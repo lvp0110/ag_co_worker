@@ -1,0 +1,475 @@
+/* Таблица итогов: строки «Стоимость …» и «Общий итог» */
+.construction-grand-total__line-label {
+  font-weight: bold;
+  text-align: left;
+}
+
+.construction-grand-total__line-label-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.construction-grand-total__line-label-button:hover {
+  color: #6cabc8;
+}
+
+.construction-grand-total__line-label-button:focus-visible {
+  outline: 2px solid #6cabc8;
+  outline-offset: 2px;
+}
+
+.construction-grand-total__line-label-button span {
+  display: inline;
+  justify-content: flex-start;
+  color: inherit;
+  font-weight: inherit;
+  pointer-events: auto;
+}
+
+.construction-grand-total__line-label-chevron {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  display: inline-block;
+  width: 0.4em;
+  height: 0.4em;
+  border-style: solid;
+  border-color: currentColor;
+  border-width: 0 0.1em 0.1em 0;
+  transform: rotate(-45deg);
+  transform-origin: 45% 55%;
+  transition: transform 0.15s ease;
+}
+
+.construction-grand-total__line-label-chevron--expanded {
+  transform: rotate(45deg);
+  transform-origin: 50% 50%;
+}
+
+.construction-grand-total__materials-summary {
+  margin-top: 0;
+}
+
+.construction-grand-total__materials-summary .tbl-in {
+  margin-top: 0;
+}
+
+.construction-grand-total__materials-summary-cell {
+  padding: 0 !important;
+  border-top: none !important;
+  background: #fff !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+  vertical-align: top;
+}
+
+.construction-grand-total__materials-summary-row:hover > .construction-grand-total__materials-summary-cell {
+  background: #fff !important;
+}
+
+.construction-grand-total__line-amount {
+  font-weight: bold;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.construction-grand-total__line--first .construction-grand-total__line-label--calc {
+  border-top: 2px solid var(--table-border, #ccc);
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+.construction-grand-total__line--first .construction-grand-total__line-amount--calc {
+  border-top: 2px solid var(--table-border, #ccc);
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+.construction-grand-total__line--next .construction-grand-total__line-label--calc,
+.construction-grand-total__line--next .construction-grand-total__line-amount--calc {
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+.construction-grand-total__total-label {
+  font-weight: bold;
+  text-align: left;
+}
+
+.construction-grand-total__total-amount {
+  font-weight: bold;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.construction-grand-total__total-label--calc {
+  border-top: 2px solid var(--table-border, #ccc);
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+.construction-grand-total__total-amount--calc {
+  border-top: 2px solid var(--table-border, #ccc);
+  padding-top: 12px;
+  padding-bottom: 8px;
+}
+
+/* Карточка конструкции (шапка и размеры) */
+.construction-card__heading-th {
+  font-weight: bold;
+  text-align: left;
+  background-color: #d2e2eb;
+}
+
+.construction-card__heading-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.construction-card__heading-title {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+}
+
+.construction-card__heading-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  margin-top: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  position: static;
+  cursor: pointer;font-size: larger;
+}
+
+.construction-card__heading-toggle:focus-visible {
+  outline: 2px solid #6cabc8;
+  outline-offset: 2px;
+}
+
+.construction-card__heading-chevron {
+  box-sizing: border-box;
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  border-style: solid;
+  border-color: currentColor;
+  border-width: 0 0.12em 0.12em 0;
+  transform: rotate(-45deg);
+  transform-origin: 45% 55%;
+  transition: transform 0.15s ease;
+}
+
+.construction-card__heading-chevron--expanded {
+  transform: rotate(45deg);
+  transform-origin: 50% 50%;
+}
+
+.construction-card__heading-delete-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: #6d7277;
+  background: #fff;
+  border: 1px solid #c9d0d6;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.construction-card__heading-delete-button:hover {
+  color: #c53030;
+  border-color: #e2a4a4;
+  background: #fff5f5;
+  font-size: 26px;
+
+}
+
+.construction-card__dim-th {
+  text-align: center;
+}
+
+.construction-card__dim-td {
+  text-align: center;
+}
+
+.construction-card__delete-icon {
+  height: 30px;
+  opacity: 0.7;
+}
+
+.construction-card__delete-col {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* «Итого» внизу карточки КП: разметка; оформление как у заголовка раздела — в KpPage.css */
+.kp-card-sections-total__inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75em;
+  flex-wrap: nowrap;
+}
+
+/* Режим без interleaved: общий список конструкций */
+.construction-list-legacy__dim-th {
+  text-align: center;
+}
+
+.construction-list-legacy__code-td {
+  text-align: right;
+}
+
+.construction-list-legacy__title-td {
+  text-align: center;
+}
+
+.construction-list-legacy__title-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: center;
+  text-decoration: underline;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.construction-list-legacy__title-chevron {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  display: inline-block;
+  width: 0.4em;
+  height: 0.4em;
+  border-style: solid;
+  border-color: currentColor;
+  border-width: 0 0.1em 0.1em 0;
+  transform: rotate(-45deg);
+  transform-origin: 45% 55%;
+  transition: transform 0.15s ease;
+}
+
+.construction-list-legacy__title-chevron--expanded {
+  transform: rotate(45deg);
+  transform-origin: 50% 50%;
+}
+
+.construction-list-legacy__materials-cell {
+  padding: 0;
+  vertical-align: top;
+  border-top: none;
+}
+
+.construction-list-legacy__materials-cell .tbl-in {
+  margin-top: 0;
+}
+
+.construction-list-legacy__title-button:hover {
+  color: #6cabc8;
+}
+
+.construction-list-legacy__title-button:focus-visible {
+  outline: 2px solid #6cabc8;
+  outline-offset: 2px;
+}
+
+.construction-list-legacy__dim-td {
+  text-align: center;
+}
+
+/* Калькулятор: экран < 430px — карточки вместо таблицы конструкций */
+.construction-list-legacy-cards-wrap {
+  width: 100%;
+}
+
+.construction-list-legacy-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.construction-list-legacy-card {
+  border: 1px solid #c9d0d6;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.construction-list-legacy-card__header {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  background-color: #d2e2eb;
+}
+
+.construction-list-legacy-card__toggle {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.construction-list-legacy-card__toggle:focus-visible {
+  outline: 2px solid #6cabc8;
+  outline-offset: -2px;
+}
+
+.construction-list-legacy-card__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  color: inherit;
+  font-weight: inherit;
+  pointer-events: auto;
+}
+
+.construction-list-legacy-card__title {
+  display: block;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.3;
+  color: #1a1d21;
+  text-align: left;
+}
+
+.construction-list-legacy-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.construction-list-legacy-card__meta-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.construction-list-legacy-card__meta-label {
+  display: inline;
+  color: #6d7277;
+  font-weight: 600;
+  pointer-events: auto;
+}
+
+.construction-list-legacy-card__meta-value {
+  display: inline;
+  color: #1a1d21;
+  font-weight: 500;
+  pointer-events: auto;
+}
+
+.construction-list-legacy-card__delete {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  margin: 0 6px 0 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.construction-list-legacy-card__delete:hover {
+  background: rgb(255 255 255 / 0.55);
+}
+
+.construction-list-legacy-card__materials {
+  padding: 0;
+  border-top: 1px solid #c9d0d6;
+  background: #fff;
+}
+
+.construction-list-legacy-card__materials .tbl-in {
+  margin-top: 0;
+}
+
+.construction-list-legacy-card--expanded {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+}
+
+/* Экран < 768px: колонка «шифр» в таблицах .tbl-in */
+@media screen and (max-width: 767px) {
+  .tbl-in .tbl-in__cipher-col {
+    display: none;
+  }
+}

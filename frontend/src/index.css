@@ -1,0 +1,43 @@
+:root {
+  font-family: 'Montserrat', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #ffffff;
+  color: #000000;
+}
+
+#root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  text-align: left;
+}
+
+/* Responsive Images - общие стили */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Улучшенная поддержка responsive images */
+img[srcset] {
+  width: 100%;
+  height: auto;
+}

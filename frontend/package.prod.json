@@ -1,0 +1,14 @@
+{
+  "name": "ag-co-worker-frontend-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Production static server for frontend/dist. Used inside frontend/Dockerfile — NOT for local dev.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "http-proxy-middleware": "^3.0.3"
+  }
+}

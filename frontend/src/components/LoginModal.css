@@ -1,0 +1,129 @@
+.login-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.login-modal {
+  position: relative;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+  padding: 32px 28px 24px;
+  width: 100%;
+  max-width: 380px;
+  box-sizing: border-box;
+}
+
+.login-modal__close {
+  /* Reset global `button` leaks from Calculator.css */
+  width: auto;
+  height: auto;
+  margin: 0;
+  box-shadow: none;
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.login-modal__close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.login-modal__title {
+  margin: 0 0 20px;
+  font-size: 22px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.login-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: #334155;
+}
+
+/* Override global `span` from Calculator.css (display:flex; justify-content:center; color:#878181; font-weight:600; pointer-events:none) */
+.login-modal__field > span {
+  display: block;
+  justify-content: flex-start;
+  color: #334155;
+  font-weight: 500;
+  font-size: 14px;
+  pointer-events: auto;
+}
+
+.login-modal__field input {
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  font: inherit;
+}
+
+.login-modal__field input:focus {
+  border-color: #6cabc8;
+  box-shadow: 0 0 0 3px rgba(108, 171, 200, 0.2);
+}
+
+.login-modal__error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.login-modal__submit {
+  /* Reset global `button` leaks from Calculator.css */
+  width: 100%;
+  height: auto;
+  box-shadow: none;
+  display: block;
+  margin: 4px 0 0;
+  padding: 10px 16px;
+  background: #6cabc8;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.login-modal__submit:hover:not(:disabled) {
+  background: #5897b7;
+}
+
+.login-modal__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

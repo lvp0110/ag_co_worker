@@ -1,0 +1,79 @@
+# Prod-compose. Используется ТОЛЬКО на сервере через `docker compose -f docker-compose.prod.yml ...`.
+# Локальная разработка живёт в docker-compose.yml (postgres + adminer).
+#
+# TLS и маршрутизация по доменам — на хостовом системном nginx (deploy/nginx/ag_co_worker.conf).
+# Наши контейнеры говорят только HTTP. Публично слушает ТОЛЬКО frontend на 127.0.0.1:3008.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      POSTGRES_DB: ag_co_worker
+      POSTGRES_USER: postgres
+      # POSTGRES_PASSWORD приходит из .env.prod
+    volumes:
+      - ag_co_worker_pg_data:/var/lib/postgresql/data
+    # НЕТ секции ports — postgres доступен только во внутренней docker network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ag_co_worker"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      # ВАЖНО: явно target=runtime. В backend/Dockerfile есть и dev-стадия
+      # (для локального docker-compose.yml); без target Docker собрал бы
+      # ПОСЛЕДНЮЮ стадию (dev → `npm run dev`), что в prod ломает контейнер.
+      target: runtime
+    restart: unless-stopped
+    env_file: .env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Загруженные пользователями файлы (логотипы КП и т.п.) живут в named
+      # volume, чтобы переживать rebuild контейнера. Express.static в backend
+      # отдаёт их по /uploads/*, host nginx проксирует на 127.0.0.1:3008.
+      - ag_co_worker_uploads:/app/uploads
+    # НЕТ секции ports — backend доступен только из frontend-контейнера через docker network.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--tries=1", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      PORT: "3004"
+      BACKEND_URL: http://backend:3006
+      # Внешний auth; в .env.prod задайте AUTH_SERVICE_URL=...
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://host.docker.internal:3005}
+    # Биндим ТОЛЬКО на loopback — снаружи недоступен, трафик идёт через host nginx.
+    ports:
+      - "127.0.0.1:3008:3004"
+    volumes:
+      # Статика отдельно от контейнера: rsync в эту директорию = моментальный роллаут
+      # без rebuild/restart контейнера.
+      - ./frontend/dist:/app/dist:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--tries=1", "http://localhost:3004/__front_health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  ag_co_worker_pg_data:
+    name: ag_co_worker_pg_data
+  ag_co_worker_uploads:
+    name: ag_co_worker_uploads

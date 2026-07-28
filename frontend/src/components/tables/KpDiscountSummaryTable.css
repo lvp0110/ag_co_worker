@@ -1,0 +1,15 @@
+.kp-discount-summary {
+  margin-top: 0;
+}
+
+.kp-discount-summary .tbl-in,
+.construction-grand-total__materials-summary .kp-discount-summary {
+  margin-top: 0;
+}
+
+.kp-page__services-input.kp-discount-input--selected {
+  outline: 2px solid #6cabc8;
+  outline-offset: 1px;
+  background-color: #e8f4fa;
+}
+

@@ -1,0 +1,224 @@
+name: Prod deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_migrate:
+        description: "Применять prisma миграции"
+        type: choice
+        required: true
+        default: auto
+        options: [auto, "yes", "no"]
+      rev:
+        description: "Ревизия для деплоя (по умолчанию origin/main)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Сериализуем параллельные деплои — два rollback-а или push + ручной dispatch
+# не должны драться за docker compose и rsync.
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Переопределяемая ревизия — для отката через workflow_dispatch.
+      DEPLOY_REV_OVERRIDE: ${{ github.event.inputs.rev }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      # ─── SSH setup ──────────────────────────────────────────────────────
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # ─── deploy/.env.deploy from secrets ────────────────────────────────
+      - name: Write deploy/.env.deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+          DEPLOY_CERT_DIR: ${{ secrets.DEPLOY_CERT_DIR }}
+        run: |
+          # DEPLOY_REV из override (если workflow_dispatch с rev) или origin/main.
+          REV="${DEPLOY_REV_OVERRIDE:-origin/main}"
+          cat > deploy/.env.deploy <<EOF
+          DEPLOY_HOST=$DEPLOY_HOST
+          DEPLOY_DIR=$DEPLOY_DIR
+          DEPLOY_DOMAIN=$DEPLOY_DOMAIN
+          DEPLOY_CERT_DIR=$DEPLOY_CERT_DIR
+          DEPLOY_REMOTE=origin
+          DEPLOY_REV=$REV
+          EOF
+          chmod 600 deploy/.env.deploy
+
+      # ─── Telegram: start ────────────────────────────────────────────────
+      - name: Notify Telegram (start)
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MSG=$'🚀 <b>Деплой ag_co_worker начат</b>\n'
+          MSG+="<b>Репозиторий:</b> ${GITHUB_REPOSITORY}"$'\n'
+          MSG+="<b>Ветка:</b> ${GITHUB_REF_NAME}"$'\n'
+          MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
+          MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
+          MSG+="<a href=\"https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\">Run #${GITHUB_RUN_NUMBER}</a>"
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d parse_mode=HTML \
+            -d disable_web_page_preview=true \
+            --data-urlencode text="$MSG" > /dev/null
+
+      # ─── path filters: что изменилось? ──────────────────────────────────
+      # На workflow_dispatch у `github.event.before` пусто → paths-filter
+      # сравнит HEAD с HEAD~1, что для ручного запуска бессмысленно, поэтому
+      # ниже в `decide` все шаги для dispatch'а форсируются в true.
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.prod.yml'
+            frontend:
+              - 'frontend/**'
+            frontend_container:
+              - 'frontend/server.js'
+              - 'frontend/Dockerfile'
+              - 'frontend/package.prod.json'
+            migrations:
+              - 'backend/prisma/migrations/**'
+            nginx:
+              - 'deploy/nginx/**'
+
+      # ─── Решаем, что катить ─────────────────────────────────────────────
+      - name: Decide what to deploy
+        id: decide
+        env:
+          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
+          FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+          FRONTEND_CONTAINER_CHANGED: ${{ steps.filter.outputs.frontend_container }}
+          MIGRATIONS_CHANGED: ${{ steps.filter.outputs.migrations }}
+          NGINX_CHANGED: ${{ steps.filter.outputs.nginx }}
+          FORCE_MIGRATE: ${{ github.event.inputs.force_migrate }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Ручной запуск (force redeploy / rollback) — выкатываем всё, контейнер
+            # фронта пересобираем (тот же поведенческий контракт, что и для backend).
+            echo "should_backend=true"           >> "$GITHUB_OUTPUT"
+            echo "should_frontend=true"          >> "$GITHUB_OUTPUT"
+            echo "should_frontend_rebuild=true"  >> "$GITHUB_OUTPUT"
+            echo "should_nginx=true"             >> "$GITHUB_OUTPUT"
+            case "$FORCE_MIGRATE" in
+              yes) echo "should_migrate=true"  >> "$GITHUB_OUTPUT" ;;
+              no)  echo "should_migrate=false" >> "$GITHUB_OUTPUT" ;;
+              *)   echo "should_migrate=$MIGRATIONS_CHANGED" >> "$GITHUB_OUTPUT" ;;
+            esac
+          else
+            # push в main — выкатываем только то, что менялось.
+            echo "should_backend=$BACKEND_CHANGED"                       >> "$GITHUB_OUTPUT"
+            echo "should_frontend=$FRONTEND_CHANGED"                     >> "$GITHUB_OUTPUT"
+            echo "should_frontend_rebuild=$FRONTEND_CONTAINER_CHANGED"   >> "$GITHUB_OUTPUT"
+            echo "should_migrate=$MIGRATIONS_CHANGED"                    >> "$GITHUB_OUTPUT"
+            echo "should_nginx=$NGINX_CHANGED"                           >> "$GITHUB_OUTPUT"
+          fi
+
+      # ─── Rollout ────────────────────────────────────────────────────────
+      - name: Rollout backend
+        if: steps.decide.outputs.should_backend == 'true'
+        run: bash deploy/deploy-backend.sh
+
+      - name: Rollout migrations
+        if: steps.decide.outputs.should_migrate == 'true'
+        run: bash deploy/deploy-migrate.sh
+
+      - name: Sync nginx config
+        if: steps.decide.outputs.should_nginx == 'true'
+        run: bash deploy/deploy-nginx-sync.sh
+
+      - name: Reload nginx
+        if: steps.decide.outputs.should_nginx == 'true'
+        run: bash deploy/deploy-nginx-reload.sh
+
+      - name: Rollout frontend
+        if: steps.decide.outputs.should_frontend == 'true'
+        env:
+          # REBUILD=1 пересобирает frontend-контейнер (нужно когда менялся
+          # server.js / Dockerfile / package.prod.json). По умолчанию
+          # deploy-frontend.sh делает только локальный vite build + rsync dist.
+          REBUILD: ${{ steps.decide.outputs.should_frontend_rebuild == 'true' && '1' || '0' }}
+        run: bash deploy/deploy-frontend.sh
+
+      - name: Smoke test
+        run: bash deploy/deploy-status.sh
+
+      # ─── Telegram: success / failure ────────────────────────────────────
+      - name: Notify Telegram (success)
+        if: success()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+        run: |
+          MSG=$'✅ <b>Деплой ag_co_worker успешно завершён</b>\n'
+          MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
+          MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
+          MSG+="<b>Backend:</b> ${{ steps.decide.outputs.should_backend == 'true' && 'выкачен' || 'без изменений' }}"$'\n'
+          MSG+="<b>Frontend:</b> ${{ steps.decide.outputs.should_frontend == 'true' && (steps.decide.outputs.should_frontend_rebuild == 'true' && 'выкачен (rebuild контейнера)' || 'выкачен') || 'без изменений' }}"$'\n'
+          MSG+="<b>Миграции:</b> ${{ steps.decide.outputs.should_migrate == 'true' && 'применены' || 'не требовались' }}"$'\n'
+          MSG+="<b>Nginx:</b> ${{ steps.decide.outputs.should_nginx == 'true' && 'перечитан' || 'без изменений' }}"$'\n'
+          MSG+="<a href=\"https://${DEPLOY_DOMAIN}\">https://${DEPLOY_DOMAIN}</a>"
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d parse_mode=HTML \
+            -d disable_web_page_preview=true \
+            --data-urlencode text="$MSG" > /dev/null
+
+      - name: Notify Telegram (failure)
+        if: failure()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MSG=$'❌ <b>Деплой ag_co_worker провален</b>\n'
+          MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
+          MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
+          MSG+="<a href=\"https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\">Логи Run #${GITHUB_RUN_NUMBER}</a>"
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d parse_mode=HTML \
+            -d disable_web_page_preview=true \
+            --data-urlencode text="$MSG" > /dev/null

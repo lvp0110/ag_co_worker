@@ -1,0 +1,40 @@
+.materials-list__section-title-th {
+  font-size: 14px;
+  color: #1a1d21;
+  font-weight: bold;
+  text-align: left;
+}
+
+.materials-list__col--hidden {
+  display: none;
+}
+
+.materials-list__empty-message {
+  text-align: center;
+  padding: 20px;
+}
+
+.materials-list__footer-cell {
+  font-weight: bold;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.materials-list__footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.materials-list__footer-sum {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.kp-page__services-input.kp-discount-input--selected {
+  outline: 2px solid #6cabc8;
+  outline-offset: 1px;
+  background-color: #e8f4fa;
+}
