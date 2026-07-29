@@ -264,6 +264,24 @@ export const CountrySchema = z
   })
   .openapi("Country");
 
+/**
+ * Ответ выгрузки в 1С (`POST/PUT /integration/onec/isolation/document`),
+ * который backend прокидывает в ответе создания/обновления КП.
+ * `code: 0` — выгрузка не выполнялась, `code: 200` — успех.
+ */
+export const OnecExportResponseSchema = z
+  .object({
+    code: z.number().int(),
+    data: z
+      .object({
+        document_id: z.string().optional(),
+        user_email: z.string().optional(),
+      })
+      .optional(),
+    error: z.string().optional(),
+  })
+  .openapi("OnecExportResponse");
+
 export const OfferSchema = z
   .object({
     id: z.string().uuid(),
@@ -287,6 +305,8 @@ export const OfferSchema = z
     constructions: z.array(OfferConstructionSchema),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
+    // Только в ответах POST /api/offers и PATCH /api/offers/:id.
+    onec: OnecExportResponseSchema.nullable().optional(),
   })
   .openapi("Offer");
 

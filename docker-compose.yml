@@ -40,6 +40,7 @@ services:
       CALC_SERVICE_URL: https://dev3.constrtodo.ru:3005
       CALC_SERVICE_TIMEOUT_MS: "60000"
       AUTH_SERVICE_URL: http://host.docker.internal:3005
+      ONEC_SERVICE_URL: http://host.docker.internal:3005
       # tsx watch использует chokidar — polling гарантирует ловлю изменений
       # в bind-mount на macOS/Windows (где fs-события иногда не доходят).
       CHOKIDAR_USEPOLLING: "true"

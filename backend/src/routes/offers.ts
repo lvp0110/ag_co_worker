@@ -14,6 +14,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { CalcServiceError, calculateByProduct } from "../services/calcService.js";
 import { recalcConstructionsMaterials } from "../services/offerRecalc.js";
+import { exportOfferToOnec } from "../services/onecIntegration.js";
 import { OfferPdfError, renderOfferPdf } from "../services/offerPdf.js";
 import { formatKpCode } from "../utils/kpCode.js";
 import { buildOffersListWhere } from "../utils/offerListSearch.js";
@@ -225,16 +226,23 @@ router.post(
       return { offer, constructions };
     });
 
-    return res
-      .status(201)
-      .json(
-        toOfferDto(
-          created.offer,
-          created.constructions,
-          user.company,
-          user.employeeNumber
-        )
-      );
+    const onec = await exportOfferToOnec({
+      mode: "create",
+      documentId: created.offer.id,
+      calcParamsList,
+      cookieHeader: req.headers.cookie,
+      csrfToken: req.get("x-csrf-token"),
+    });
+
+    return res.status(201).json({
+      ...toOfferDto(
+        created.offer,
+        created.constructions,
+        user.company,
+        user.employeeNumber
+      ),
+      onec,
+    });
   })
 );
 
@@ -538,18 +546,31 @@ router.patch(
       return { offer, constructions };
     });
 
+    // Конструкции могли измениться — синхронизируем документ в 1С (PUT).
+    const onec =
+      parsed.constructions !== undefined
+        ? await exportOfferToOnec({
+            mode: "update",
+            documentId: updated.offer.id,
+            calcParamsList: updated.constructions.map((c) => c.calcParams),
+            cookieHeader: req.headers.cookie,
+            csrfToken: req.get("x-csrf-token"),
+          })
+        : null;
+
     const owner = await prisma.user.findUnique({
       where: { id: userId },
       include: { company: true },
     });
-    return res.json(
-      toOfferDto(
+    return res.json({
+      ...toOfferDto(
         updated.offer,
         updated.constructions,
         owner?.company,
         owner?.employeeNumber
-      )
-    );
+      ),
+      onec,
+    });
   })
 );
 

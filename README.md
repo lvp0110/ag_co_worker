@@ -181,6 +181,9 @@ Backend — `backend/.env` (создаётся из `.env.example` через `m
 | `REFRESH_TOKEN_EXPIRES_IN` | `30d` | TTL refresh cookie |
 | `CALC_SERVICE_URL` | `https://dev3.constrtodo.ru:3005` | База внешнего сервиса расчёта |
 | `CALC_SERVICE_TIMEOUT_MS` | `60000` | Таймаут запроса к calc-сервису (прайс `/api/v2/data` на dev3 часто >15s) |
+| `ONEC_SERVICE_URL` | значение `AUTH_SERVICE_URL` | База сервиса выгрузки КП в 1С (`/integration/onec/isolation/document`) |
+| `ONEC_TIMEOUT_MS` | `60000` | Таймаут выгрузки в 1С (ручка сама считает материалы) |
+| `ONEC_EXPORT_ENABLED` | `true` | `false` — полностью отключить выгрузку в 1С |
 
 Frontend (опционально — через `frontend/.env.local`):
 

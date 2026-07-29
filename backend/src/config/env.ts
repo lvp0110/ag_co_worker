@@ -41,6 +41,18 @@ export const env = {
   calcServiceTimeoutMs: toInt(process.env.CALC_SERVICE_TIMEOUT_MS, 60000),
   /** Внешний auth (POST /login, GET /auth/session, POST /auth/logout). */
   authServiceUrl: process.env.AUTH_SERVICE_URL ?? "http://localhost:3005",
+  /**
+   * Выгрузка документов в 1С (POST/PUT /integration/onec/isolation/document).
+   * Тот же сервис, что и auth: ручка авторизует по той же session-cookie,
+   * поэтому по умолчанию наследуем AUTH_SERVICE_URL.
+   */
+  onecServiceUrl:
+    process.env.ONEC_SERVICE_URL ??
+    process.env.AUTH_SERVICE_URL ??
+    "http://localhost:3005",
+  // Ручка сама считает материалы по конструкциям, поэтому таймаут как у calc.
+  onecTimeoutMs: toInt(process.env.ONEC_TIMEOUT_MS, 60000),
+  onecExportEnabled: (process.env.ONEC_EXPORT_ENABLED ?? "true") !== "false",
 };
 
 if (env.nodeEnv === "production" && !process.env.DATABASE_URL) {

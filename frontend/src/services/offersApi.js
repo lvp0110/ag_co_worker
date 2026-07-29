@@ -1,12 +1,36 @@
 import { request, requestRawResponse } from "./apiClient.js";
 
 /**
+ * Ответ выгрузки КП в 1С: backend отдаёт его в поле `onec` при создании
+ * и при сохранении КП — `{ code, data: { document_id, user_email }, error }`.
+ * `code: 200` — документ создан, `code: 0` — выгрузка не выполнялась.
+ */
+const logOnecResponse = (label, onec) => {
+  if (onec === undefined || onec === null) return;
+  if (onec.error) {
+    console.error(`[onec] ${label} → 1С вернула ошибку (code=${onec.code}):`, onec);
+    return;
+  }
+  console.log(`[onec] ${label} → 1С ответила code=${onec.code}:`, onec.data ?? onec);
+};
+
+/**
  * POST /api/offers — { form, offerDraft } → полный Offer DTO c пересчитанными materials.
  * form          — метаданные КП (title, manager_name, region, ...)
  * offerDraft    — { constructions: [{ calc_params, materials?, montage? }], services?: [...] }
  */
-export const createOffer = (payload) =>
-  request("/api/offers", { method: "POST", body: payload });
+export const createOffer = async (payload) => {
+  if (import.meta.env.DEV) {
+    const constructions = payload?.offerDraft?.constructions ?? [];
+    console.log(
+      `[kp] POST /api/offers → ${constructions.length} constr (эти же уйдут в 1С):`,
+      constructions.map((c) => c.calc_params),
+    );
+  }
+  const offer = await request("/api/offers", { method: "POST", body: payload });
+  logOnecResponse("POST /api/offers", offer?.onec);
+  return offer;
+};
 
 /**
  * GET /api/offers — постраничный список офферов (метаданные, без конструкций).
@@ -27,8 +51,14 @@ export const listOffers = ({ page = 1, limit = 20, q = "", date = "" } = {}) => 
 export const getOffer = (id) => request(`/api/offers/${encodeURIComponent(id)}`, { method: "GET" });
 
 /** PATCH /api/offers/:id — частичное обновление (form?, services?, constructions?, total_cost?). */
-export const updateOffer = (id, patch) =>
-  request(`/api/offers/${encodeURIComponent(id)}`, { method: "PATCH", body: patch });
+export const updateOffer = async (id, patch) => {
+  const offer = await request(`/api/offers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: patch,
+  });
+  logOnecResponse(`PATCH /api/offers/${id}`, offer?.onec);
+  return offer;
+};
 
 /** POST /api/offers/:id/clone — дубликат, возвращает { id } нового оффера. */
 export const cloneOffer = (id) =>
