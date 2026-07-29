@@ -7,13 +7,6 @@ import {
   useState,
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import ConstructionList from "./tables/ConstructionList";
-import {
-  formatKpComputedSum,
-  formatRub,
-  montageLineProductRub,
-  parseKpDecimal,
-} from "./tables/MaterialsList";
 import {
   deleteOffer,
   fetchOfferPdf,
@@ -26,8 +19,6 @@ import {
   emptyGrandTotalDiscountAmounts,
   emptyGrandTotalDiscounts,
   enrichConstructionsWithTitles,
-  mapGrandTotalDiscountAmountsFromApi,
-  mapGrandTotalDiscountsFromApi,
   mapOfferResponseToKpView,
   normalizeGrandTotalDiscountAmounts,
   normalizeGrandTotalDiscounts,
@@ -46,10 +37,7 @@ import {
   useOfferEditSessionStore,
 } from "../stores/offerEditSessionStore.js";
 import { useCalculatorStore } from "../stores/calculatorStore.js";
-import { KpNarrowExpandableRow } from "./kp/KpNarrowExpandableRow";
 import PdfPrintDialog from "./PdfPrintDialog.jsx";
-import { useKpExpandedRow } from "../hooks/useKpExpandedRow";
-import { useKpNarrowViewport } from "../hooks/useKpNarrowViewport";
 import "./Calculator.css";
 import "./KpPage.css";
 
@@ -77,8 +65,6 @@ function isKpContactFormComplete(form) {
   ].every((v) => String(v ?? "").trim() !== "");
 }
 
-const KP_DECIMAL_PLACEHOLDER = "0,00";
-
 const KP_AUTO_RESIZE_TEXTAREA_SELECTOR =
   ".kp-page__services-textarea, .kp-page__contact textarea.kp-page__input";
 
@@ -87,120 +73,6 @@ function syncTextareaHeight(field) {
   field.style.height = "auto";
   field.style.height = `${field.scrollHeight}px`;
 }
-
-function serviceRowSum(priceStr, qtyStr) {
-  const p = parseKpDecimal(priceStr);
-  const q = parseKpDecimal(qtyStr);
-  if (p === null || q === null) return formatKpComputedSum(null);
-  return formatKpComputedSum(p * q);
-}
-
-/** Сумма блока «Дополнительные материалы» (цена × количество по строкам). */
-function additionalMaterialsGrandTotalRubForKp(materialRows) {
-  if (!Array.isArray(materialRows)) return 0;
-  let sum = 0;
-  for (const row of materialRows) {
-    const p = parseKpDecimal(row.price);
-    const q = parseKpDecimal(row.quantity);
-    if (p !== null && q !== null) sum += p * q;
-  }
-  return sum;
-}
-
-function newCustomMaterialRow() {
-  const id =
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `mat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  return {
-    id,
-    name: "",
-    price: "",
-    quantity: "",
-    unit: "",
-  };
-}
-
-function KpCollapsibleExtraTable({
-  tableId,
-  ariaLabel,
-  title,
-  sectionOpen,
-  onToggleSection,
-  totalRub,
-  colgroup,
-  children,
-  footerRows,
-}) {
-  return (
-    <div className="kp-table-card">
-      <button
-        type="button"
-        className="kp-section-collapsible-toggle"
-        aria-expanded={sectionOpen}
-        aria-controls={tableId}
-        onClick={onToggleSection}
-      >
-        <span className="kp-collapsible-title-row">
-          <span className="kp-collapsible-title-inner">
-            <span
-              className={`kp-collapsible-chevron${
-                sectionOpen ? " kp-collapsible-chevron--expanded" : ""
-              }`}
-              aria-hidden
-            />
-            <span>{title}</span>
-          </span>
-          <span className="kp-collapsible-title-sum" aria-hidden>
-            {formatRub(totalRub ?? 0)}
-          </span>
-        </span>
-      </button>
-      <div className="tbl-in">
-        <table
-          className="data kp-data-table--starts-with-column-headers"
-          id={tableId}
-          aria-label={ariaLabel}
-          data-export-section-title={title}
-          data-erp-data-start-row="1"
-        >
-          {colgroup}
-          {sectionOpen && (
-            <>
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Цена</th>
-                  <th>Количество</th>
-                  <th>Ед. изм.</th>
-                  <th>Сумма</th>
-                </tr>
-              </thead>
-              <tbody>{children}</tbody>
-              <tfoot>
-                {footerRows}
-                <tr className="kp-page__section-total-row">
-                  <td colSpan={5} className="kp-page__section-total-cell">
-                    <div className="kp-card-sections-total__inner">
-                      <span className="kp-card-sections-total__label">
-                        Итого
-                      </span>
-                      <span className="kp-card-sections-total__amount">
-                        {formatRub(totalRub)}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </tfoot>
-            </>
-          )}
-        </table>
-      </div>
-    </div>
-  );
-}
-
-const MONTAGE_ROW_LABEL = "Монтаж";
 
 const INITIAL_SERVICE_ROWS = [
   {
@@ -280,7 +152,6 @@ const KpPage = () => {
     hasUnsavedChanges,
     kpSnapshot,
     startDraft,
-    stashKpSnapshot,
     clearKpSnapshot,
     markDraftSaved,
     markDraftDirty,
@@ -288,12 +159,6 @@ const KpPage = () => {
     isOfferPdfExportBlocked,
     isNewDraftOffer,
     clearNewDraftOfferFlag,
-    setSelectedPriceArticles,
-    setActiveConstructionId,
-    setSelectedArticlesForConstruction,
-    clearSelectedArticlesForConstruction,
-    selectedPriceArticlesByKeyId,
-    updateKpSnapshotMaterialRowsForConstruction,
   } = useOfferEditSession();
 
   const isPdfExportBlocked =
@@ -308,10 +173,6 @@ const KpPage = () => {
   });
   /** Монтаж по карточкам: key_id конструкции → { price, quantity, unit } */
   const [montageByKeyId, setMontageByKeyId] = useState(() => ({}));
-  /** Раскрыт блок «Монтаж» в карточке (по key_id); по умолчанию свёрнут */
-  const [montageSectionOpenByKeyId, setMontageSectionOpenByKeyId] = useState(
-    () => ({}),
-  );
   /** Доп. материалы по конструкциям: { [key_id]: rows[] } */
   const [materialRowsByKeyId, setMaterialRowsByKeyId] = useState(() => ({}));
   const [serviceRows, setServiceRows] = useState(INITIAL_SERVICE_ROWS);
@@ -333,33 +194,14 @@ const KpPage = () => {
   const [grandTotalDiscountAmounts, setGrandTotalDiscountAmounts] = useState(
     emptyGrandTotalDiscountAmounts,
   );
-  /** Открыт ли блок доп. материалов по конструкциям: { [key_id]: boolean } */
-  const [additionalMaterialsSectionOpenByKeyId, setAdditionalMaterialsSectionOpenByKeyId] =
-    useState(() => ({}));
-  /** Свёрнутость карточек конструкций: key_id → collapsed (true = свёрнута). */
-  const [cardCollapseOverridesByKeyId, setCardCollapseOverridesByKeyId] =
-    useState(() => ({}));
-  const isKpNarrow = useKpNarrowViewport();
-  const { expandedKey, toggleRow } = useKpExpandedRow();
   const [manualMontagePriceByKeyId, setManualMontagePriceByKeyId] = useState(
     () => ({}),
-  );
-  const constrToCalcToSentForTable = useCalculatorStore(
-    (s) => s.ConstrToCalcToSent,
   );
   const visibleRegionOptions = useMemo(
     () => filterVisibleRegionOptions(regions),
     [regions]
   );
   const isPriceRegionsLoading = priceLoading || (!priceLoaded && !priceError);
-  const additionalMaterialsRubByKeyId = useMemo(() => {
-    const result = {};
-    for (const [keyId, rows] of Object.entries(materialRowsByKeyId)) {
-      result[keyId] = additionalMaterialsGrandTotalRubForKp(rows);
-    }
-    return result;
-  }, [materialRowsByKeyId]);
-
   const dateInputValue = useMemo(
     () => normalizeDateForDateInput(form.date),
     [form.date],
@@ -380,8 +222,6 @@ const KpPage = () => {
   const shouldResetDirtyBaselineRef = useRef(true);
   /** Снимок черновика из sessionStore применяем на страницу только один раз на загрузку :id. */
   const didApplyDraftSnapshotRef = useRef(false);
-  const prevMaterialRowsByKeyIdRef = useRef({});
-
   const buildCurrentUpdatePayload = useCallback(() => {
     const calcState = useCalculatorStore.getState();
     return buildUpdateOfferPayload({
@@ -488,22 +328,6 @@ const KpPage = () => {
           markDraftSaved();
         }
 
-        if (effectiveSnap) {
-          setCardCollapseOverridesByKeyId(
-            effectiveSnap.cardCollapseOverridesByKeyId ?? {},
-          );
-          setMontageSectionOpenByKeyId(
-            effectiveSnap.montageSectionOpenByKeyId ?? {},
-          );
-          setAdditionalMaterialsSectionOpenByKeyId(
-            effectiveSnap.additionalMaterialsSectionOpenByKeyId ?? {},
-          );
-        } else {
-          setCardCollapseOverridesByKeyId({});
-          setMontageSectionOpenByKeyId({});
-          setAdditionalMaterialsSectionOpenByKeyId({});
-        }
-
         setForm(effectiveSnap?.form ?? view.form);
         // Сессия калькулятора/КП живёт в kpSnapshot — иначе после удаления
         // в калькуляторе GET снова подставляет старый состав до PATCH.
@@ -523,7 +347,6 @@ const KpPage = () => {
           ...nextCalcTablesRaw,
           ConstrToCalc: enrichConstructionsWithTitles(
             nextCalcTablesRaw?.ConstrToCalc ?? [],
-            null,
             constrToCalcToSent,
           ),
         };
@@ -578,15 +401,6 @@ const KpPage = () => {
           }
           setManualMontagePriceByKeyId(initialManual);
         }
-        // Восстановить артикулы по каждой конструкции из materialRowsByKeyId.
-        const rowsByKeyId =
-          effectiveSnap?.materialRowsByKeyId ?? view.materialRowsByKeyId;
-        for (const [keyId, rows] of Object.entries(rowsByKeyId)) {
-          const articles = rows
-            .map((r) => String(r.sourceArticle ?? "").trim())
-            .filter(Boolean);
-          if (articles.length) setSelectedArticlesForConstruction(keyId, articles);
-        }
 
         setLoadStatus("loaded");
       } catch (err) {
@@ -616,7 +430,6 @@ const KpPage = () => {
     clearSession,
     navigate,
     markDraftSaved,
-    setSelectedArticlesForConstruction,
   ]);
 
   useEffect(() => {
@@ -624,7 +437,6 @@ const KpPage = () => {
     dirtyBaselinePayloadRef.current = null;
     shouldResetDirtyBaselineRef.current = true;
     didApplyDraftSnapshotRef.current = false;
-    prevMaterialRowsByKeyIdRef.current = {};
   }, [id]);
 
   // Когда открываем КП из списка после «Выйти», persisted zustand может догрузиться
@@ -661,17 +473,6 @@ const KpPage = () => {
     }
     if (snap.manualMontagePriceByKeyId) {
       setManualMontagePriceByKeyId(snap.manualMontagePriceByKeyId);
-    }
-    if (snap.cardCollapseOverridesByKeyId) {
-      setCardCollapseOverridesByKeyId(snap.cardCollapseOverridesByKeyId);
-    }
-    if (snap.montageSectionOpenByKeyId) {
-      setMontageSectionOpenByKeyId(snap.montageSectionOpenByKeyId);
-    }
-    if (snap.additionalMaterialsSectionOpenByKeyId) {
-      setAdditionalMaterialsSectionOpenByKeyId(
-        snap.additionalMaterialsSectionOpenByKeyId,
-      );
     }
 
     didApplyDraftSnapshotRef.current = true;
@@ -763,27 +564,6 @@ const KpPage = () => {
     });
   }, [calcTables.ConstrToCalc, kpSettings, manualMontagePriceByKeyId]);
 
-  const updateMontagePriceRow = useCallback(
-    (key_id) => (e) => {
-      const value = e.target.value;
-      // Любое касание поля (в т.ч. полная очистка) «закрепляет» цену за
-      // пользователем: после этого авто-эффект не подставит ставку из kpSettings.
-      setManualMontagePriceByKeyId((prev) => {
-        if (prev[key_id] === true) return prev;
-        return { ...prev, [key_id]: true };
-      });
-      setMontageByKeyId((prev) => ({
-        ...prev,
-        [key_id]: {
-          unit: "м2",
-          ...prev[key_id],
-          price: value,
-        },
-      }));
-    },
-    [],
-  );
-
   const handleDownloadPdf = () => {
     if (!id || isDownloadingPdf) return;
     if (isPdfExportBlocked) {
@@ -866,22 +646,6 @@ const KpPage = () => {
     }
   };
 
-  const onMaterialKpFieldChange = useCallback(
-    (key_id, indexInFullMaterialsData, field, value) => {
-      setCalcTables((prev) => ({
-        ...prev,
-        materialsByConstruction: prev.materialsByConstruction.map((entry) => {
-          if (entry.key_id !== key_id) return entry;
-          const nextData = entry.data.map((row, i) =>
-            i === indexInFullMaterialsData ? { ...row, [field]: value } : row,
-          );
-          return { ...entry, data: nextData };
-        }),
-      }));
-    },
-    [],
-  );
-
   const onFieldChange = (key) => (e) => {
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
   };
@@ -917,23 +681,6 @@ const KpPage = () => {
       cityValue: matchingOption.value,
     });
   }, [form.region, selectedRegion, visibleRegionOptions]);
-
-  const updateMaterialRow = useCallback(
-    (key_id, rowId, field) => (e) => {
-      const value = e.target.value;
-      setMaterialRowsByKeyId((prev) => {
-        const rows = prev[key_id] ?? [];
-        const nextRows = rows.map((r) =>
-          r.id === rowId ? { ...r, [field]: value } : r,
-        );
-        return {
-          ...prev,
-          [key_id]: nextRows,
-        };
-      });
-    },
-    [],
-  );
 
   const autoResizeNameField = (e) => {
     syncTextareaHeight(e.target);
@@ -971,35 +718,13 @@ const KpPage = () => {
       window.removeEventListener("resize", syncAll);
     };
   }, [
-    materialRowsByKeyId,
-    serviceRows,
     loadStatus,
-    isKpNarrow,
-    expandedKey,
     form.object,
     form.manager,
     form.phone,
     form.email,
     form.officeAddress,
   ]);
-
-  // Синхронизируем snapshot доп. материалов после коммита React-стейта.
-  // Важно: не вызывать zustand setState внутри React setState-updater.
-  useEffect(() => {
-    const prev = prevMaterialRowsByKeyIdRef.current || {};
-    const next = materialRowsByKeyId || {};
-    for (const [keyId, rows] of Object.entries(next)) {
-      if (!snapshotsAreEqual(prev[keyId] ?? [], rows ?? [])) {
-        updateKpSnapshotMaterialRowsForConstruction(keyId, rows ?? []);
-      }
-    }
-    for (const keyId of Object.keys(prev)) {
-      if (!(keyId in next)) {
-        updateKpSnapshotMaterialRowsForConstruction(keyId, []);
-      }
-    }
-    prevMaterialRowsByKeyIdRef.current = next;
-  }, [materialRowsByKeyId, updateKpSnapshotMaterialRowsForConstruction]);
 
   // Скидки итога — в session snapshot, чтобы пережить reload и уход на /calc|/price.
   useEffect(() => {
@@ -1028,89 +753,6 @@ const KpPage = () => {
       grandTotalDiscountAmounts: normalizedAmounts,
     });
   }, [grandTotalDiscounts, grandTotalDiscountAmounts, loadStatus]);
-
-  const addMaterialRow = useCallback(
-    (key_id) => {
-      setMaterialRowsByKeyId((prev) => {
-        return {
-          ...prev,
-          [key_id]: [...(prev[key_id] ?? []), newCustomMaterialRow()],
-        };
-      });
-    },
-    [],
-  );
-
-  const removeMaterialRow = useCallback(
-    (key_id, rowId) => {
-      setMaterialRowsByKeyId((prev) => {
-        const rows = (prev[key_id] ?? []).filter((r) => r.id !== rowId);
-        if (rows.length === 0) {
-          const next = { ...prev };
-          delete next[key_id];
-          return next;
-        }
-        return { ...prev, [key_id]: rows };
-      });
-    },
-    [],
-  );
-
-  const toggleCardCollapsed = useCallback((key_id) => {
-    setCardCollapseOverridesByKeyId((prev) => ({
-      ...prev,
-      [key_id]: !(prev[key_id] ?? true),
-    }));
-  }, []);
-
-  const stashAndLeaveKp = useCallback(() => {
-    const calcParamsById = new Map(
-      (originalConstructionsRef.current || []).map((c) => [
-        c.id,
-        c.calc_params,
-      ]),
-    );
-    const constrToCalcToSent = (calcTables.ConstrToCalc || [])
-      .map((ui) => calcParamsById.get(ui.key_id))
-      .filter(Boolean);
-    const tablesForSnapshot =
-      calcTables.ConstrToCalc?.length > 0
-        ? {
-            ...calcTables,
-            tableConstrToCalc: calcTables.tableConstrToCalc ?? {},
-          }
-        : calcTables;
-
-    stashKpSnapshot({
-      form,
-      calcTables: tablesForSnapshot,
-      constrToCalcToSent,
-      montageByKeyId,
-      serviceRows,
-      materialRowsByKeyId,
-      manualMontagePriceByKeyId,
-      kpSettings,
-      grandTotalDiscounts,
-      grandTotalDiscountAmounts,
-      cardCollapseOverridesByKeyId,
-      montageSectionOpenByKeyId,
-      additionalMaterialsSectionOpenByKeyId,
-    });
-  }, [
-    stashKpSnapshot,
-    form,
-    calcTables,
-    montageByKeyId,
-    serviceRows,
-    materialRowsByKeyId,
-    manualMontagePriceByKeyId,
-    kpSettings,
-    grandTotalDiscounts,
-    grandTotalDiscountAmounts,
-    cardCollapseOverridesByKeyId,
-    montageSectionOpenByKeyId,
-    additionalMaterialsSectionOpenByKeyId,
-  ]);
 
   const handleExit = useCallback(async () => {
     if (!id) return;
@@ -1146,530 +788,6 @@ const KpPage = () => {
     clearKpSnapshot,
     navigate,
   ]);
-
-  const openPriceForConstruction = useCallback((key_id) => {
-    setActiveConstructionId(key_id);
-    stashAndLeaveKp();
-    navigate("/price");
-  }, [setActiveConstructionId, stashAndLeaveKp, navigate]);
-
-  const openCalculatorForConstructions = () => {
-    stashAndLeaveKp();
-    const snap = useOfferEditSessionStore.getState().kpSnapshot;
-    if (snap?.calcTables) {
-      useCalculatorStore
-        .getState()
-        .loadKpEditState(
-          buildCalculatorSyncFromKp({
-            calcTables: snap.calcTables,
-            constrToCalcToSent: snap.constrToCalcToSent,
-          }),
-        );
-    }
-    navigate("/calc");
-  };
-
-  const updateMontageRow = useCallback(
-    (key_id, field) => (e) => {
-      const value = e.target.value;
-      setMontageByKeyId((prev) => ({
-        ...prev,
-        [key_id]: {
-          price: "",
-          quantity: "",
-          unit: "",
-          ...prev[key_id],
-          [field]: value,
-        },
-      }));
-    },
-    [],
-  );
-
-  const toggleMontageSection = useCallback((key_id) => {
-    setMontageSectionOpenByKeyId((prev) => ({
-      ...prev,
-      [key_id]: !prev[key_id],
-    }));
-  }, []);
-
-  const removeConstructionFromKp = useCallback((key_id) => {
-    const nextConstr = (calcTables.ConstrToCalc || []).filter(
-      (item) => item.key_id !== key_id,
-    );
-    const nextMaterials = (calcTables.materialsByConstruction || []).filter(
-      (entry) => entry.key_id !== key_id,
-    );
-    const nextCalcTables = {
-      ...calcTables,
-      ConstrToCalc: nextConstr,
-      materialsByConstruction: nextMaterials,
-      tableConstrToCalc:
-        nextConstr.length === 0 ? null : calcTables.tableConstrToCalc,
-    };
-    const calcParamsById = new Map(
-      (originalConstructionsRef.current || []).map((c) => [
-        c.id,
-        c.calc_params,
-      ]),
-    );
-    const constrToCalcToSent = nextConstr
-      .map((ui) => calcParamsById.get(ui.key_id))
-      .filter(Boolean);
-
-    setCalcTables(nextCalcTables);
-
-    const { setField } = useCalculatorStore.getState();
-    setField("ConstrToCalc", nextConstr);
-    setField("materialsByConstruction", nextMaterials);
-    setField("ConstrToCalcToSent", constrToCalcToSent);
-    if (nextConstr.length === 0) {
-      setField("tableConstrToCalc", null);
-    }
-
-    const sess = useOfferEditSessionStore.getState();
-    if (sess.activeOfferId === id) {
-      const prevSnap = sess.kpSnapshot || {};
-      const patch = {
-        ...prevSnap,
-        calcTables: nextCalcTables,
-        constrToCalcToSent,
-      };
-      if (prevSnap.montageByKeyId) {
-        const m = { ...prevSnap.montageByKeyId };
-        delete m[key_id];
-        patch.montageByKeyId = m;
-      }
-      if (prevSnap.manualMontagePriceByKeyId) {
-        const m = { ...prevSnap.manualMontagePriceByKeyId };
-        delete m[key_id];
-        patch.manualMontagePriceByKeyId = m;
-      }
-      if (prevSnap.cardCollapseOverridesByKeyId) {
-        const m = { ...prevSnap.cardCollapseOverridesByKeyId };
-        delete m[key_id];
-        patch.cardCollapseOverridesByKeyId = m;
-      }
-      if (prevSnap.montageSectionOpenByKeyId) {
-        const m = { ...prevSnap.montageSectionOpenByKeyId };
-        delete m[key_id];
-        patch.montageSectionOpenByKeyId = m;
-      }
-      if (prevSnap.additionalMaterialsSectionOpenByKeyId) {
-        const m = { ...prevSnap.additionalMaterialsSectionOpenByKeyId };
-        delete m[key_id];
-        patch.additionalMaterialsSectionOpenByKeyId = m;
-      }
-      sess.stashKpSnapshot(patch);
-    }
-
-    setCardCollapseOverridesByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    setMontageByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    setMontageSectionOpenByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    setManualMontagePriceByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    setMaterialRowsByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    setAdditionalMaterialsSectionOpenByKeyId((prev) => {
-      if (!(key_id in prev)) return prev;
-      const next = { ...prev };
-      delete next[key_id];
-      return next;
-    });
-
-    clearSelectedArticlesForConstruction(key_id);
-  }, [id, calcTables, clearSelectedArticlesForConstruction]);
-
-  const renderKpMontageSlot = useCallback(
-    ({ key_id, cardIndex }) => {
-      const row = montageByKeyId[key_id] ?? {
-        price: "",
-        quantity: "",
-        unit: "",
-      };
-      const montageOpen = montageSectionOpenByKeyId[key_id] === true;
-      return (
-        <div className="tbl-in kp-page__montage-table-wrap">
-          <button
-            type="button"
-            className="kp-section-collapsible-toggle"
-            aria-expanded={montageOpen}
-            onClick={() => toggleMontageSection(key_id)}
-          >
-            <span className="kp-collapsible-title-row">
-              <span className="kp-collapsible-title-inner">
-                <span
-                  className={`kp-collapsible-chevron${
-                    montageOpen ? " kp-collapsible-chevron--expanded" : ""
-                  }`}
-                  aria-hidden
-                />
-                <span>Монтаж</span>
-              </span>
-              <span className="kp-collapsible-title-sum" aria-hidden>
-                {formatRub(montageLineProductRub(row) ?? 0)}
-              </span>
-            </span>
-          </button>
-          <table
-            className="data kp-data-table--starts-with-column-headers"
-            id={`kp-table-montage-${key_id}`}
-            aria-label={`Монтаж, карточка ${cardIndex + 1}`}
-            data-export-section-title="Монтаж"
-            data-erp-data-start-row="1"
-          >
-            {montageOpen && (
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Цена</th>
-                  <th>Количество</th>
-                  <th>Ед. изм.</th>
-                  <th>Сумма</th>
-                </tr>
-              </thead>
-            )}
-            {montageOpen && (
-              <tbody>
-                {(() => {
-                  const montageRowKey = `montage-${key_id}`;
-                  const priceInput = (
-                    <input
-                      id={`kp-montage-${key_id}-price`}
-                      type="text"
-                      className="kp-page__services-input"
-                      value={row.price}
-                      placeholder={KP_DECIMAL_PLACEHOLDER}
-                      onChange={updateMontagePriceRow(key_id)}
-                      aria-label={`Цена, ${MONTAGE_ROW_LABEL} (карточка ${cardIndex + 1}, из настроек КП)`}
-                    />
-                  );
-                  const quantityInput = (
-                    <input
-                      id={`kp-montage-${key_id}-quantity`}
-                      type="text"
-                      readOnly
-                      className="kp-page__services-input"
-                      value={row.quantity}
-                      placeholder={KP_DECIMAL_PLACEHOLDER}
-                      aria-label={`Количество, ${MONTAGE_ROW_LABEL} (карточка ${cardIndex + 1}, площадь конструкции)`}
-                    />
-                  );
-                  const unitInput = (
-                    <input
-                      id={`kp-montage-${key_id}-unit`}
-                      type="text"
-                      readOnly
-                      className="kp-page__services-input"
-                      value={row.unit}
-                      aria-label={`Единица измерения, ${MONTAGE_ROW_LABEL} (карточка ${cardIndex + 1})`}
-                    />
-                  );
-                  const sumInput = (
-                    <input
-                      id={`kp-montage-${key_id}-sum`}
-                      type="text"
-                      readOnly
-                      className="kp-page__services-input kp-page__services-input--computed"
-                      value={serviceRowSum(row.price, row.quantity)}
-                      aria-label={`Сумма, ${MONTAGE_ROW_LABEL} (карточка ${cardIndex + 1}, цена × количество)`}
-                    />
-                  );
-                  const montageDetailFields = [
-                    { id: "price", label: "Цена", children: priceInput },
-                    {
-                      id: "quantity",
-                      label: "Количество",
-                      children: quantityInput,
-                    },
-                    { id: "unit", label: "Ед. изм.", children: unitInput },
-                    { id: "sum", label: "Сумма", children: sumInput },
-                  ];
-                  const montageCells = isKpNarrow ? (
-                    <>
-                      <td className="kp-page__service-name-td--preset">
-                        {MONTAGE_ROW_LABEL}
-                      </td>
-                      <td />
-                      <td />
-                      <td />
-                      <td className="kp-narrow-row-summary-sum">
-                        {serviceRowSum(row.price, row.quantity)}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="kp-page__service-name-td--preset">
-                        {MONTAGE_ROW_LABEL}
-                      </td>
-                      <td>{priceInput}</td>
-                      <td>{quantityInput}</td>
-                      <td>{unitInput}</td>
-                      <td>{sumInput}</td>
-                    </>
-                  );
-                  if (isKpNarrow) {
-                    return (
-                      <KpNarrowExpandableRow
-                        rowKey={montageRowKey}
-                        expandedKey={expandedKey}
-                        onToggleRow={toggleRow}
-                        narrow
-                        colSpan={5}
-                        detailTitle={MONTAGE_ROW_LABEL}
-                        detailFields={montageDetailFields}
-                      >
-                        {montageCells}
-                      </KpNarrowExpandableRow>
-                    );
-                  }
-                  return <tr>{montageCells}</tr>;
-                })()}
-              </tbody>
-            )}
-          </table>
-        </div>
-      );
-    },
-    [
-      montageByKeyId,
-      montageSectionOpenByKeyId,
-      toggleMontageSection,
-      updateMontagePriceRow,
-      updateMontageRow,
-      isKpNarrow,
-      expandedKey,
-      toggleRow,
-    ],
-  );
-
-  const renderKpAdditionalMaterialsSlot = useCallback(
-    ({ key_id, cardIndex }) => {
-      const rows = materialRowsByKeyId[key_id] ?? [];
-      const sectionOpen = additionalMaterialsSectionOpenByKeyId[key_id] === true;
-      const totalRub = additionalMaterialsGrandTotalRubForKp(rows);
-
-      const toggleSection = () => {
-        const willClose = sectionOpen;
-        setAdditionalMaterialsSectionOpenByKeyId((prev) => ({
-          ...prev,
-          [key_id]: !prev[key_id],
-        }));
-        if (willClose) {
-          // При закрытии — сбрасываем выбранные артикулы для этой конструкции.
-          clearSelectedArticlesForConstruction(key_id);
-        }
-      };
-
-      return (
-        <KpCollapsibleExtraTable
-          tableId={`kp-table-additional-materials-${key_id}`}
-          ariaLabel={`Дополнительные материалы, карточка ${cardIndex + 1}`}
-          title="Дополнительные материалы"
-          sectionOpen={sectionOpen}
-          onToggleSection={toggleSection}
-          totalRub={totalRub}
-          colgroup={
-            <colgroup>
-              <col style={{ width: "50%" }} />
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "20%" }} />
-            </colgroup>
-          }
-          footerRows={
-            <tr className="kp-page__services-add-row">
-              <td colSpan={5} className="kp-page__services-add-cell">
-                <div className="kp-page__services-add-actions">
-                  <button
-                    type="button"
-                    className="kp-page__services-add kp-page__services-add--secondary"
-                    onClick={() => openPriceForConstruction(key_id)}
-                  >
-                    Выбрать материал из прайса
-                  </button>
-                  <button
-                    type="button"
-                    className="kp-page__services-add"
-                    onClick={() => addMaterialRow(key_id)}
-                  >
-                    Добавить строку
-                  </button>
-                </div>
-              </td>
-            </tr>
-          }
-        >
-          {rows.map((row) => {
-            const rowKey = `mat-${key_id}-${row.id}`;
-            const removeRowButton = (
-              <button
-                type="button"
-                className="kp-page__service-row-remove"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeMaterialRow(key_id, row.id);
-                }}
-                aria-label="Удалить строку"
-              >
-                ×
-              </button>
-            );
-            const nameTextarea = (
-              <textarea
-                className="kp-page__services-input kp-page__services-textarea"
-                value={row.name}
-                onChange={(e) => {
-                  updateMaterialRow(key_id, row.id, "name")(e);
-                  syncTextareaHeight(e.target);
-                }}
-                onInput={autoResizeNameField}
-                aria-label="Название материала"
-                rows={1}
-              />
-            );
-            const nameCell = isKpNarrow ? (
-              <div className="kp-page__service-name-cell">{nameTextarea}</div>
-            ) : (
-              <div className="kp-page__service-name-cell">
-                {removeRowButton}
-                {nameTextarea}
-              </div>
-            );
-            const priceInput = (
-              <input
-                type="text"
-                className="kp-page__services-input"
-                value={row.price}
-                placeholder={KP_DECIMAL_PLACEHOLDER}
-                onChange={updateMaterialRow(key_id, row.id, "price")}
-                aria-label={`Цена, ${row.name || "материал"}`}
-              />
-            );
-            const quantityInput = (
-              <input
-                type="text"
-                className="kp-page__services-input"
-                value={row.quantity}
-                placeholder={KP_DECIMAL_PLACEHOLDER}
-                onChange={updateMaterialRow(key_id, row.id, "quantity")}
-                aria-label={`Количество, ${row.name || "материал"}`}
-              />
-            );
-            const unitInput = (
-              <input
-                type="text"
-                className="kp-page__services-input"
-                value={row.unit}
-                onChange={updateMaterialRow(key_id, row.id, "unit")}
-                aria-label={`Единица измерения, ${row.name || "материал"}`}
-              />
-            );
-            const sumInput = (
-              <input
-                type="text"
-                readOnly
-                className="kp-page__services-input kp-page__services-input--computed"
-                value={serviceRowSum(row.price, row.quantity)}
-                aria-label={`Сумма, ${row.name || "материал"} (цена × количество)`}
-              />
-            );
-            const detailFields = [
-              { id: "name", label: "Название", children: nameCell },
-              { id: "price", label: "Цена", children: priceInput },
-              { id: "quantity", label: "Количество", children: quantityInput },
-              { id: "unit", label: "Ед. изм.", children: unitInput },
-              { id: "sum", label: "Сумма", children: sumInput },
-            ];
-            const rowCells = isKpNarrow ? (
-              <>
-                <td>
-                  <div className="kp-page__service-name-cell kp-narrow-row-summary-cell">
-                    {removeRowButton}
-                    <span className="kp-narrow-row-summary-name">
-                      {row.name?.trim() ? row.name : "—"}
-                    </span>
-                  </div>
-                </td>
-                <td />
-                <td />
-                <td />
-                <td className="kp-narrow-row-summary-sum">
-                  {serviceRowSum(row.price, row.quantity)}
-                </td>
-              </>
-            ) : (
-              <>
-                <td>{nameCell}</td>
-                <td>{priceInput}</td>
-                <td>{quantityInput}</td>
-                <td>{unitInput}</td>
-                <td>{sumInput}</td>
-              </>
-            );
-            if (isKpNarrow) {
-              return (
-                <KpNarrowExpandableRow
-                  key={row.id}
-                  rowKey={rowKey}
-                  expandedKey={expandedKey}
-                  onToggleRow={toggleRow}
-                  narrow
-                  colSpan={5}
-                  detailFields={detailFields}
-                >
-                  {rowCells}
-                </KpNarrowExpandableRow>
-              );
-            }
-            return <tr key={row.id}>{rowCells}</tr>;
-          })}
-        </KpCollapsibleExtraTable>
-      );
-    },
-    [
-      materialRowsByKeyId,
-      additionalMaterialsSectionOpenByKeyId,
-      clearSelectedArticlesForConstruction,
-      openPriceForConstruction,
-      addMaterialRow,
-      removeMaterialRow,
-      updateMaterialRow,
-      autoResizeNameField,
-      isKpNarrow,
-      expandedKey,
-      toggleRow,
-    ],
-  );
 
   if (loadStatus === "loading" || authStatus === "loading") {
     return (
@@ -1724,7 +842,7 @@ const KpPage = () => {
             </label>
             <div className="kp-page__date-with-code">
               {kpCode ? (
-                <span className="kp-page__kp-code" aria-label={`Номер КП ${kpCode}`}>
+                <span className="kp-page__kp-code" title={kpCode} aria-label={`Номер КП ${kpCode}`}>
                   {kpCode}
                 </span>
               ) : null}
@@ -1840,46 +958,6 @@ const KpPage = () => {
             />
           </div>
         </section>
-
-        <div
-          className="tables-and-buttons-container kp-page__tables"
-          aria-label="Данные расчёта из калькулятора"
-        >
-          {calcTables.tableConstrToCalc != null &&
-          calcTables.ConstrToCalc.length > 0 ? (
-            <>
-              <ConstructionList
-                constructions={calcTables.ConstrToCalc}
-                constrToCalcToSent={constrToCalcToSentForTable}
-                readOnly
-                showHeadingDeleteButton
-                onDelete={removeConstructionFromKp}
-                materialsByConstruction={calcTables.materialsByConstruction}
-                defaultCardsCollapsed
-                cardCollapseOverrides={cardCollapseOverridesByKeyId}
-                onToggleCardCollapsed={toggleCardCollapsed}
-                renderKpMontageSlot={renderKpMontageSlot}
-                renderKpAdditionalMaterialsSlot={renderKpAdditionalMaterialsSlot}
-                additionalMaterialsRubByKeyId={additionalMaterialsRubByKeyId}
-                montageByKeyId={montageByKeyId}
-                showGrandTotalInline={false}
-                onMaterialKpFieldChange={onMaterialKpFieldChange}
-              />
-            </>
-          ) : (
-            <p className="kp-page__tables-empty">
-              В этом КП пока нет конструкций. Перейдите в{" "}
-              <button
-                type="button"
-                className="kp-page__link-btn"
-                onClick={openCalculatorForConstructions}
-              >
-                калькулятор
-              </button>
-              , чтобы добавить.
-            </p>
-          )}
-        </div>
 
         <div className="kp-page__save-bar">
           {saveError && (

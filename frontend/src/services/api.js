@@ -87,20 +87,6 @@ export const getAllIsolationConstr = async () => {
   return allIsolationConstrCache.loadingPromise;
 };
 
-/** Code → { Name, Description } для подписей карточек на КП. */
-export const buildTitleByCodeMap = (constrList) => {
-  const titleByCode = new Map();
-  for (const row of constrList || []) {
-    if (row?.Code) {
-      titleByCode.set(row.Code, {
-        Name: row.Name,
-        Description: row.Description,
-      });
-    }
-  }
-  return titleByCode;
-};
-
 /**
  * Формирует полный URL для изображения из API
  * @param {string} imageName - Имя файла изображения из API или путь вида /Img_constr/...

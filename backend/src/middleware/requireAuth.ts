@@ -1,6 +1,7 @@
 import { type NextFunction, type Request, type Response } from "express";
 import {
   fetchExternalSession,
+  mapRole,
   upsertLocalUserFromExternal,
 } from "../services/externalAuth.js";
 
@@ -32,6 +33,6 @@ export const requireAuth = async (
     return res.status(403).json({ error: "Account is blocked" });
   }
 
-  req.auth = { userId: user.id };
+  req.auth = { userId: user.id, role: mapRole(external.role_type) };
   return next();
 };

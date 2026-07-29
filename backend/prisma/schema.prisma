@@ -12,80 +12,45 @@ enum Role {
   ADMIN
 }
 
-model Country {
-  code      String    @id @db.VarChar(2)
-  name      String    @db.VarChar(50)
-  companies Company[]
-
-  @@map("countries")
-}
-
-model Company {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @db.VarChar(255)
-  address     String?
-  phone       String?  @db.VarChar(50)
-  countryCode String   @default("RU") @map("country_code") @db.VarChar(2)
-  ogrn        String?  @db.VarChar(50)
-  ogrnip      String?  @db.VarChar(50)
-  kpp         String?  @db.VarChar(50)
-  inn         String?  @db.VarChar(50)
-  logoUrl     String?  @map("logo_url")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  users       User[]
-  country     Country  @relation(fields: [countryCode], references: [code])
-
-  @@index([countryCode], map: "companies_country_code_idx")
-  @@map("companies")
-}
-
 model User {
-  id             String   @id @default(uuid()) @db.Uuid
-  fullName       String   @map("full_name") @db.VarChar(255)
-  phone          String?  @db.VarChar(50)
-  email          String   @unique @db.VarChar(255)
-  officeAddress  String?  @map("office_address")
-  passwordHash   String   @map("password_hash") @db.VarChar(255)
-  role           Role     @default(USER)
-  isBlocked      Boolean  @default(false) @map("is_blocked")
-  /** Порядковый номер сотрудника в рамках компании (для кода КП «КП-001-07»). */
-  employeeNumber Int      @map("employee_number")
-  companyId      String   @map("company_id") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  company        Company  @relation(fields: [companyId], references: [id])
-  offers         Offer[]
+  id            String   @id @default(uuid()) @db.Uuid
+  fullName      String   @map("full_name") @db.VarChar(255)
+  phone         String?  @db.VarChar(50)
+  email         String   @unique @db.VarChar(255)
+  officeAddress String?  @map("office_address")
+  role          Role     @default(USER)
+  isBlocked     Boolean  @default(false) @map("is_blocked")
+  /** `department_id` из внешней сессии; 0 — отдел не указан. */
+  departmentId  Int      @default(0) @map("department_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  offers        Offer[]
 
-  @@unique([companyId, employeeNumber], map: "users_company_id_employee_number_key")
-  @@index([companyId], map: "users_company_id_idx")
+  @@index([departmentId], map: "users_department_id_idx")
   @@map("users")
 }
 
 model Offer {
-  id              String              @id @default(uuid()) @db.Uuid
-  userId          String              @map("user_id") @db.Uuid
-  title           String?             @db.VarChar(255)
-  managerName     String?             @map("manager_name") @db.VarChar(255)
-  phone           String?             @db.VarChar(50)
-  email           String?             @db.VarChar(255)
-  officeAddress   String?             @map("office_address")
-  kpDate          String?             @map("kp_date") @db.VarChar(50)
-  /** Порядковый номер КП в рамках пользователя (для кода вида «ИПВ-12»). */
-  kpNumber        Int                 @map("kp_number")
-  objectName      String?             @map("object_name")
-  region          String?             @db.VarChar(120)
-  markupPercent   Decimal?            @map("markup_percent") @db.Decimal(6, 2)
-  discountPercent Decimal?            @map("discount_percent") @db.Decimal(6, 2)
-  services        Json?
-  additionalMaterials Json?           @map("additional_materials")
-  kpSettings      Json?               @map("kp_settings")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  constructions   OfferConstruction[]
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  title               String?             @db.VarChar(255)
+  managerName         String?             @map("manager_name") @db.VarChar(255)
+  phone               String?             @db.VarChar(50)
+  email               String?             @db.VarChar(255)
+  officeAddress       String?             @map("office_address")
+  kpDate              String?             @map("kp_date") @db.VarChar(50)
+  objectName          String?             @map("object_name")
+  region              String?             @db.VarChar(120)
+  markupPercent       Decimal?            @map("markup_percent") @db.Decimal(6, 2)
+  discountPercent     Decimal?            @map("discount_percent") @db.Decimal(6, 2)
+  services            Json?
+  additionalMaterials Json?               @map("additional_materials")
+  kpSettings          Json?               @map("kp_settings")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  constructions       OfferConstruction[]
 
-  @@unique([userId, kpNumber], map: "offers_user_id_kp_number_key")
   @@index([userId], map: "offers_user_id_idx")
   @@map("offers")
 }

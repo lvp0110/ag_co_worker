@@ -1,5 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import { parseKpNumberFromQuery } from "./kpCode.js";
 
 /**
  * Нормализует фильтр даты к возможным значениям kp_date в БД
@@ -30,7 +29,7 @@ type OffersListFilters = {
   date?: unknown;
 };
 
-/** WHERE для списка КП: свои офферы + поиск по объекту/номеру и фильтр по дате. */
+/** WHERE для списка КП: свои офферы + поиск по объекту/document_id и фильтр по дате. */
 export function buildOffersListWhere(
   userId: string,
   filters: OffersListFilters = {}
@@ -43,9 +42,13 @@ export function buildOffersListWhere(
     const or: Prisma.OfferWhereInput[] = [
       { objectName: { contains: query, mode: "insensitive" } },
     ];
-    const kpNumber = parseKpNumberFromQuery(query);
-    if (kpNumber != null) {
-      or.push({ kpNumber });
+    // document_id = Offer.id (UUID): точное совпадение при полном id в запросе
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        query
+      )
+    ) {
+      or.push({ id: query });
     }
     and.push({ OR: or });
   }

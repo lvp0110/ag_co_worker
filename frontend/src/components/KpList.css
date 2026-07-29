@@ -144,16 +144,18 @@
 }
 
 .kp-list__num-col {
-  width: 88px;
-  text-align: center;
+  width: 280px;
+  text-align: left;
 }
 
 .kp-list__num-cell {
-  text-align: center;
+  text-align: left;
   color: #64748b;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   font-weight: 600;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .kp-list__actions-col {
@@ -250,16 +252,21 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 8px;
   border-radius: 6px;
   background: #f1f5f9;
   color: #64748b;
   white-space: nowrap;
-  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .kp-list__card-title {

@@ -29,8 +29,6 @@ export default function ProfilePage() {
     );
   }
 
-  const company = user.company;
-
   return (
     <div className="profile-page">
       <h1 className="profile-page__title">Профиль</h1>
@@ -46,25 +44,11 @@ export default function ProfilePage() {
             label="Роль"
             value={user.role === "ADMIN" ? "Администратор" : "Пользователь"}
           />
+          <Row
+            label="Отдел"
+            value={user.department_id != null ? String(user.department_id) : null}
+          />
         </dl>
-      </section>
-
-      <section className="profile-page__card">
-        <h2 className="profile-page__card-title">Компания</h2>
-        {company ? (
-          <dl className="profile-page__list">
-            <Row label="Название фирмы" value={company.name} />
-            <Row label="Адрес фирмы" value={company.address} />
-            <Row label="Телефон" value={company.phone} />
-            <Row label="Страна" value={company.country} />
-            <Row label="ОГРН" value={company.ogrn} />
-            <Row label="ОГРНИП" value={company.ogrnip} />
-            <Row label="КПП" value={company.kpp} />
-            <Row label="ИНН" value={company.inn} />
-          </dl>
-        ) : (
-          <p className="profile-page__empty">Компания не привязана.</p>
-        )}
       </section>
     </div>
   );

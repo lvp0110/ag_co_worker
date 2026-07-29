@@ -88,8 +88,8 @@ cp deploy/.env.deploy.example deploy/.env.deploy
 # На сервере после первого git clone:
 cd /srv/ag_co_worker
 cp deploy/.env.prod.example .env.prod
-# Заполнить POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, CORS_ORIGIN.
-# openssl rand -hex 32  — для секретов.
+# Заполнить POSTGRES_PASSWORD, CORS_ORIGIN, AUTH_SERVICE_URL.
+# openssl rand -hex 32  — для пароля Postgres.
 chmod 600 .env.prod
 ```
 

@@ -144,12 +144,16 @@
 }
 
 .kp-page__kp-code {
-  flex: 0 0 auto;
-  font-size: 14px;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
   font-weight: 700;
-  font-style: italic;
+  font-style: normal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: #1a1d21;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kp-page__date-with-code .kp-page__input {

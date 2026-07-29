@@ -394,7 +394,9 @@ export default function KpList() {
               {offers.map((o) => (
                 <article key={o.id} className="kp-list__card" role="listitem">
                   <div className="kp-list__card-header">
-                    <span className="kp-list__card-num">{o.kp_code || "—"}</span>
+                    <span className="kp-list__card-num" title={o.kp_code || undefined}>
+                      {o.kp_code || "—"}
+                    </span>
                     <button
                       type="button"
                       className="kp-list__link kp-list__card-title"
@@ -436,7 +438,9 @@ export default function KpList() {
               <tbody>
                 {offers.map((o) => (
                   <tr key={o.id}>
-                    <td className="kp-list__num-cell">{o.kp_code || "—"}</td>
+                    <td className="kp-list__num-cell" title={o.kp_code || undefined}>
+                      {o.kp_code || "—"}
+                    </td>
                     <td>
                       <button
                         type="button"

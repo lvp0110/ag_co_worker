@@ -10,7 +10,7 @@
 |------|------------|
 | Frontend | React 19, Vite, React Router 7 |
 | Backend | Node.js, Express, TypeScript, Prisma |
-| Auth | JWT в httpOnly cookies (access + refresh) |
+| Auth | Внешний сервис (`AUTH_SERVICE_URL`): cookie `access_token` + CSRF |
 | DB | PostgreSQL 16 (в Docker) |
 | API-документация | OpenAPI + Swagger UI (`@asteasolutions/zod-to-openapi`) |
 | Внешний сервис | `dev3.constrtodo.ru:3005` — расчёт материалов |
@@ -116,13 +116,11 @@ make db-ui
 
 | Группа | Пути |
 |--------|------|
-| **Auth** | `POST /api/auth/{register,login,refresh,logout}` |
-| **Users** | `GET/PUT /api/users/me` |
-| **Offers** | `POST/GET /api/offers`, `GET/PATCH/DELETE /api/offers/:id`, `POST /api/offers/:id/clone` |
+| **Offers** | `POST/GET /api/offers`, `GET/PATCH/DELETE /api/offers/:id`, `POST /api/offers/:id/clone`, `GET /api/offers/:id/pdf` |
 | **Calc (proxy)** | Прозрачно проксируют на внешний `dev3.constrtodo.ru:3005`: `POST /api/v1/calcIsolation/byProduct`, `GET /api/v1/AllIsolationConstr`, `GET /api/v1/IsolationConstrMaterials/{code}`, `GET /api/v1/constr/{filename}`, `GET /api/v2/isolationConstructions/props/{code}` |
 | **Health** | `GET /health` |
 
-Аутентификация — через httpOnly cookies `accessToken` (15 min) и `refreshToken` (30 days). Все запросы с фронта идут с `credentials: 'include'`; refresh при 401 выполняется автоматически клиентом.
+Аутентификация — во внешнем сервисе (`AUTH_SERVICE_URL`): фронт ходит на `POST /login`, `GET /auth/session`, `POST /auth/logout`, а backend в `requireAuth` валидирует ту же cookie `access_token` через `GET /auth/session` и маппит пользователя в локальную БД (отдел = `department_id`). Свои токены backend не выдаёт. Роль администратора тоже приходит оттуда (`role_type: "admin"`); сотрудники, роли, доступ и отделы настраиваются только во внешнем сервисе — локальной админки пользователей нет. Реквизиты организации в КП/PDF задаются env `KP_COMPANY_*`. Номер КП = `document_id` из 1С (он же `Offer.id` / URL `/kp/:id`). Все запросы с фронта идут с `credentials: 'include'`; на 401 клиент эмитит `auth:unauthorized` и открывает `LoginModal`.
 
 ---
 
@@ -139,17 +137,17 @@ ag_co_worker/
 │   │   ├── docs/                   ← Zod + Swagger
 │   │   ├── lib/prisma.ts
 │   │   ├── middleware/requireAuth.ts
-│   │   ├── routes/                 ← auth, users, offers, calc (proxy)
-│   │   ├── services/               ← calcService, offerRecalc
-│   │   ├── utils/                  ← tokens, userDto
+│   │   ├── routes/                 ← offers, calc (proxy)
+│   │   ├── services/               ← calcService, offerRecalc, externalAuth, onecIntegration, offerPdf
+│   │   ├── utils/                  ← offerListSearch, pagination
 │   │   └── index.ts
 │   ├── .env.example
 │   └── package.json
 ├── frontend/                       ← React + Vite
 │   ├── src/
-│   │   ├── components/             ← Calculator, KpPage, KpList, LoginModal, RegisterPage, AppHeader, …
+│   │   ├── components/             ← Calculator, KpPage, KpList, LoginModal, AppHeader, …
 │   │   ├── context/AuthContext.jsx
-│   │   ├── services/               ← apiClient, authApi, offersApi, constructionApi
+│   │   ├── services/               ← apiClient, authApi, offersApi, constructionApi, priceApi
 │   │   ├── utils/offerMapper.js
 │   │   └── ...
 │   ├── public/
@@ -175,10 +173,7 @@ Backend — `backend/.env` (создаётся из `.env.example` через `m
 | `PORT` | `3006` | Порт backend-API |
 | `CORS_ORIGIN` | `http://localhost:5175,http://localhost:5176` | Список origin'ов через запятую (для `credentials: true`). По умолчанию разрешены оба стандартных порта Vite |
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5435/ag_co_worker?schema=public` | Соединение с PostgreSQL |
-| `JWT_ACCESS_SECRET` | `dev_access_secret_change_me` | Секрет для access токена — **в проде обязательно заменить** |
-| `JWT_REFRESH_SECRET` | `dev_refresh_secret_change_me` | Аналогично — **в проде заменить** |
-| `ACCESS_TOKEN_EXPIRES_IN` | `15m` | TTL access cookie |
-| `REFRESH_TOKEN_EXPIRES_IN` | `30d` | TTL refresh cookie |
+| `AUTH_SERVICE_URL` | `http://localhost:3005` | База внешнего auth-сервиса — `requireAuth` валидирует сессию через его `GET /auth/session` |
 | `CALC_SERVICE_URL` | `https://dev3.constrtodo.ru:3005` | База внешнего сервиса расчёта |
 | `CALC_SERVICE_TIMEOUT_MS` | `60000` | Таймаут запроса к calc-сервису (прайс `/api/v2/data` на dev3 часто >15s) |
 | `ONEC_SERVICE_URL` | значение `AUTH_SERVICE_URL` | База сервиса выгрузки КП в 1С (`/integration/onec/isolation/document`) |

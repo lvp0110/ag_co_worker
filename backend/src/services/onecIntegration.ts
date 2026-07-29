@@ -5,7 +5,8 @@ import { env } from "../config/env.js";
 /**
  * Выгрузка документа расчёта звукоизоляции в 1С.
  *
- * POST /integration/onec/isolation/document — создать документ,
+ * POST /integration/onec/isolation/document — создать документ (без document_id:
+ *   id выдаёт 1С в ответе `data.document_id`, им же пишем локальный Offer),
  * PUT  /integration/onec/isolation/document — обновить существующий.
  * Ручка не идемпотентна: повторный POST с тем же document_id создаёт документ
  * заново, поэтому правки КП уходят строго через PUT.
@@ -144,19 +145,25 @@ export const mapCalcParamsToOnecConstruction = (
 
 const sendDocument = async (
   method: "POST" | "PUT",
-  documentId: string,
+  documentId: string | undefined,
   calcParamsList: unknown[],
   cookieHeader: string,
   csrfToken: string
 ): Promise<OnecExportResponse> => {
   const url = `${env.onecServiceUrl.replace(/\/$/, "")}${DOCUMENT_PATH}`;
-  const body = {
+  // На создании document_id не шлём — его выдаёт 1С; на обновлении обязателен.
+  const body: {
+    constructions: OnecConstruction[];
+    document_id?: string;
+  } = {
     constructions: calcParamsList.map(mapCalcParamsToOnecConstruction),
-    document_id: documentId,
   };
+  if (documentId) body.document_id = documentId;
 
   logOnec(
-    `[onec] ${method} ${url} → ${body.constructions.length} constr:\n` +
+    `[onec] ${method} ${url} → ${body.constructions.length} constr` +
+      (documentId ? ` doc=${documentId}` : " (без document_id)") +
+      `:\n` +
       JSON.stringify(body, null, 2)
   );
 
@@ -207,13 +214,15 @@ const sendDocument = async (
  * Выгружает документ и ВОЗВРАЩАЕТ ответ 1С — он уходит на фронт в поле `onec`,
  * чтобы КП сразу видело `document_id` / `user_email` либо текст ошибки.
  *
- * Никогда не бросает: ошибка 1С не должна ронять создание КП (оно уже в нашей
- * БД), поэтому проблема приезжает как `{code, error}`. Цена — ответ
- * POST /api/offers ждёт 1С, а та сама считает материалы.
+ * На `create` `documentId` не передаём: id выдаёт 1С (`data.document_id`),
+ * и им же потом пишется локальный Offer. На `update` — обязателен (PUT).
+ *
+ * Никогда не бросает: ошибка приезжает как `{code, error}`.
  */
 export const exportOfferToOnec = async (options: {
   mode: "create" | "update";
-  documentId: string;
+  /** Обязателен для update; для create обычно не передаётся. */
+  documentId?: string;
   calcParamsList: unknown[];
   cookieHeader: string | undefined;
   /** `X-CSRF-Token` входящего запроса, если фронт его прислал. */
@@ -223,12 +232,19 @@ export const exportOfferToOnec = async (options: {
   // Каждая причина пропуска логируется и возвращается с code: 0 — иначе
   // «ответа нет» невозможно отличить от невызванного экспорта.
   const skip = (reason: string): OnecExportResponse => {
-    logOnec(`[onec] ${mode} ${documentId} skipped: ${reason}`);
+    logOnec(`[onec] ${mode} ${documentId ?? "(new)"} skipped: ${reason}`);
     return { code: 0, error: reason };
   };
   if (!env.onecExportEnabled) return skip("ONEC_EXPORT_ENABLED=false");
-  if (calcParamsList.length === 0) return skip("конструкций в запросе нет");
   if (!cookieHeader) return skip("no auth cookie in request");
+  if (mode === "update" && !documentId) {
+    return skip("document_id обязателен для PUT");
+  }
+  // Пустой список на create всё равно шлём: 1С выдаёт document_id.
+  // На update без конструкций выгрузка бессмысленна.
+  if (mode === "update" && calcParamsList.length === 0) {
+    return skip("конструкций в запросе нет");
+  }
 
   const csrfToken = options.csrfToken || readCsrfFromCookie(cookieHeader);
   if (!csrfToken) return skip("нет csrf_token ни в заголовке, ни в cookie");
@@ -237,20 +253,37 @@ export const exportOfferToOnec = async (options: {
   const startedAt = Date.now();
   const result = await sendDocument(
     method,
-    documentId,
+    mode === "create" ? undefined : documentId,
     calcParamsList,
     cookieHeader,
     csrfToken
   );
   const elapsed = Date.now() - startedAt;
+  const resolvedId = result.data?.document_id ?? documentId ?? "(unknown)";
 
   logOnec(
     result.error
-      ? `[onec] ${method} ${DOCUMENT_PATH} ${documentId} FAIL ${elapsed}ms code=${result.code}: ${result.error}`
-      : `[onec] ${method} ${DOCUMENT_PATH} ${documentId} OK ${elapsed}ms` +
+      ? `[onec] ${method} ${DOCUMENT_PATH} ${resolvedId} FAIL ${elapsed}ms code=${result.code}: ${result.error}`
+      : `[onec] ${method} ${DOCUMENT_PATH} ${resolvedId} OK ${elapsed}ms` +
           (result.data?.user_email ? ` user=${result.data.user_email}` : "") +
           (result.data?.document_id ? ` doc=${result.data.document_id}` : "")
   );
 
   return result;
+};
+
+/** UUID v4/v1 и т.п. — Offer.id в БД `@db.Uuid`, поэтому id от 1С должен быть UUID. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Достаёт `document_id` из ответа 1С. Пустой / не-UUID → null (вызывающий
+ * решает, падать или генерировать локальный id).
+ */
+export const readOnecDocumentId = (
+  onec: OnecExportResponse
+): string | null => {
+  const id = onec.data?.document_id?.trim();
+  if (!id || !UUID_RE.test(id)) return null;
+  return id;
 };

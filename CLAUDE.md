@@ -48,17 +48,19 @@ README покрывает сценарии разработчика деталь
 - Override-поля: `KpPricePerM2`, `KpPricePerUnit`, `pricePerSquareMeter`, `pricePerUnit`. Остальные поля всегда приходят из fresh.
 - `calculateByProduct(params[])` в `calcService.ts` вызывает внешний API **по одной конструкции в цикле** — при отправке массива сервис склеивает ответы, теряя разбивку. Не возвращайся к batched-вызову.
 
-### httpOnly cookie auth (без access token в JSON)
+### Auth целиком внешний (свои токены backend не выдаёт)
 
-- Backend ставит две cookie (`accessToken` 15m, `refreshToken` 30d) при register/login/refresh; логин-ответ содержит только `{user}`, токен в теле **не передаётся**.
-- `requireAuth` читает access из `req.cookies.accessToken`, не из Authorization.
+- Логин/сессия/логаут — во внешнем сервисе (`AUTH_SERVICE_URL`): фронт ходит на `POST /login`, `GET /auth/session`, `POST /auth/logout` (см. [frontend/src/services/authApi.js](frontend/src/services/authApi.js)). Cookie — httpOnly `access_token` + читаемый `csrf_token` (нужен как `X-CSRF-Token` на мутациях auth и на выгрузке в 1С).
+- `requireAuth` ([backend/src/middleware/requireAuth.ts](backend/src/middleware/requireAuth.ts)) пробрасывает `req.headers.cookie` в `GET /auth/session` внешнего сервиса и апсертит пользователя в локальную БД ([services/externalAuth.ts](backend/src/services/externalAuth.ts)) — `req.auth.userId` это **локальный** UUID, к нему привязаны офферы. Роль и `isBlocked` перезаписываются из внешней сессии на каждом запросе.
+- Своих ручек `/api/auth/*` и JWT у backend нет (удалены как мёртвый код) — не добавляй их обратно и не заводи локальный логин.
+- Локальной админки пользователей (`/api/admin/*`, UI `/admin`) нет — сотрудники, роли, пароли и отделы живут только во внешнем auth. Локальный `User` — проекция для FK офферов (`departmentId` из `department_id` сессии). Реквизиты КП — из `KP_COMPANY_*` в env. Номер КП = `document_id` из 1С (`Offer.id` / `kp_code`), не `КП-NNN-MM`.
 - `app.set('trust proxy', 1)` в [backend/src/index.ts](backend/src/index.ts) обязателен — backend стоит за frontend-container'ом (прокси), который стоит за host nginx.
-- Фронтовый `apiClient.js` всегда с `credentials: 'include'`. При 401 один раз пробует `POST /api/auth/refresh` (single-flight через `refreshInFlight`), при провале эмитит `window` event `auth:unauthorized` — на это подписан `AuthContext`, открывает `LoginModal`.
+- Фронтовый `apiClient.js` всегда с `credentials: 'include'`. Refresh-логики нет: на 401 эмитится `window` event `auth:unauthorized` — на него подписан `AuthContext`, открывает `LoginModal`.
 - НЕ добавлять `Authorization` header — работа идёт только через cookies.
 
 ### Frontend всегда на относительных URL
 
-- `apiClient.js`: `DEFAULT_BASE_URL = import.meta.env.DEV ? "http://localhost:3007" : ""` + `??`-оператор (не `||`, пустая строка должна оставаться пустой). В prod-сборке URL = `""` → все fetch-ы относительные (`/api/auth/login`).
+- `apiClient.js`: `DEFAULT_BASE_URL = ""` + `??`-оператор (не `||`, пустая строка должна оставаться пустой). URL всегда `""` → все fetch-ы относительные (`/api/offers`, `/login`); в dev проксирует Vite.
 - `api.js` / `constructionApi.js`: все запросы к calc-сервису (`/api/v1/*`, `/api/v2/*`) **всегда** относительные. В dev Vite-proxy из `vite.config.js` проксирует в `dev3.constrtodo.ru:3005`, в prod backend-router [routes/calc.ts](backend/src/routes/calc.ts) проксирует из docker-сети.
 - Не вводи `https://dev3.constrtodo.ru:3005/...` в новом коде фронта — это ломает single-origin-auth.
 
@@ -91,7 +93,7 @@ README покрывает сценарии разработчика деталь
 
 | Что искать                                     | Файл                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Главный поток auth                             | [frontend/src/context/AuthContext.jsx](frontend/src/context/AuthContext.jsx), [frontend/src/services/apiClient.js](frontend/src/services/apiClient.js), [backend/src/routes/auth.ts](backend/src/routes/auth.ts), [backend/src/utils/tokens.ts](backend/src/utils/tokens.ts) |
+| Главный поток auth                             | [frontend/src/context/AuthContext.jsx](frontend/src/context/AuthContext.jsx), [frontend/src/services/authApi.js](frontend/src/services/authApi.js), [backend/src/middleware/requireAuth.ts](backend/src/middleware/requireAuth.ts), [backend/src/services/externalAuth.ts](backend/src/services/externalAuth.ts) |
 | Offer CRUD + merge                             | [backend/src/routes/offers.ts](backend/src/routes/offers.ts), [backend/src/services/offerRecalc.ts](backend/src/services/offerRecalc.ts)                                                                                                                                     |
 | Внешний calc-сервис                            | [backend/src/services/calcService.ts](backend/src/services/calcService.ts), [backend/src/routes/calc.ts](backend/src/routes/calc.ts)                                                                                                                                         |
 | Маппинг UI ↔ API                               | [frontend/src/utils/offerMapper.js](frontend/src/utils/offerMapper.js)                                                                                                                                                                                                       |

@@ -18,7 +18,7 @@ FRONTEND_DIR := frontend
 .PHONY: help setup install reinstall env db-up db-down db-migrate db-reset db-ui \
         backend frontend frontend-docker dev dev-docker dev-docker-build stop build clean status \
         deploy-bootstrap deploy-backend deploy-frontend deploy-migrate \
-        deploy-create-admin deploy-nginx-sync deploy-nginx-reload deploy-status
+        deploy-nginx-sync deploy-nginx-reload deploy-status
 
 .DEFAULT_GOAL := help
 
@@ -166,9 +166,6 @@ deploy-frontend: ## Локальный vite build + rsync dist на прод. RE
 
 deploy-migrate: ## Применить prisma migrate deploy на проде (отдельный run --rm, не трогает работающий backend)
 	bash deploy/deploy-migrate.sh
-
-deploy-create-admin: ## Создать/повысить рутового админа на проде (креды из .env.prod: ADMIN_EMAIL/ADMIN_PASSWORD)
-	bash deploy/deploy-create-admin.sh
 
 deploy-nginx-sync: ## Залить nginx server block из deploy/nginx/ на сервер и валидировать nginx -t
 	bash deploy/deploy-nginx-sync.sh

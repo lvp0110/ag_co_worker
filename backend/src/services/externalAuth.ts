@@ -1,13 +1,9 @@
-import bcrypt from "bcrypt";
 import { type Role, type User } from "@prisma/client";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
-import { nextEmployeeNumberForCompany } from "../utils/employeeNumber.js";
 
-const SALT_ROUNDS = 10;
-const DEFAULT_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
-/** Неиспользуемый пароль: вход только через внешний auth-сервис. */
-const EXTERNAL_PASSWORD_PLACEHOLDER = "external-auth-no-local-password";
+/** `department_id` отсутствует в сессии → отдел «не указан». */
+const NO_DEPARTMENT = 0;
 
 export type ExternalSessionUser = {
   user_id: string;
@@ -17,6 +13,8 @@ export type ExternalSessionUser = {
   email: string;
   role_type?: string;
   is_active?: boolean;
+  /** Отдел сотрудника — единственная «организационная» привязка, которую отдаёт auth. */
+  department_id?: number;
 };
 
 type ExternalApiResponse<T> = {
@@ -30,7 +28,7 @@ const buildFullName = (u: ExternalSessionUser): string => {
   return name || u.email;
 };
 
-const mapRole = (roleType: string | undefined): Role =>
+export const mapRole = (roleType: string | undefined): Role =>
   String(roleType || "").toLowerCase() === "admin" ? "ADMIN" : "USER";
 
 /**
@@ -71,24 +69,15 @@ export const fetchExternalSession = async (
   return data;
 };
 
-const resolveCompanyId = async (): Promise<string> => {
-  const configured = (process.env.DEFAULT_COMPANY_ID ?? "").trim();
-  if (configured) {
-    const company = await prisma.company.findUnique({ where: { id: configured } });
-    if (company) return company.id;
-  }
-  const fallback =
-    (await prisma.company.findUnique({ where: { id: DEFAULT_COMPANY_ID } })) ??
-    (await prisma.company.findFirst({ orderBy: { createdAt: "asc" } }));
-  if (!fallback) {
-    throw new Error("В БД нет компании для привязки внешнего пользователя");
-  }
-  return fallback.id;
+const readDepartmentId = (external: ExternalSessionUser): number => {
+  const raw = Number(external.department_id);
+  return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : NO_DEPARTMENT;
 };
 
 /**
  * Находит или создаёт локального User по email из внешней сессии.
- * Обновляет ФИО / role / isBlocked с внешнего сервиса.
+ * Обновляет ФИО / role / isBlocked / отдел с внешнего сервиса.
+ * Локальная строка нужна только как FK-якорь для офферов.
  */
 export const upsertLocalUserFromExternal = async (
   external: ExternalSessionUser
@@ -97,30 +86,23 @@ export const upsertLocalUserFromExternal = async (
   const fullName = buildFullName(external);
   const role = mapRole(external.role_type);
   const isBlocked = external.is_active === false;
+  const departmentId = readDepartmentId(external);
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return prisma.user.update({
       where: { id: existing.id },
-      data: { fullName, role, isBlocked },
+      data: { fullName, role, isBlocked, departmentId },
     });
   }
 
-  const companyId = await resolveCompanyId();
-  const passwordHash = await bcrypt.hash(EXTERNAL_PASSWORD_PLACEHOLDER, SALT_ROUNDS);
-
-  return prisma.$transaction(async (tx) => {
-    const employeeNumber = await nextEmployeeNumberForCompany(tx, companyId);
-    return tx.user.create({
-      data: {
-        email,
-        fullName,
-        role,
-        isBlocked,
-        passwordHash,
-        companyId,
-        employeeNumber,
-      },
-    });
+  return prisma.user.create({
+    data: {
+      email,
+      fullName,
+      role,
+      isBlocked,
+      departmentId,
+    },
   });
 };

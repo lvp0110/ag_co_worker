@@ -31,10 +31,6 @@ export const env = {
     "http://localhost:5175",
     "http://localhost:5176",
   ]),
-  accessTokenSecret: process.env.JWT_ACCESS_SECRET ?? "dev_access_secret_change_me",
-  refreshTokenSecret: process.env.JWT_REFRESH_SECRET ?? "dev_refresh_secret_change_me",
-  accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN ?? "15m",
-  refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN ?? "30d",
   calcServiceUrl:
     process.env.CALC_SERVICE_URL ?? "https://dev3.constrtodo.ru:3005",
   // AllIsolationConstr на dev3 может отвечать 25–35s; 15s давало обрыв chunked-тела.
@@ -53,6 +49,30 @@ export const env = {
   // Ручка сама считает материалы по конструкциям, поэтому таймаут как у calc.
   onecTimeoutMs: toInt(process.env.ONEC_TIMEOUT_MS, 60000),
   onecExportEnabled: (process.env.ONEC_EXPORT_ENABLED ?? "true") !== "false",
+  /**
+   * Реквизиты организации для шапки и колонтитулов КП/PDF.
+   *
+   * Раньше лежали в таблице `companies` и правились в админке. Сотрудник теперь
+   * привязан к отделу внешнего auth-сервиса (`department_id`), а реквизитов тот
+   * не отдаёт вообще — только id и название отдела. Поэтому единственный
+   * источник правды здесь; пустое значение просто не выводится в PDF.
+   */
+  kpCompany: {
+    name: process.env.KP_COMPANY_NAME ?? "ООО «Шуманет Шоп»",
+    address:
+      process.env.KP_COMPANY_ADDRESS ??
+      "115054, Москва г, Новокузнецкая ул, дом 33, строение 2",
+    phone: process.env.KP_COMPANY_PHONE ?? "",
+    ogrn: process.env.KP_COMPANY_OGRN ?? "1177746342157",
+    ogrnip: process.env.KP_COMPANY_OGRNIP ?? "",
+    kpp: process.env.KP_COMPANY_KPP ?? "770501001",
+    inn: process.env.KP_COMPANY_INN ?? "9705093593",
+    /**
+     * Путь к файлу логотипа для шапки PDF (PNG/JPEG/WebP), абсолютный или
+     * относительно cwd backend'а. Пусто → шапка без картинки.
+     */
+    logoFile: process.env.KP_COMPANY_LOGO_FILE ?? "",
+  },
 };
 
 if (env.nodeEnv === "production" && !process.env.DATABASE_URL) {

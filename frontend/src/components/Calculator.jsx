@@ -69,7 +69,6 @@ const Calculator = () => {
     startDraft,
     markNewDraftOffer,
     stashKpSnapshot,
-    clearKpSnapshot,
   } = useOfferEditSession();
 
   const hydratedOfferIdRef = useRef(null);

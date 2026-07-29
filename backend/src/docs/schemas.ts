@@ -9,41 +9,6 @@ export const ErrorResponseSchema = z
   })
   .openapi("ErrorResponse");
 
-export const UserSchema = z
-  .object({
-    id: z.string().uuid(),
-    full_name: z.string(),
-    phone: z.string().nullable(),
-    email: z.string().email(),
-    office_address: z.string().nullable(),
-    employee_number: z.number().int().optional(),
-    created_at: z.string().datetime(),
-    updated_at: z.string().datetime(),
-  })
-  .openapi("User");
-
-export const AuthSuccessSchema = z
-  .object({
-    user: UserSchema,
-  })
-  .openapi("AuthSuccess");
-
-export const LoginRequestSchema = z
-  .object({
-    email: z.string().email(),
-    password: z.string().min(1),
-  })
-  .openapi("LoginRequest");
-
-export const UpdateMeRequestSchema = z
-  .object({
-    full_name: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().email().optional(),
-    office_address: z.string().optional(),
-  })
-  .openapi("UpdateMeRequest");
-
 export const HealthResponseSchema = z
   .object({
     ok: z.boolean(),
@@ -234,35 +199,11 @@ export const OfferSummarySchema = z
     object_name: z.string().nullable(),
     region: z.string().nullable(),
     kp_date: z.string().nullable(),
-    kp_number: z.number().int(),
     kp_code: z.string(),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
   })
   .openapi("OfferSummary");
-
-export const CompanySchema = z
-  .object({
-    id: z.string().uuid(),
-    name: z.string(),
-    address: z.string().nullable(),
-    phone: z.string().nullable(),
-    country_code: z.string(),
-    country: z.string().nullable(),
-    ogrn: z.string().nullable(),
-    ogrnip: z.string().nullable(),
-    kpp: z.string().nullable(),
-    inn: z.string().nullable(),
-    logo_url: z.string().nullable(),
-  })
-  .openapi("Company");
-
-export const CountrySchema = z
-  .object({
-    code: z.string(),
-    name: z.string(),
-  })
-  .openapi("Country");
 
 /**
  * Ответ выгрузки в 1С (`POST/PUT /integration/onec/isolation/document`),
@@ -292,13 +233,11 @@ export const OfferSchema = z
     email: z.string().nullable(),
     office_address: z.string().nullable(),
     kp_date: z.string().nullable(),
-    kp_number: z.number().int(),
     kp_code: z.string(),
     object_name: z.string().nullable(),
     region: z.string().nullable(),
     markup_percent: z.number().nullable(),
     discount_percent: z.number().nullable(),
-    company: CompanySchema.nullable(),
     services: z.array(ServiceSchema).nullable(),
     additional_materials: z.array(AdditionalMaterialSchema).nullable(),
     kp_settings: KpSettingsSchema.nullable(),
@@ -313,5 +252,6 @@ export const OfferSchema = z
 export const CloneOfferResponseSchema = z
   .object({
     id: z.string().uuid(),
+    onec: OnecExportResponseSchema.nullable().optional(),
   })
   .openapi("CloneOfferResponse");

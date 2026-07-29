@@ -56,14 +56,6 @@ function IconLogout() {
   );
 }
 
-function IconAdmin() {
-  return (
-    <svg {...iconProps}>
-      <path d="M12 3l7 4v5c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V7l7-4z" />
-    </svg>
-  );
-}
-
 export default function AppHeader() {
   const innerRef = useRef(null);
   const logoSrc = `${import.meta.env.BASE_URL}logo1.png`;
@@ -191,26 +183,6 @@ export default function AppHeader() {
             </HeaderIcon>
             <span className="app-header__label">Прайс</span>
           </NavLink>
-          {user?.role === "ADMIN" && (
-            <NavLink
-              to="/admin/users"
-              className={({ isActive }) =>
-                `app-header__link${
-                  isActive || location.pathname.startsWith("/admin")
-                    ? " app-header__link--active"
-                    : ""
-                }`
-              }
-              title="Админка"
-              aria-label="Админка"
-              onClick={(e) => guardDraftNav(e, "/admin/users")}
-            >
-              <HeaderIcon>
-                <IconAdmin />
-              </HeaderIcon>
-              <span className="app-header__label">Админка</span>
-            </NavLink>
-          )}
         </nav>
         <div className="app-header__auth">
           {status === "loading" ? null : user ? (

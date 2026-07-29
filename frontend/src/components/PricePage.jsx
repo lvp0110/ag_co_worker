@@ -118,7 +118,6 @@ const PricePage = () => {
     selectedPriceArticles,
     togglePriceArticle,
     kpSnapshot,
-    updateKpSnapshotMaterialRows,
     activeConstructionId,
     updateKpSnapshotMaterialRowsForConstruction,
   } = useOfferEditSession();

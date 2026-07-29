@@ -2,7 +2,7 @@ import { env } from "../config/env.js";
 import { fetchUpstreamCached } from "./upstreamCache.js";
 
 /**
- * Серверный аналог frontend getAllIsolationConstr + buildTitleByCodeMap.
+ * Серверный аналог frontend getAllIsolationConstr: каталог конструкций как Map по Code.
  * Используется для рендера PDF КП: названия секций и блок Info (характеристики, картинки).
  */
 

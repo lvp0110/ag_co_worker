@@ -89,11 +89,7 @@ export function buildCreateOfferPayload({
 // ─── load ───────────────────────────────────────────────────────────────────
 
 /** Подставляет title/description из ItemsBase. */
-export function enrichConstructionsWithTitles(
-  constructions,
-  _titleByCode,
-  constrToCalcToSent = [],
-) {
+export function enrichConstructionsWithTitles(constructions, constrToCalcToSent = []) {
   return syncConstructionsTitlesFromItems(constructions, constrToCalcToSent);
 }
 
@@ -109,9 +105,9 @@ export function enrichConstructionsWithTitles(
  *   - materialRows  — дополнительные материалы (хранятся в offer.additional_materials,
  *                     независимо от расчётов — backend их не пересчитывает).
  *
- * `titleByCode` — устаревший параметр (шифр/названия берутся из ItemsBase).
+ * Шифры и названия берутся из ItemsBase, а не из каталога AllIsolationConstr.
  */
-export function mapOfferResponseToKpView(offer, { titleByCode: _titleByCode } = {}) {
+export function mapOfferResponseToKpView(offer) {
   const itemsKeyMap = getItemsAgIdKeyMap();
   const constructions = (offer.constructions || []).map((c) => {
     const cp = c.calc_params || {};
@@ -187,8 +183,8 @@ export function mapOfferResponseToKpView(offer, { titleByCode: _titleByCode } = 
 /**
  * Состояние калькулятора из GET /api/offers/:id (режим редактирования черновика КП).
  */
-export function mapOfferToCalculatorState(offer, options) {
-  const view = mapOfferResponseToKpView(offer, options);
+export function mapOfferToCalculatorState(offer) {
+  const view = mapOfferResponseToKpView(offer);
   const constrToCalcToSent = (offer.constructions || [])
     .map((c) => c.calc_params)
     .filter(Boolean);

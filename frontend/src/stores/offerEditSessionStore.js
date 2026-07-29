@@ -135,18 +135,6 @@ export const useOfferEditSessionStore = create(
         });
       },
 
-      /** Обратная совместимость: плоский список артикулов активной конструкции. */
-      setSelectedPriceArticles: (articles) => {
-        const keyId = get().activeConstructionId;
-        if (!keyId) return;
-        set((state) => ({
-          selectedPriceArticlesByKeyId: {
-            ...state.selectedPriceArticlesByKeyId,
-            [keyId]: Array.isArray(articles) ? articles : [],
-          },
-        }));
-      },
-
       /** Обратная совместимость: toggle для активной конструкции. */
       togglePriceArticle: (article) => {
         const key = String(article ?? "").trim();
@@ -178,25 +166,6 @@ export const useOfferEditSessionStore = create(
               [keyId]: rows,
             },
           };
-          const activeKey = state.activeOfferId != null ? String(state.activeOfferId) : null;
-          return {
-            kpSnapshot: nextSnapshot,
-            kpSnapshotsByOfferId:
-              activeKey != null
-                ? {
-                    ...state.kpSnapshotsByOfferId,
-                    [activeKey]: nextSnapshot,
-                  }
-                : state.kpSnapshotsByOfferId,
-          };
-        }),
-
-      /** Обратная совместимость — обновить materialRows как единый список (не используется в новом коде). */
-      updateKpSnapshotMaterialRows: (materialRows) =>
-        set((state) => {
-          const nextSnapshot = state.kpSnapshot
-            ? { ...state.kpSnapshot, materialRows }
-            : { materialRows };
           const activeKey = state.activeOfferId != null ? String(state.activeOfferId) : null;
           return {
             kpSnapshot: nextSnapshot,
@@ -284,7 +253,6 @@ export const useOfferEditSessionStore = create(
         if (base === "/price") return true;
         if (base === "/info" || base.startsWith("/info/")) return true;
         if (base === "/profile") return true;
-        if (base === "/admin" || base.startsWith("/admin/")) return true;
         if (base === `/kp/${activeOfferId}`) return true;
         return false;
       },
@@ -327,9 +295,6 @@ export function useOfferEditSession() {
   const requestExitToList = useOfferEditSessionStore((s) => s.requestExitToList);
   const consumeExitToList = useOfferEditSessionStore((s) => s.consumeExitToList);
   const togglePriceArticle = useOfferEditSessionStore((s) => s.togglePriceArticle);
-  const setSelectedPriceArticles = useOfferEditSessionStore(
-    (s) => s.setSelectedPriceArticles
-  );
   const setActiveConstructionId = useOfferEditSessionStore((s) => s.setActiveConstructionId);
   const setSelectedArticlesForConstruction = useOfferEditSessionStore(
     (s) => s.setSelectedArticlesForConstruction
@@ -339,9 +304,6 @@ export function useOfferEditSession() {
   );
   const togglePriceArticleForConstruction = useOfferEditSessionStore(
     (s) => s.togglePriceArticleForConstruction
-  );
-  const updateKpSnapshotMaterialRows = useOfferEditSessionStore(
-    (s) => s.updateKpSnapshotMaterialRows
   );
   const updateKpSnapshotMaterialRowsForConstruction = useOfferEditSessionStore(
     (s) => s.updateKpSnapshotMaterialRowsForConstruction
@@ -377,7 +339,6 @@ export function useOfferEditSession() {
     isEditingDraft,
     kpSnapshot,
     selectedPriceArticles,
-    selectedPriceArticlesByKeyId,
     activeConstructionId,
     startDraft,
     stashKpSnapshot,
@@ -388,12 +349,10 @@ export function useOfferEditSession() {
     requestExitToList,
     consumeExitToList,
     togglePriceArticle,
-    setSelectedPriceArticles,
     setActiveConstructionId,
     setSelectedArticlesForConstruction,
     clearSelectedArticlesForConstruction,
     togglePriceArticleForConstruction,
-    updateKpSnapshotMaterialRows,
     updateKpSnapshotMaterialRowsForConstruction,
     isPathAllowedDuringDraft,
     isOfferPdfExportBlocked,

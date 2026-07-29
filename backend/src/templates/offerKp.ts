@@ -11,7 +11,6 @@ import {
   kpPackDisplayUnits,
 } from "../utils/materialPackUnits.js";
 import { numberToWordsRu, pluralRu, rublesToWordsRu } from "../utils/numberToWordsRu.js";
-import { UPLOADS_DIR } from "../routes/uploads.js";
 
 /**
  * HTML-шаблон коммерческого предложения «Шуманет Шоп».
@@ -94,7 +93,8 @@ export type OfferForRender = {
   kp_code?: string | null;
   object_name: string | null;
   region: string | null;
-  logo_url: string | null;
+  /** Путь к файлу логотипа на диске (`KP_COMPANY_LOGO_FILE`). */
+  logo_file: string | null;
   company_name: string | null;
   company_address: string | null;
   company_phone: string | null;
@@ -425,20 +425,19 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 /**
- * Собирает HTML логотипа для шапки КП. Логотип берётся из компании (logo_url).
- * Если URL пуст, файл не читается или расширение не поддерживается — возвращаем
- * пустую строку (дефолтного логотипа нет). Картинка вставляется как data: URI —
- * puppeteer рендерит без сети.
+ * Собирает HTML логотипа для шапки КП. Путь к файлу приходит из конфига
+ * (`KP_COMPANY_LOGO_FILE`). Если путь пуст, файл не читается или расширение не
+ * поддерживается — возвращаем пустую строку (дефолтного логотипа нет). Картинка
+ * вставляется как data: URI — puppeteer рендерит без сети.
  */
-const buildLogoBlockHtml = (logoUrl: string | null | undefined): string => {
-  if (!logoUrl) return "";
-  // Защита от path traversal — берём только basename.
-  const filename = path.basename(logoUrl);
-  const ext = path.extname(filename).toLowerCase();
+const buildLogoBlockHtml = (logoFile: string | null | undefined): string => {
+  const configured = (logoFile ?? "").trim();
+  if (!configured) return "";
+  const ext = path.extname(configured).toLowerCase();
   const mime = MIME_BY_EXT[ext];
   if (!mime) return "";
   try {
-    const buf = readFileSync(path.join(UPLOADS_DIR, filename));
+    const buf = readFileSync(path.resolve(configured));
     const b64 = buf.toString("base64");
     return `<img class="logo-img" src="data:${mime};base64,${b64}" alt="">`;
   } catch {
@@ -736,7 +735,7 @@ export function renderOfferKpHtml({
     // Телефон менеджера из формы КП — выводится в теле рядом с почтой.
     MANAGER_PHONE: esc(offer.phone ?? ""),
     // HTML, не esc(): либо <img data: URI>, либо дефолтный брендовый блок.
-    LOGO_BLOCK: buildLogoBlockHtml(offer.logo_url),
+    LOGO_BLOCK: buildLogoBlockHtml(offer.logo_file),
     // Адресат во вступительной фразе «Компания ООО «...» предлагает Вам».
     // Это «кому адресовано» (offer.recipient) — транзитное поле из запроса
     // на /pdf, в БД не хранится. Обёртка «ООО «»» зафиксирована в шаблоне, в
@@ -766,7 +765,7 @@ const applyPlaceholders = (template: string, values: Record<string, string>): st
 
 /**
  * Дефолтные реквизиты для футера PDF. Используются по-полю, если
- * соответствующее поле в Offer не заполнено (см. buildFooterHtml).
+ * соответствующее поле не заполнено в конфиге (см. buildFooterHtml).
  */
 const DEFAULT_FOOTER = {
   companyName: "",
@@ -779,7 +778,7 @@ const DEFAULT_FOOTER = {
 } as const;
 
 /**
- * Футер PDF собирается на каждый рендер: значения из Offer
+ * Футер PDF собирается на каждый рендер: реквизиты из конфига
  * (company_name / company_address / company_phone / ogrn / ogrnip / inn / kpp) подставляются
  * по-полю; пустые поля и соответствующие строки не выводятся.
  */
