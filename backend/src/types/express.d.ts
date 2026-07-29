@@ -1,11 +1,11 @@
 import "express";
+import type { RequestAuth } from "../services/externalAuth.js";
 
 declare global {
   namespace Express {
     interface Request {
-      auth?: {
-        userId: string;
-      };
+      /** Сессия внешнего auth; владелец офферов = `auth.email`. */
+      auth?: RequestAuth;
     }
   }
 }

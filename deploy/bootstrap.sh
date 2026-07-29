@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Первый запуск на чистой машине.
-# Предварительные требования (делаются вручную оператором):
-#   1. Docker + docker compose plugin установлены.
-#   2. `apt install nginx` + certbot + сертификат получен в /etc/letsencrypt/live/<domain>/.
-#   3. Конфиг nginx положен и активирован (см. deploy/nginx/ag_co_worker.conf и deploy/README.md).
-#   4. На сервере существует пользователь из DEPLOY_HOST с правом на docker и $DEPLOY_DIR.
-#   5. Переменные DEPLOY_HOST / DEPLOY_DIR / DEPLOY_DOMAIN заданы в deploy/.env.deploy.
+# Первый запуск на чистой машине (без Docker).
+# Предварительные требования (вручную):
+#   1. Node.js ≥ 20 (node + npm в PATH для user deploy).
+#   2. nginx + certbot, сертификат в /etc/letsencrypt/live/<domain>/.
+#   3. Конфиг nginx активирован (deploy/nginx/ag_co_worker.conf).
+#   4. Пользователь DEPLOY_HOST с правом на DEPLOY_DIR и passwordless sudo
+#      для systemctl/journalctl по юнитам ag-co-worker-*.
+#   5. deploy/.env.deploy заполнен; на сервере .env.prod рядом с репо.
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
@@ -30,29 +31,44 @@ ok "репо на сервере"
 
 info "проверка предварительных условий на сервере"
 remote '
-  test -f .env.prod || { echo "✗ '"'"'.env.prod'"'"' нет рядом с docker-compose.prod.yml. Скопируйте deploy/.env.prod.example → .env.prod и заполните."; exit 1; }
+  test -f .env.prod || { echo "✗ '"'"'.env.prod'"'"' нет в корне checkout'"'"'а. Скопируйте deploy/.env.prod.example → .env.prod и заполните."; exit 1; }
+  command -v node >/dev/null 2>&1 || { echo "✗ node не установлен (нужен ≥20)"; exit 1; }
+  command -v npm >/dev/null 2>&1 || { echo "✗ npm не установлен"; exit 1; }
   command -v nginx >/dev/null 2>&1 || { echo "✗ nginx не установлен. sudo apt install nginx"; exit 1; }
   ls /etc/nginx/sites-enabled/ag_co_worker.conf >/dev/null 2>&1 || { echo "✗ /etc/nginx/sites-enabled/ag_co_worker.conf не активирован. См. deploy/README.md."; exit 1; }
   sudo nginx -t 2>&1
-  command -v docker >/dev/null 2>&1 || { echo "✗ docker не установлен"; exit 1; }
-  docker compose version >/dev/null 2>&1 || { echo "✗ docker compose plugin не установлен"; exit 1; }
+  node -v
 '
 ok "предусловия выполнены"
 
-info "поднимаем postgres + backend"
-compose "up -d postgres backend"
+info "ставим systemd unit-ы"
+# Подставляем реальный DEPLOY_DIR в unit-файлы (шаблоны содержат /srv/ag_co_worker).
+ssh_exec "
+  set -e
+  sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-backend.service' \
+    | sudo tee /etc/systemd/system/$BACKEND_UNIT.service >/dev/null
+  sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-frontend.service' \
+    | sudo tee /etc/systemd/system/$FRONTEND_UNIT.service >/dev/null
+  sudo systemctl daemon-reload
+"
 
-info "применяем первые миграции"
-compose "run --rm backend npx prisma migrate deploy"
+info "сборка backend"
+remote "cd backend && npm ci && npm run build"
 
-info "поднимаем frontend (для первого запуска ожидаем rsync dist/ уже на хосте — иначе статика пустая)"
-remote 'test -d frontend/dist || { echo "! frontend/dist нет. После bootstrap сделайте make deploy-frontend."; mkdir -p frontend/dist; }'
-compose "up -d frontend"
+info "prod-deps frontend (server.js)"
+remote "mkdir -p frontend/dist && cd frontend && npm ci --omit=dev"
+
+info "включаем и запускаем сервисы"
+svc "enable --now $BACKEND_UNIT"
+svc "enable --now $FRONTEND_UNIT"
+sleep 3
+svc "is-active $BACKEND_UNIT"
+svc "is-active $FRONTEND_UNIT"
 
 if [ -n "$DEPLOY_DOMAIN" ]; then
   info "smoke-check https://$DEPLOY_DOMAIN/health"
-  # --fail-with-body чтобы увидеть тело при 5xx, --retry на случай медленного старта.
-  curl -fs --retry 5 --retry-delay 2 "https://$DEPLOY_DOMAIN/health" || warn "health не отвечает — смотрите логи nginx и docker"
+  curl -fs --retry 5 --retry-delay 2 "https://$DEPLOY_DOMAIN/health" \
+    || warn "health не отвечает — смотрите nginx и journalctl -u $BACKEND_UNIT / $FRONTEND_UNIT"
 fi
 
 ok "bootstrap завершён. Дальше: make deploy-frontend (вылить статику)."

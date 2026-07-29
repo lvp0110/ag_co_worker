@@ -3,7 +3,7 @@
  *
  * В dev и prod ходим относительными URL'ами (BASE_URL = ""):
  *   /login, /auth/*  → auth-сервис (Vite/nginx proxy)
- *   /api/*, /uploads → наш backend
+ *   /api/*           → наш backend (в dev /api/v1|/api/v2 → calc :3005)
  *
  * Авторизация — httpOnly cookie `access_token` (+ `csrf_token` для мутаций auth).
  * На 401 эмитим DOM event `auth:unauthorized` (AuthContext открывает LoginModal).
@@ -118,12 +118,5 @@ export const request = async (path, init = {}, options = {}) => {
 
   return parseResponse(response);
 };
-
-/**
- * Возвращает сырой Response с той же обработкой 401.
- * Полезно для бинарных ответов (PDF/файлы).
- */
-export const requestRawResponse = (path, init = {}, options = {}) =>
-  fetchWithAuth(path, init, options);
 
 export { ApiError };

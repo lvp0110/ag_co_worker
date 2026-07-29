@@ -43,63 +43,6 @@
   background: #5897b7;
 }
 
-.kp-list__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-  margin-bottom: 16px;
-}
-
-.kp-list__filter {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.kp-list__filter--search {
-  flex: 1 1 280px;
-  max-width: 420px;
-}
-
-.kp-list__filter--date {
-  flex: 0 0 auto;
-}
-
-.kp-list__search-label {
-  display: block;
-  justify-content: flex-start;
-  color: #1a1d21;
-  font-weight: 700;
-  font-style: italic;
-  font-size: 13px;
-  pointer-events: auto;
-  margin: 0 0 6px;
-}
-
-.kp-list__search {
-  width: 100%;
-  margin: 0;
-  padding: 10px 12px;
-  box-sizing: border-box;
-  font-family: inherit;
-  font-size: 14px;
-  border: 1px solid #c9d0d6;
-  border-radius: 6px;
-  background: #fff;
-  color: #2c2f33;
-}
-
-.kp-list__date {
-  width: auto;
-  min-width: 160px;
-}
-
-.kp-list__search:focus {
-  outline: 2px solid #6cabc8;
-  outline-offset: 1px;
-}
-
 .kp-list__results--refreshing {
   opacity: 0.65;
   pointer-events: none;
@@ -144,16 +87,18 @@
 }
 
 .kp-list__num-col {
-  width: 88px;
-  text-align: center;
+  width: 280px;
+  text-align: left;
 }
 
 .kp-list__num-cell {
-  text-align: center;
+  text-align: left;
   color: #64748b;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   font-weight: 600;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .kp-list__actions-col {
@@ -250,16 +195,21 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  padding: 4px 8px;
   border-radius: 6px;
   background: #f1f5f9;
   color: #64748b;
   white-space: nowrap;
-  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .kp-list__card-title {
@@ -328,20 +278,6 @@
 
   .kp-list__new-btn {
     width: 100%;
-  }
-
-  .kp-list__filters {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .kp-list__filter--search {
-    max-width: none;
-  }
-
-  .kp-list__date {
-    width: 100%;
-    min-width: 0;
   }
 
   .kp-list__table {

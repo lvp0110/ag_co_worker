@@ -172,6 +172,11 @@ router.post("/api/v1/calcIsolation/byProduct", async (req, res) => {
     return;
   }
 
+  console.log(
+    `[calc] POST /api/v1/calcIsolation/byProduct ← ${body.length} constr:\n` +
+      JSON.stringify(body, null, 2)
+  );
+
   try {
     const batches = await calculateByProduct(body as CalcParams[]);
     if (body.length === 1) {

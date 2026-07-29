@@ -1,16 +1,10 @@
-import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
 import { openApiSpec } from "./docs/swagger.js";
-import { prisma } from "./lib/prisma.js";
-import adminRouter from "./routes/admin.js";
-import authRouter from "./routes/auth.js";
 import calcRouter from "./routes/calc.js";
 import offersRouter from "./routes/offers.js";
-import uploadsRouter, { UPLOADS_DIR } from "./routes/uploads.js";
-import usersRouter from "./routes/users.js";
 
 const app = express();
 
@@ -29,7 +23,6 @@ app.use(
   })
 );
 app.use(express.json({ limit: "2mb" }));
-app.use(cookieParser());
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
@@ -40,21 +33,7 @@ app.get("/api/openapi.json", (_req: Request, res: Response) => {
   res.json(openApiSpec);
 });
 
-app.use("/api/auth", authRouter);
-app.use("/api/users", usersRouter);
-app.use("/api/admin", adminRouter);
 app.use("/api/offers", offersRouter);
-app.use("/api/uploads", uploadsRouter);
-// Статическая отдача загруженных файлов (логотипы и т.п.). Содержимое
-// content-addressed (имя = sha256), поэтому кешируем агрессивно.
-app.use(
-  "/uploads",
-  express.static(UPLOADS_DIR, {
-    maxAge: "7d",
-    index: false,
-    fallthrough: false,
-  })
-);
 app.use(calcRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -62,13 +41,17 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   return res.status(500).json({ error: "Internal server error" });
 });
 
-const server = app.listen(env.port, () => {
-  console.log(`Backend API listening on port ${env.port}`);
-});
+const listenHost = process.env.HOST?.trim() || "";
+const server = listenHost
+  ? app.listen(env.port, listenHost, () => {
+      console.log(`Backend API listening on ${listenHost}:${env.port}`);
+    })
+  : app.listen(env.port, () => {
+      console.log(`Backend API listening on port ${env.port}`);
+    });
 
-const shutdown = async (): Promise<void> => {
-  server.close(async () => {
-    await prisma.$disconnect();
+const shutdown = (): void => {
+  server.close(() => {
     process.exit(0);
   });
 };

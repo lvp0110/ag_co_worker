@@ -24,25 +24,26 @@ const parseOrigins = (value: string | undefined, fallback: string[]): string[] =
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: toInt(process.env.PORT, 3007),
-  databaseUrl:
-    process.env.DATABASE_URL ??
-    "postgresql://postgres:postgres@localhost:5435/ag_co_worker?schema=public",
   corsOrigin: parseOrigins(process.env.CORS_ORIGIN, [
     "http://localhost:5175",
     "http://localhost:5176",
   ]),
-  accessTokenSecret: process.env.JWT_ACCESS_SECRET ?? "dev_access_secret_change_me",
-  refreshTokenSecret: process.env.JWT_REFRESH_SECRET ?? "dev_refresh_secret_change_me",
-  accessTokenExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN ?? "15m",
-  refreshTokenExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN ?? "30d",
   calcServiceUrl:
-    process.env.CALC_SERVICE_URL ?? "https://dev3.constrtodo.ru:3005",
-  // AllIsolationConstr на dev3 может отвечать 25–35s; 15s давало обрыв chunked-тела.
+    process.env.CALC_SERVICE_URL ?? "http://localhost:3005",
+  // AllIsolationConstr может отвечать 25–35s; 15s давало обрыв chunked-тела.
   calcServiceTimeoutMs: toInt(process.env.CALC_SERVICE_TIMEOUT_MS, 60000),
   /** Внешний auth (POST /login, GET /auth/session, POST /auth/logout). */
   authServiceUrl: process.env.AUTH_SERVICE_URL ?? "http://localhost:3005",
+  /**
+   * Выгрузка документов в 1С (POST/PUT /integration/onec/isolation/document).
+   * Тот же сервис, что и auth: ручка авторизует по той же session-cookie,
+   * поэтому по умолчанию наследуем AUTH_SERVICE_URL.
+   */
+  onecServiceUrl:
+    process.env.ONEC_SERVICE_URL ??
+    process.env.AUTH_SERVICE_URL ??
+    "http://localhost:3005",
+  // Ручка сама считает материалы по конструкциям, поэтому таймаут как у calc.
+  onecTimeoutMs: toInt(process.env.ONEC_TIMEOUT_MS, 60000),
+  onecExportEnabled: (process.env.ONEC_EXPORT_ENABLED ?? "true") !== "false",
 };
-
-if (env.nodeEnv === "production" && !process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is required");
-}

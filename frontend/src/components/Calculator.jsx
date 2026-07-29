@@ -43,17 +43,10 @@ import {
   sectionIdFromSubCategory,
 } from "../utils/constructionSection";
 import { calculateConstruction } from "../services/constructionApi";
-import { createOffer, getOffer } from "../services/offersApi";
-import {
-  buildCreateOfferPayload,
-  mapOfferToCalculatorState,
-} from "../utils/offerMapper";
+import { createKpFromCalc } from "../services/offersApi";
+import { buildCreateOfferPayload } from "../utils/offerMapper";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useCalcField, useCalculatorStore } from "../stores/calculatorStore.js";
-import {
-  useOfferEditSession,
-  useOfferEditSessionStore,
-} from "../stores/offerEditSessionStore.js";
+import { useCalcField } from "../stores/calculatorStore.js";
 import ItemsList from "./ItemsList";
 import SelectedItemForms from "./SelectedItemForms";
 import ConstructionList from "./tables/ConstructionList";
@@ -62,17 +55,7 @@ const Calculator = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { isAuthed, openLoginModal } = useAuth();
-  const {
-    activeOfferId,
-    isEditingDraft,
-    kpSnapshot,
-    startDraft,
-    markNewDraftOffer,
-    stashKpSnapshot,
-    clearKpSnapshot,
-  } = useOfferEditSession();
 
-  const hydratedOfferIdRef = useRef(null);
   const initializedItemIdRef = useRef(null);
 
   // Persistent-поля: живут в zustand-сторе (sessionStorage), переживают
@@ -198,94 +181,6 @@ const Calculator = () => {
       }
     }
   }, [openedSubCategories, itemsWithImages, getItemsForSection]);
-
-  // После «В калькулятор» снимок КП обновляется — перегидратируем калькулятор.
-  useEffect(() => {
-    if (!isEditingDraft) return;
-    hydratedOfferIdRef.current = null;
-  }, [kpSnapshot, activeOfferId, isEditingDraft]);
-
-  // При редактировании КП подтягиваем конструкции из снимка КП или с сервера.
-  useEffect(() => {
-    if (!isEditingDraft || !activeOfferId) {
-      hydratedOfferIdRef.current = null;
-      return undefined;
-    }
-    if (hydratedOfferIdRef.current === activeOfferId) return undefined;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const snap = kpSnapshot;
-        if (
-          snap?.calcTables?.ConstrToCalc?.length > 0 &&
-          snap?.constrToCalcToSent?.length > 0
-        ) {
-          if (cancelled) return;
-          const { ConstrToCalc, materialsByConstruction } = snap.calcTables;
-          setConstrToCalc(ConstrToCalc);
-          setConstrToCalcToSent(snap.constrToCalcToSent);
-          setMaterialsByConstruction(materialsByConstruction ?? []);
-          setTableConstrToCalc(ConstrToCalc.length > 0 ? {} : null);
-          hydratedOfferIdRef.current = activeOfferId;
-          return;
-        }
-
-        // Пустой состав из снимка КП («В калькулятор») — без ожидания GET.
-        // Иначе поздний пустой ответ getOffer затирает результат расчёта.
-        if (snap?.calcTables) {
-          const cc = snap.calcTables.ConstrToCalc ?? [];
-          const sent = snap.constrToCalcToSent;
-          const sentLen = Array.isArray(sent) ? sent.length : 0;
-          if (cc.length === 0 && sentLen === 0) {
-            if (cancelled) return;
-            setConstrToCalc([]);
-            setConstrToCalcToSent([]);
-            setMaterialsByConstruction([]);
-            setTableConstrToCalc(null);
-            hydratedOfferIdRef.current = activeOfferId;
-            return;
-          }
-        }
-
-        const offer = await getOffer(activeOfferId);
-        if (cancelled) return;
-
-        const state = mapOfferToCalculatorState(offer);
-        const storeNow = useCalculatorStore.getState();
-        const incomingEmpty = !state.constrToCalcToSent?.length;
-        if (incomingEmpty && storeNow.ConstrToCalcToSent.length > 0) {
-          hydratedOfferIdRef.current = activeOfferId;
-          return;
-        }
-
-        setConstrToCalc(state.constrToCalc);
-        setConstrToCalcToSent(state.constrToCalcToSent);
-        setMaterialsByConstruction(state.materialsByConstruction);
-        setTableConstrToCalc(
-          state.constrToCalc?.length > 0
-            ? (state.tableConstrToCalc ?? {})
-            : null,
-        );
-        hydratedOfferIdRef.current = activeOfferId;
-      } catch {
-        // пустой калькулятор — пользователь может добавить конструкции вручную
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    isEditingDraft,
-    activeOfferId,
-    kpSnapshot,
-    setConstrToCalc,
-    setConstrToCalcToSent,
-    setMaterialsByConstruction,
-    setTableConstrToCalc,
-  ]);
 
   const [constR, setConstR] = useState({
     title: "",
@@ -472,53 +367,20 @@ const Calculator = () => {
       if (newConstrToCalc.length === 0) {
         setTableConstrToCalc(null);
       }
-
-      if (isEditingDraft && activeOfferId) {
-        const sess = useOfferEditSessionStore.getState();
-        if (sess.activeOfferId !== activeOfferId) return;
-        const prevSnap = sess.kpSnapshot || {};
-        const nextCalcTables = {
-          tableConstrToCalc:
-            newConstrToCalc.length > 0 ? (tableConstrToCalc ?? {}) : null,
-          ConstrToCalc: newConstrToCalc,
-          materialsByConstruction: newMaterials,
-        };
-        const patch = {
-          ...prevSnap,
-          calcTables: nextCalcTables,
-          constrToCalcToSent: newConstrToCalcToSent,
-        };
-        if (prevSnap.montageByKeyId) {
-          const m = { ...prevSnap.montageByKeyId };
-          delete m[idConstr];
-          patch.montageByKeyId = m;
-        }
-        if (prevSnap.manualMontagePriceByKeyId) {
-          const m = { ...prevSnap.manualMontagePriceByKeyId };
-          delete m[idConstr];
-          patch.manualMontagePriceByKeyId = m;
-        }
-        sess.stashKpSnapshot(patch);
-      }
     },
     [
-      activeOfferId,
       ConstrToCalc,
       ConstrToCalcToSent,
-      isEditingDraft,
       materialsByConstruction,
       setConstrToCalc,
       setConstrToCalcToSent,
       setMaterialsByConstruction,
       setTableConstrToCalc,
-      tableConstrToCalc,
     ],
   );
 
   /**
-   * Сам запрос POST /api/offers и редирект на /kp/:id.
-   * Вынесен отдельно, чтобы одинаково вызываться и из handleMakeKP, и из
-   * useEffect'а «продолжение после логина».
+   * Сам запрос в 1С и переход на /kp/:document_id.
    */
   const submitKp = useCallback(async () => {
     if (ConstrToCalcToSent.length === 0) return;
@@ -528,10 +390,20 @@ const Calculator = () => {
         constrToCalcToSent: ConstrToCalcToSent,
         constrToCalc: ConstrToCalc,
       });
-      const offer = await createOffer(payload);
-      startDraft(offer.id);
-      markNewDraftOffer(offer.id);
-      navigate("/kp/list", { state: { autoOpenOfferId: offer.id } });
+      const constructions = payload.offerDraft.constructions.map((c) => ({
+        calc_params: c.calc_params,
+      }));
+      const created = await createKpFromCalc({ constructions });
+      const id = created.id;
+      navigate(`/kp/${id}`, {
+        state: {
+          onec: {
+            code: created.code,
+            data: created.data,
+            error: created.error,
+          },
+        },
+      });
     } catch (err) {
       setModal({
         isOpen: true,
@@ -545,7 +417,7 @@ const Calculator = () => {
     } finally {
       setIsSubmittingKp(false);
     }
-  }, [ConstrToCalcToSent, ConstrToCalc, navigate, startDraft, markNewDraftOffer]);
+  }, [ConstrToCalcToSent, ConstrToCalc, navigate]);
 
   /**
    * «Сделать КП»: либо сразу создаёт оффер (если авторизован), либо открывает
@@ -582,59 +454,7 @@ const Calculator = () => {
     submitKp();
   }, [pendingCreateKp, isAuthed, submitKp]);
 
-  const handleReturnToKp = useCallback(async () => {
-    if (!activeOfferId || ConstrToCalcToSent.length === 0) {
-      navigate(`/kp/${activeOfferId}`);
-      return;
-    }
-    setIsSubmittingKp(true);
-    try {
-      const tablesForSnapshot =
-        ConstrToCalc.length > 0
-          ? {
-              tableConstrToCalc: tableConstrToCalc ?? {},
-              ConstrToCalc,
-              materialsByConstruction,
-            }
-          : {
-              tableConstrToCalc: null,
-              ConstrToCalc,
-              materialsByConstruction,
-            };
-      stashKpSnapshot({
-        ...(kpSnapshot ?? {}),
-        calcTables: tablesForSnapshot,
-        constrToCalcToSent: ConstrToCalcToSent,
-      });
-      hydratedOfferIdRef.current = null;
-      navigate(`/kp/${activeOfferId}`);
-    } catch (err) {
-      setModal({
-        isOpen: true,
-        title: "Ошибка",
-        html: `Не удалось вернуть изменения в черновик КП.<br><br>${err?.message || ""}`,
-        icon: "error",
-        imageUrl: null,
-        confirmButtonText: "OK",
-        confirmButtonColor: "#6cabc8",
-      });
-    } finally {
-      setIsSubmittingKp(false);
-    }
-  }, [
-    activeOfferId,
-    ConstrToCalc,
-    ConstrToCalcToSent,
-    materialsByConstruction,
-    tableConstrToCalc,
-    kpSnapshot,
-    navigate,
-    stashKpSnapshot,
-  ]);
-
-  const showMakeKpButton =
-    !isEditingDraft && ConstrToCalcToSent.length > 0;
-  const showReturnToKpButton = isAuthed && isEditingDraft;
+  const showMakeKpButton = ConstrToCalcToSent.length > 0;
 
   const addConstrToCalc = useCallback(async () => {
     let calcProfileStep = Number(profileStep) || 600;
@@ -1157,34 +977,19 @@ const Calculator = () => {
                                   legacyTableWithMaterials
                                 />
                               )}
-                            {(showReturnToKpButton ||
-                              (template != null && showMakeKpButton)) && (
+                            {template != null && showMakeKpButton && (
                               <div className="tables-and-buttons-footer">
-                                {showReturnToKpButton ? (
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={handleReturnToKp}
-                                    className="counter__button_plus counter__button_plus--shadow"
-                                    disabled={isSubmittingKp}
-                                  >
-                                    {isSubmittingKp
-                                      ? "Обновление КП..."
-                                      : "Вернуться в КП"}
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={handleMakeKP}
-                                    className="counter__button_plus"
-                                    disabled={isSubmittingKp}
-                                  >
-                                    {isSubmittingKp
-                                      ? "Создание КП..."
-                                      : "Сделать КП"}
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={handleMakeKP}
+                                  className="counter__button_plus"
+                                  disabled={isSubmittingKp}
+                                >
+                                  {isSubmittingKp
+                                    ? "Создание КП..."
+                                    : "Сделать КП"}
+                                </button>
                               </div>
                             )}
                           </div>

@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getImageUrl } from "../services/api.js";
-import { useOfferEditSession } from "../stores/offerEditSessionStore.js";
 import "./AppHeader.css";
 
 const navLinkClass = ({ isActive }) =>
@@ -56,14 +55,6 @@ function IconLogout() {
   );
 }
 
-function IconAdmin() {
-  return (
-    <svg {...iconProps}>
-      <path d="M12 3l7 4v5c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V7l7-4z" />
-    </svg>
-  );
-}
-
 export default function AppHeader() {
   const innerRef = useRef(null);
   const logoSrc = `${import.meta.env.BASE_URL}logo1.png`;
@@ -71,21 +62,7 @@ export default function AppHeader() {
   const kpIconSrc = getImageUrl("kp.svg");
   const priceIconSrc = getImageUrl("price.svg");
   const location = useLocation();
-  const navigate = useNavigate();
   const { user, status, openLoginModal, logout } = useAuth();
-  const {
-    isEditingDraft,
-    hasUnsavedKpEdits,
-    activeOfferId,
-    isPathAllowedDuringDraft,
-  } = useOfferEditSession();
-
-  const guardDraftNav = (event, targetPath) => {
-    if (!isEditingDraft || !activeOfferId) return;
-    if (isPathAllowedDuringDraft(targetPath)) return;
-    event.preventDefault();
-    navigate(`/kp/${activeOfferId}`, { replace: true });
-  };
   const kpNavActive =
     location.pathname === "/kp/list" ||
     (location.pathname.startsWith("/kp/") && location.pathname !== "/kp/list");
@@ -116,7 +93,6 @@ export default function AppHeader() {
           end={false}
           title="Калькулятор конструкций"
           aria-label="Калькулятор конструкций"
-          onClick={(e) => guardDraftNav(e, "/calc")}
         >
           <img
             src={logoSrc}
@@ -133,7 +109,6 @@ export default function AppHeader() {
             end={false}
             title="Калькулятор"
             aria-label="Калькулятор"
-            onClick={(e) => guardDraftNav(e, "/calc")}
           >
             <HeaderIcon>
               <MaskedNavIcon src={calcIconSrc} />
@@ -142,41 +117,15 @@ export default function AppHeader() {
           </NavLink>
           {user && (
             <NavLink
-              to={
-                isEditingDraft && activeOfferId
-                  ? `/kp/${activeOfferId}`
-                  : "/kp/list"
-              }
-              className={`app-header__link${kpNavActive ? " app-header__link--active" : ""}${
-                hasUnsavedKpEdits ? " app-header__link--unsaved" : ""
-              }`}
-              end={isEditingDraft}
-              title={
-                hasUnsavedKpEdits
-                  ? "Мои КП — есть несохранённые изменения"
-                  : "Мои КП"
-              }
-              aria-label={
-                hasUnsavedKpEdits ? "Мои КП, несохранённые изменения" : "Мои КП"
-              }
-              onClick={(e) =>
-                guardDraftNav(
-                  e,
-                  isEditingDraft && activeOfferId
-                    ? `/kp/${activeOfferId}`
-                    : "/kp/list",
-                )
-              }
+              to="/kp/list"
+              className={`app-header__link${kpNavActive ? " app-header__link--active" : ""}`}
+              title="Мои КП"
+              aria-label="Мои КП"
             >
               <HeaderIcon>
                 <MaskedNavIcon src={kpIconSrc} />
               </HeaderIcon>
               <span className="app-header__label">Мои КП</span>
-              {hasUnsavedKpEdits ? (
-                <span className="app-header__unsaved-badge" aria-hidden="true">
-                  !
-                </span>
-              ) : null}
             </NavLink>
           )}
           <NavLink
@@ -184,33 +133,12 @@ export default function AppHeader() {
             className={navLinkClass}
             title="Прайс"
             aria-label="Прайс"
-            onClick={(e) => guardDraftNav(e, "/price")}
           >
             <HeaderIcon>
               <MaskedNavIcon src={priceIconSrc} />
             </HeaderIcon>
             <span className="app-header__label">Прайс</span>
           </NavLink>
-          {user?.role === "ADMIN" && (
-            <NavLink
-              to="/admin/users"
-              className={({ isActive }) =>
-                `app-header__link${
-                  isActive || location.pathname.startsWith("/admin")
-                    ? " app-header__link--active"
-                    : ""
-                }`
-              }
-              title="Админка"
-              aria-label="Админка"
-              onClick={(e) => guardDraftNav(e, "/admin/users")}
-            >
-              <HeaderIcon>
-                <IconAdmin />
-              </HeaderIcon>
-              <span className="app-header__label">Админка</span>
-            </NavLink>
-          )}
         </nav>
         <div className="app-header__auth">
           {status === "loading" ? null : user ? (
@@ -222,7 +150,6 @@ export default function AppHeader() {
                 }
                 title={user.full_name || user.email}
                 aria-label="Профиль"
-                onClick={(e) => guardDraftNav(e, "/profile")}
               >
                 <HeaderIcon>
                   <IconUser />

@@ -23,12 +23,10 @@ export default defineConfig({
     },
   ],
   server: {
-    // host: true → vite слушает 0.0.0.0 (нужно при запуске в docker-контейнере,
-    // чтобы порт был доступен с хоста; локально на работу не влияет).
+    // host: true → vite слушает 0.0.0.0 (доступ с LAN при необходимости).
     host: true,
     port: 5175,
-    // В docker bind-mount на macOS file-watching не ловит изменения без polling.
-    // Включается через CHOKIDAR_USEPOLLING=true (см. docker-compose.yml).
+    // Polling: CHOKIDAR_USEPOLLING=true при проблемном file-watching.
     watch: {
       usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
     },
@@ -42,13 +40,18 @@ export default defineConfig({
         target: process.env.AUTH_PROXY_TARGET || 'http://localhost:3005',
         changeOrigin: true,
       },
-      // Наш backend: offers, users, calc-proxy, health.
-      '/api': {
-        target: process.env.BACKEND_PROXY_TARGET || 'http://localhost:3007',
+      // Calc/images/price — напрямую на внешний сервис (не через backend).
+      // Иначе при падении :3007 иконки и /api/v2/data дают 500 в Vite.
+      '/api/v1': {
+        target: process.env.CALC_PROXY_TARGET || 'http://localhost:3005',
         changeOrigin: true,
       },
-      // Логотипы и прочие пользовательские загрузки лежат на backend (Express.static).
-      '/uploads': {
+      '/api/v2': {
+        target: process.env.CALC_PROXY_TARGET || 'http://localhost:3005',
+        changeOrigin: true,
+      },
+      // Наш backend: offers, health (и calc-proxy в prod через этот же путь).
+      '/api': {
         target: process.env.BACKEND_PROXY_TARGET || 'http://localhost:3007',
         changeOrigin: true,
       },

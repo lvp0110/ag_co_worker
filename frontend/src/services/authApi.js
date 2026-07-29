@@ -28,17 +28,26 @@ export const mapExternalUser = (u) => {
   if (!u) return null;
   const fullName = [u.last_name, u.first_name, u.middle_name].filter(Boolean).join(" ").trim();
   const roleType = String(u.role_type || "").toLowerCase();
+  const phone =
+    u.phone ??
+    u.cellphone ??
+    u.phone_number ??
+    null;
+  const office =
+    u.office_address ??
+    u.officeAddress ??
+    u.address ??
+    null;
   return {
     id: u.user_id,
     full_name: fullName || u.email || "",
     email: u.email ?? "",
-    phone: null,
-    office_address: null,
+    phone: phone != null && String(phone).trim() !== "" ? String(phone).trim() : null,
+    office_address:
+      office != null && String(office).trim() !== "" ? String(office).trim() : null,
     role: roleType === "admin" ? "ADMIN" : "USER",
     is_blocked: u.is_active === false,
-    employee_number: null,
-    company_id: null,
-    company: null,
+    department_id: u.department_id ?? null,
   };
 };
 
@@ -97,9 +106,3 @@ export const logout = async () => {
     // ignore
   }
 };
-
-/** GET /api/users/me — локальный профиль (после маппинга сессии на backend). */
-export const me = () => request("/api/users/me", { method: "GET" }, { silent401: true });
-
-/** PUT /api/users/me — обновить локальный профиль. */
-export const updateMe = (patch) => request("/api/users/me", { method: "PUT", body: patch });

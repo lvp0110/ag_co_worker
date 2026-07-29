@@ -1,13 +1,10 @@
 import { type NextFunction, type Request, type Response } from "express";
-import {
-  fetchExternalSession,
-  upsertLocalUserFromExternal,
-} from "../services/externalAuth.js";
+import { fetchExternalSession, toRequestAuth } from "../services/externalAuth.js";
 
 /**
- * Auth через внешний сервис (:3005 / AUTH_SERVICE_URL).
- * Браузер шлёт cookie `access_token` (same-origin через Vite/nginx proxy),
- * мы пробрасываем Cookie в GET /auth/session и маппим пользователя в локальную БД.
+ * Auth через внешний сервис (`AUTH_SERVICE_URL`).
+ * Браузер шлёт cookie `access_token`; мы пробрасываем Cookie в GET /auth/session.
+ * Локального User больше нет — `req.auth.email` = ключ владельца офферов.
  */
 export const requireAuth = async (
   req: Request,
@@ -20,18 +17,15 @@ export const requireAuth = async (
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  let user;
-  try {
-    user = await upsertLocalUserFromExternal(external);
-  } catch (err) {
-    console.error("[requireAuth] upsert local user failed:", err);
-    return res.status(503).json({ error: "Auth mapping unavailable" });
-  }
-
-  if (user.isBlocked) {
+  if (external.is_active === false) {
     return res.status(403).json({ error: "Account is blocked" });
   }
 
-  req.auth = { userId: user.id };
+  const auth = toRequestAuth(external);
+  if (!auth.email) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  req.auth = auth;
   return next();
 };

@@ -1,13 +1,6 @@
-import bcrypt from "bcrypt";
-import { type Role, type User } from "@prisma/client";
 import { env } from "../config/env.js";
-import { prisma } from "../lib/prisma.js";
-import { nextEmployeeNumberForCompany } from "../utils/employeeNumber.js";
 
-const SALT_ROUNDS = 10;
-const DEFAULT_COMPANY_ID = "00000000-0000-0000-0000-000000000001";
-/** Неиспользуемый пароль: вход только через внешний auth-сервис. */
-const EXTERNAL_PASSWORD_PLACEHOLDER = "external-auth-no-local-password";
+export type AuthRole = "USER" | "ADMIN";
 
 export type ExternalSessionUser = {
   user_id: string;
@@ -17,6 +10,18 @@ export type ExternalSessionUser = {
   email: string;
   role_type?: string;
   is_active?: boolean;
+  /** Отдел сотрудника — единственная «организационная» привязка, которую отдаёт auth. */
+  department_id?: number;
+};
+
+/** Нормализованная сессия для `req.auth` — без локальной строки User. */
+export type RequestAuth = {
+  /** Внешний `user_id` из `/auth/session`. */
+  externalUserId: string;
+  /** Email владельца офферов (lowercase). */
+  email: string;
+  fullName: string;
+  role: AuthRole;
 };
 
 type ExternalApiResponse<T> = {
@@ -25,13 +30,16 @@ type ExternalApiResponse<T> = {
   error?: string;
 };
 
-const buildFullName = (u: ExternalSessionUser): string => {
+export const buildFullName = (u: ExternalSessionUser): string => {
   const name = [u.last_name, u.first_name, u.middle_name].filter(Boolean).join(" ").trim();
   return name || u.email;
 };
 
-const mapRole = (roleType: string | undefined): Role =>
+export const mapRole = (roleType: string | undefined): AuthRole =>
   String(roleType || "").toLowerCase() === "admin" ? "ADMIN" : "USER";
+
+export const normalizeOwnerEmail = (email: string): string =>
+  String(email).trim().toLowerCase();
 
 /**
  * GET {AUTH_SERVICE_URL}/auth/session с пробросом Cookie.
@@ -71,56 +79,10 @@ export const fetchExternalSession = async (
   return data;
 };
 
-const resolveCompanyId = async (): Promise<string> => {
-  const configured = (process.env.DEFAULT_COMPANY_ID ?? "").trim();
-  if (configured) {
-    const company = await prisma.company.findUnique({ where: { id: configured } });
-    if (company) return company.id;
-  }
-  const fallback =
-    (await prisma.company.findUnique({ where: { id: DEFAULT_COMPANY_ID } })) ??
-    (await prisma.company.findFirst({ orderBy: { createdAt: "asc" } }));
-  if (!fallback) {
-    throw new Error("В БД нет компании для привязки внешнего пользователя");
-  }
-  return fallback.id;
-};
-
-/**
- * Находит или создаёт локального User по email из внешней сессии.
- * Обновляет ФИО / role / isBlocked с внешнего сервиса.
- */
-export const upsertLocalUserFromExternal = async (
-  external: ExternalSessionUser
-): Promise<User> => {
-  const email = String(external.email).trim().toLowerCase();
-  const fullName = buildFullName(external);
-  const role = mapRole(external.role_type);
-  const isBlocked = external.is_active === false;
-
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return prisma.user.update({
-      where: { id: existing.id },
-      data: { fullName, role, isBlocked },
-    });
-  }
-
-  const companyId = await resolveCompanyId();
-  const passwordHash = await bcrypt.hash(EXTERNAL_PASSWORD_PLACEHOLDER, SALT_ROUNDS);
-
-  return prisma.$transaction(async (tx) => {
-    const employeeNumber = await nextEmployeeNumberForCompany(tx, companyId);
-    return tx.user.create({
-      data: {
-        email,
-        fullName,
-        role,
-        isBlocked,
-        passwordHash,
-        companyId,
-        employeeNumber,
-      },
-    });
-  });
-};
+/** Собирает `req.auth` из внешней сессии (без записи в локальную БД). */
+export const toRequestAuth = (external: ExternalSessionUser): RequestAuth => ({
+  externalUserId: String(external.user_id ?? "").trim(),
+  email: normalizeOwnerEmail(external.email),
+  fullName: buildFullName(external),
+  role: mapRole(external.role_type),
+});

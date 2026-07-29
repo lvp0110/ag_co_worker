@@ -22,6 +22,12 @@ export const calculateConstruction = async (constrList) => {
   const apiUrl = `${BASE_URL}/api/v1/calcIsolation/byProduct`;
 
   const payload = JSON.stringify(constrList);
+  if (import.meta.env.DEV) {
+    console.log(
+      `[calc] POST ${apiUrl} → ${constrList.length} constr:`,
+      JSON.parse(payload),
+    );
+  }
   const response = await fetch(apiUrl, {
     method: "POST",
     headers: {

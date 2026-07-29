@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Состояние прод-стека: контейнеры + здоровье приложения через nginx.
+# Состояние прод-стека: systemd units + health через nginx.
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
-info "docker compose ps:"
-compose "ps"
+info "systemd status:"
+remote "systemctl is-active '$BACKEND_UNIT' '$FRONTEND_UNIT' || true"
+remote "systemctl status '$BACKEND_UNIT' '$FRONTEND_UNIT' --no-pager -l | head -n 40" || true
 
-info "версии образов:"
-compose "images"
+info "listen ports (3006 backend, 3008 frontend):"
+remote "ss -ltnp | grep -E ':3006|:3008' || true"
 
 if [ -n "$DEPLOY_DOMAIN" ]; then
   info "health https://$DEPLOY_DOMAIN/health"

@@ -23,6 +23,9 @@ DEPLOY_DOMAIN="${DEPLOY_DOMAIN:-}"
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_REV="${DEPLOY_REV:-origin/main}"
 
+BACKEND_UNIT="${BACKEND_UNIT:-ag-co-worker-backend}"
+FRONTEND_UNIT="${FRONTEND_UNIT:-ag-co-worker-frontend}"
+
 # Используем одну shared-сессию ssh вместо многоразовых коннектов — быстрее и
 # меньше шума в authlog.
 SSH_OPTS=(-o ControlMaster=auto -o ControlPath="/tmp/.ssh-ag_co_worker-%r@%h:%p" -o ControlPersist=5m)
@@ -37,9 +40,9 @@ remote() {
   ssh_exec "set -e; cd '$DEPLOY_DIR' && $cmd"
 }
 
-# compose-обёртка — всегда указываем prod-файл и env_file.
-compose() {
-  remote "docker compose -f docker-compose.prod.yml $*"
+# systemd helpers (нужен sudo без пароля для systemctl этих юнитов).
+svc() {
+  remote "sudo systemctl $*"
 }
 
 info() { echo -e "\033[36m→ $*\033[0m"; }
