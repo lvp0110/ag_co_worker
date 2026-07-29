@@ -5,16 +5,9 @@ const SECTION_TITLE_BY_ID = Object.fromEntries(
 );
 
 /** Подкатегория расчёта (как в SubCategories.title) по id секции F/C/L/W. */
-const SECTION_TYPE_BY_ID = {
-  F: "ПОЛ",
-  C: "ПОТОЛОК",
-  L: "ОБЛИЦОВКА",
-  W: "ПЕРЕГОРОДКА",
-};
-
 const SECTION_LABEL_BY_TYPE = {
-  ПОТОЛОК: "Потолок",
   ПОЛ: "Пол",
+  ПОТОЛОК: "Потолок",
   ОБЛИЦОВКА: "Облицовка",
   ПЕРЕГОРОДКА: "Перегородка",
 };
@@ -68,13 +61,4 @@ export function sectionLabelForConstruction({ type, section_id, ag_id }) {
   const fromSectionId = sectionLabelFromSectionId(section_id);
   if (fromSectionId) return fromSectionId;
   return sectionLabelFromCode(ag_id);
-}
-
-/** Для offerMapper: type (ПОТОЛОК / ПОЛ …) из calc_params или по шифру. */
-export function constructionTypeFromCalcParams(calcParams) {
-  const cp = calcParams || {};
-  if (cp.SectionType) return String(cp.SectionType);
-  const sid = cp.SectionId || sectionIdFromCode(cp.Code || "");
-  if (sid && SECTION_TYPE_BY_ID[sid]) return SECTION_TYPE_BY_ID[sid];
-  return "";
 }

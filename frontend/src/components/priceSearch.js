@@ -39,22 +39,6 @@ export function matchesPriceSearch(row, query) {
   return matchesNameSearch(row, q);
 }
 
-export function isExactPriceSearchMatch(row, query) {
-  const q = String(query ?? "").trim().toLowerCase();
-  if (!q) return false;
-  const normalizedQuery = normalizeSearchToken(q);
-  if (!normalizedQuery) return false;
-
-  const article = String(row?.article ?? "").toLowerCase();
-  const name = String(row?.name ?? "").toLowerCase();
-  const articleMode = isArticleQuery(q);
-
-  if (articleMode) {
-    return normalizeSearchToken(article) === normalizedQuery;
-  }
-  return normalizeSearchToken(name) === normalizedQuery;
-}
-
 function isExactFieldMatch(value, query) {
   return normalizeSearchToken(value) === normalizeSearchToken(query);
 }

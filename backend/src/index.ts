@@ -3,7 +3,6 @@ import express, { type NextFunction, type Request, type Response } from "express
 import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
 import { openApiSpec } from "./docs/swagger.js";
-import { prisma } from "./lib/prisma.js";
 import calcRouter from "./routes/calc.js";
 import offersRouter from "./routes/offers.js";
 
@@ -42,13 +41,17 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   return res.status(500).json({ error: "Internal server error" });
 });
 
-const server = app.listen(env.port, () => {
-  console.log(`Backend API listening on port ${env.port}`);
-});
+const listenHost = process.env.HOST?.trim() || "";
+const server = listenHost
+  ? app.listen(env.port, listenHost, () => {
+      console.log(`Backend API listening on ${listenHost}:${env.port}`);
+    })
+  : app.listen(env.port, () => {
+      console.log(`Backend API listening on port ${env.port}`);
+    });
 
-const shutdown = async (): Promise<void> => {
-  server.close(async () => {
-    await prisma.$disconnect();
+const shutdown = (): void => {
+  server.close(() => {
     process.exit(0);
   });
 };

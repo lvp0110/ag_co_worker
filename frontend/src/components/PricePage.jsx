@@ -1,18 +1,14 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Fragment, useMemo, useState } from "react";
 import { formatRub } from "./tables/MaterialsList";
 import {
   REGION_SELECT_OPTIONS,
   filterVisibleRegionOptions,
-  findRegionOptionByValue,
   getPriceCoefficient,
 } from "../constants/regionSelectOptions.js";
 import { setPriceRegion, usePriceData } from "../services/priceApi";
 import { filterPriceRows } from "./priceSearch";
-import { useOfferEditSession } from "../stores/offerEditSessionStore.js";
 import { usePriceNarrowViewport } from "../hooks/usePriceNarrowViewport";
 import "./PricePage.css";
-
 
 const getDefaultRegionOption = (availableRegionKeys) =>
   REGION_SELECT_OPTIONS.find((option) => availableRegionKeys.has(option.regionKey))?.value ??
@@ -76,51 +72,10 @@ function PriceRowDetailCard({ row, selectedRegion, selectedCity }) {
   );
 }
 
-function newMaterialRowFromPrice(row, selectedRegion, selectedCity) {
-  const id =
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `mat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  const pricePerUnit = getPriceByRegion(
-    row,
-    selectedRegion,
-    "pricePerUnit",
-    selectedCity
-  );
-  const pricePerM2 = getPriceByRegion(
-    row,
-    selectedRegion,
-    "pricePerM2",
-    selectedCity
-  );
-  const price =
-    pricePerUnit != null && !Number.isNaN(Number(pricePerUnit))
-      ? pricePerUnit
-      : pricePerM2;
-  return {
-    id,
-    name: row.name?.trim() ? row.name : String(row.article ?? ""),
-    price: price != null && !Number.isNaN(Number(price)) ? String(price) : "",
-    quantity: "",
-    unit: row.units?.trim() ? row.units : "",
-    sourceArticle: row.article ? String(row.article) : "",
-  };
-}
-
 const PricePage = () => {
-  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [expandedRowKey, setExpandedRowKey] = useState(null);
   const isPriceNarrow = usePriceNarrowViewport();
-  const {
-    isEditingDraft,
-    activeOfferId,
-    selectedPriceArticles,
-    togglePriceArticle,
-    kpSnapshot,
-    activeConstructionId,
-    updateKpSnapshotMaterialRowsForConstruction,
-  } = useOfferEditSession();
   const {
     list: priceList,
     error,
@@ -165,15 +120,6 @@ const PricePage = () => {
     availableRegionKeys,
   ]);
 
-  useEffect(() => {
-    if (!isEditingDraft) return;
-    const cityFromKp = kpSnapshot?.form?.region;
-    if (!cityFromKp) return;
-    const option = findRegionOptionByValue(cityFromKp);
-    if (!option) return;
-    setPriceRegion(option.regionKey, { cityValue: option.value });
-  }, [isEditingDraft, kpSnapshot?.form?.region]);
-
   const handleRegionChange = (optionValue) => {
     const selectedOption = REGION_SELECT_OPTIONS.find(
       (option) => option.value === optionValue
@@ -182,56 +128,12 @@ const PricePage = () => {
     setPriceRegion(selectedOption.regionKey, { cityValue: optionValue });
   };
 
-  const selectedSet = useMemo(
-    () => new Set(selectedPriceArticles),
-    [selectedPriceArticles]
-  );
-
-  const addRowToAdditionalMaterials = (row) => {
-    if (!isEditingDraft || !activeConstructionId) {
-      try {
-        navigator.clipboard?.writeText(String(row.article ?? row.name ?? ""));
-      } catch {
-        // ignore
-      }
-      return;
+  const copyArticle = (row) => {
+    try {
+      navigator.clipboard?.writeText(String(row.article ?? row.name ?? ""));
+    } catch {
+      // ignore
     }
-
-    const article = String(row.article ?? "").trim();
-    if (!article) return;
-
-    const baseRows = kpSnapshot?.materialRowsByKeyId?.[activeConstructionId] ?? [];
-    const hasRowInKp = baseRows.some(
-      (r) => String(r.sourceArticle ?? "").trim() === article
-    );
-    const wasSelected = selectedSet.has(article) || hasRowInKp;
-    togglePriceArticle(article);
-
-    let nextRows;
-    if (wasSelected) {
-      nextRows = baseRows.filter(
-        (r) => String(r.sourceArticle ?? "").trim() !== article
-      );
-    } else {
-      const withoutEmpty = baseRows.filter(
-        (r) => r.name?.trim() || r.price?.trim() || r.quantity?.trim()
-      );
-      const existingRow = withoutEmpty.find(
-        (r) => String(r.sourceArticle ?? "").trim() === article
-      );
-      nextRows = existingRow
-        ? withoutEmpty
-        : [
-            ...withoutEmpty,
-            newMaterialRowFromPrice(
-              row,
-              selectedRegion,
-              effectiveSelectedRegionOption
-            ),
-          ];
-    }
-
-    updateKpSnapshotMaterialRowsForConstruction(activeConstructionId, nextRows);
   };
 
   const filtered = useMemo(() => {
@@ -242,19 +144,6 @@ const PricePage = () => {
     <div className="price-page">
       <main className="price-page__main">
         <h1 className="price-page__title">Прайс</h1>
-        {isEditingDraft && (
-          <p className="price-page__draft-hint">
-            Выбранные позиции подсвечены и попадут в доп. материалы выбранной
-            конструкции КП.{" "}
-            <button
-              type="button"
-              className="price-page__return-kp"
-              onClick={() => navigate(`/kp/${activeOfferId}`)}
-            >
-              Вернуться в КП
-            </button>
-          </p>
-        )}
         {error && (
           <p className="price-page__empty">
             Не удалось загрузить прайс: {error}
@@ -315,17 +204,11 @@ const PricePage = () => {
             </thead>
             <tbody>
               {filtered.map((row) => {
-                const article = String(row.article ?? "").trim();
                 const rowKey = getPriceRowKey(row, selectedRegion);
                 const isExpanded = expandedRowKey === rowKey;
-                const isSelected =
-                  isEditingDraft && article && selectedSet.has(article);
-                const rowClassName = [
-                  isSelected ? "price-page__row--selected" : "",
-                  isExpanded ? "price-page__row--expanded" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined;
+                const rowClassName = isExpanded
+                  ? "price-page__row--expanded"
+                  : undefined;
 
                 return (
                   <Fragment key={rowKey}>
@@ -392,20 +275,14 @@ const PricePage = () => {
                       <td>
                         <button
                           type="button"
-                          className={`price-page__add-button${
-                            isSelected
-                              ? " price-page__add-button--selected"
-                              : ""
-                          }`}
+                          className="price-page__add-button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            addRowToAdditionalMaterials(row);
+                            copyArticle(row);
                           }}
-                          aria-label={`${
-                            isSelected ? "Снять выбор" : "Выбрать"
-                          } материал ${row.name?.trim() || row.article}`}
+                          aria-label={`Копировать артикул ${row.article ?? ""}`}
                         >
-                          {isSelected ? "Выбрано" : "Выбрать"}
+                          Копировать
                         </button>
                       </td>
                     </tr>

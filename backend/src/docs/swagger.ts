@@ -5,15 +5,12 @@ import {
   AllIsolationConstrResponseSchema,
   CalcByProductRequestSchema,
   CalcByProductResponseSchema,
-  CloneOfferResponseSchema,
   ConstructionPropsResponseSchema,
-  CreateOfferRequestSchema,
+  CreateKpFromCalcRequestSchema,
+  CreateKpFromCalcResponseSchema,
   ErrorResponseSchema,
   HealthResponseSchema,
   IsolationConstrMaterialsResponseSchema,
-  OfferSchema,
-  OfferSummarySchema,
-  UpdateOfferRequestSchema,
 } from "./schemas.js";
 
 const registry = new OpenAPIRegistry();
@@ -47,19 +44,21 @@ registry.registerPath({
   method: "post",
   path: "/api/offers",
   tags: ["Offers"],
-  summary: "Создать оффер (с первичным расчётом материалов)",
+  summary: "Создать КП в 1С (без локальной БД)",
+  description:
+    "Проксирует POST /integration/onec/isolation/document. Ответ — code/data/error от 1С; id = document_id.",
   security: [{ cookieAuth: [] }],
   request: {
     body: {
       content: {
-        "application/json": { schema: CreateOfferRequestSchema },
+        "application/json": { schema: CreateKpFromCalcRequestSchema },
       },
     },
   },
   responses: {
     201: {
-      description: "Созданный оффер c пересчитанными материалами",
-      content: { "application/json": { schema: OfferSchema } },
+      description: "Документ создан в 1С",
+      content: { "application/json": { schema: CreateKpFromCalcResponseSchema } },
     },
     400: {
       description: "Ошибка валидации",
@@ -70,151 +69,7 @@ registry.registerPath({
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     502: {
-      description: "Внешний calcService недоступен",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/offers",
-  tags: ["Offers"],
-  summary: "Список офферов текущего пользователя",
-  security: [{ cookieAuth: [] }],
-  request: {
-    query: z.object({
-      page: z.coerce.number().int().positive().optional(),
-      limit: z.coerce.number().int().positive().optional(),
-      q: z
-        .string()
-        .optional()
-        .openapi({ description: "Поиск по номеру КП или названию объекта" }),
-      date: z
-        .string()
-        .optional()
-        .openapi({
-          description: "Фильтр по дате КП (YYYY-MM-DD или DD.MM.YYYY)",
-        }),
-    }),
-  },
-  responses: {
-    200: {
-      description: "Метаданные офферов (без конструкций)",
-      content: { "application/json": { schema: z.array(OfferSummarySchema) } },
-    },
-    401: {
-      description: "Unauthorized",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/offers/{id}",
-  tags: ["Offers"],
-  summary: "Получить оффер (с серверным пересчётом + override)",
-  security: [{ cookieAuth: [] }],
-  request: {
-    params: z.object({ id: z.string().uuid() }),
-  },
-  responses: {
-    200: {
-      description: "Оффер с пересчитанными материалами",
-      content: { "application/json": { schema: OfferSchema } },
-    },
-    401: {
-      description: "Unauthorized",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    404: {
-      description: "Оффер не найден или принадлежит другому пользователю",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    502: {
-      description: "Внешний calcService недоступен",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: "patch",
-  path: "/api/offers/{id}",
-  tags: ["Offers"],
-  summary: "Сохранить правки оффера",
-  security: [{ cookieAuth: [] }],
-  request: {
-    params: z.object({ id: z.string().uuid() }),
-    body: {
-      content: {
-        "application/json": { schema: UpdateOfferRequestSchema },
-      },
-    },
-  },
-  responses: {
-    200: {
-      description: "Обновлённый оффер",
-      content: { "application/json": { schema: OfferSchema } },
-    },
-    400: {
-      description: "Ошибка валидации",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    401: {
-      description: "Unauthorized",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    404: {
-      description: "Оффер не найден",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: "delete",
-  path: "/api/offers/{id}",
-  tags: ["Offers"],
-  summary: "Удалить оффер",
-  security: [{ cookieAuth: [] }],
-  request: {
-    params: z.object({ id: z.string().uuid() }),
-  },
-  responses: {
-    204: { description: "Удалён" },
-    401: {
-      description: "Unauthorized",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    404: {
-      description: "Оффер не найден",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/offers/{id}/clone",
-  tags: ["Offers"],
-  summary: "Создать новый оффер на основе существующего",
-  security: [{ cookieAuth: [] }],
-  request: {
-    params: z.object({ id: z.string().uuid() }),
-  },
-  responses: {
-    201: {
-      description: "ID созданного оффера",
-      content: { "application/json": { schema: CloneOfferResponseSchema } },
-    },
-    401: {
-      description: "Unauthorized",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-    404: {
-      description: "Исходный оффер не найден",
+      description: "1С не вернула document_id или сервис недоступен",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },
@@ -330,7 +185,7 @@ export const openApiSpec = generator.generateDocument({
   info: {
     title: "ag_co_worker Backend API",
     version: "1.0.0",
-    description: "API for offer management (auth — внешний сервис)",
+    description: "Backend API: proxy calc + создание КП в 1С (без локальной БД; auth — внешний сервис)",
   },
   servers: [{ url: `http://localhost:${env.port}` }],
 });

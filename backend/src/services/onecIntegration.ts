@@ -6,16 +6,18 @@ import { env } from "../config/env.js";
  * Выгрузка документа расчёта звукоизоляции в 1С.
  *
  * POST /integration/onec/isolation/document — создать документ (без document_id:
- *   id выдаёт 1С в ответе `data.document_id`, им же пишем локальный Offer),
+ *   id выдаёт 1С в ответе `data.document_id`),
  * PUT  /integration/onec/isolation/document — обновить существующий.
  * Ручка не идемпотентна: повторный POST с тем же document_id создаёт документ
  * заново, поэтому правки КП уходят строго через PUT.
  *
+ * В body только геометрия конструкций (`models.Construction`) + `document_id`
+ * на обновлении. НЕ отправляем: форму КП, услуги, доп. материалы, kp_settings,
+ * montage, materials / override цен (KpPrice*). Материалы 1С считает сама.
+ *
  * Авторизация — session-cookie пользователя (та же, что у GET /auth/session),
  * поэтому Cookie входящего запроса пробрасывается насквозь; в ответе сервис
  * возвращает `user_email`, к которому привязал документ.
- *
- * Материалы не передаём: сервис считает их сам по переданным конструкциям.
  */
 
 const DOCUMENT_PATH = "/integration/onec/isolation/document";
@@ -199,12 +201,13 @@ const sendDocument = async (
   }
 
   const code = payload?.code ?? response.status;
+  const responseDocumentId = payload?.data?.document_id?.trim();
   return {
     code,
     ...(payload?.data ? { data: payload.data } : {}),
     ...(payload?.error
       ? { error: payload.error }
-      : code !== 200
+      : !responseDocumentId && code !== 200
         ? { error: `1C export responded with ${code}` }
         : {}),
   };
@@ -272,18 +275,12 @@ export const exportOfferToOnec = async (options: {
   return result;
 };
 
-/** UUID v4/v1 и т.п. — Offer.id в БД `@db.Uuid`, поэтому id от 1С должен быть UUID. */
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
- * Достаёт `document_id` из ответа 1С. Пустой / не-UUID → null (вызывающий
- * решает, падать или генерировать локальный id).
+ * Достаёт `document_id` из ответа 1С. Пустая строка → null.
  */
 export const readOnecDocumentId = (
   onec: OnecExportResponse
 ): string | null => {
   const id = onec.data?.document_id?.trim();
-  if (!id || !UUID_RE.test(id)) return null;
-  return id;
+  return id || null;
 };

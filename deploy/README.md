@@ -1,6 +1,6 @@
 # Deploy ag_co_worker — Linux-сервер
 
-Кратко: один Linux-сервер, всё приложение в Docker (postgres + backend + frontend), TLS и маршрутизация по домену — на **хостовом системном nginx**. Деплой — SSH из локального Makefile.
+Кратко: один Linux-сервер, приложение как два Node-процесса под **systemd**, TLS и маршрутизация по домену — на **хостовом nginx**. Деплой — SSH из локального Makefile. **Локальной БД нет** — КП в 1С, auth/calc — во внешнем сервисе.
 
 ## Архитектура
 
@@ -9,21 +9,22 @@
    ↓
 [host nginx]  /etc/nginx/sites-enabled/ag_co_worker.conf
    └─ server_name ag.example.com
-      ssl_certificate /etc/letsencrypt/live/ag.example.com/*
+      ssl_certificate …
       proxy_pass → 127.0.0.1:3008
    ↓
-[frontend container]  bind: 127.0.0.1:3008 (loopback only)
-   ├─ express.static('/app/dist')       ← статика (rsync сюда)
-   └─ /api/*  →  http://backend:3006     ← proxy в docker network
+[frontend]  systemd: ag-co-worker-frontend.service
+            node server.js  (bind 127.0.0.1:3008)
+   ├─ express.static(frontend/dist)   ← статика (rsync сюда)
+   └─ /api/*, /health  →  http://127.0.0.1:3006
    ↓
-[backend container]  ports: ∅  (only internal docker network)
-   └─ Node/Express + Prisma
+[backend]   systemd: ag-co-worker-backend.service
+            node dist/index.js  (bind 127.0.0.1:3006)
+   └─ Node/Express (прокси calc + POST /api/offers → 1С)
    ↓
-[postgres container]  ports: ∅  (only internal docker network)
-   └─ volume: ag_co_worker_pg_data
+[внешний сервис :3005]  auth / calc / 1С
 ```
 
-Наружу виден **только** nginx на 80/443. Backend и postgres не публикуются вообще, frontend слушает только на loopback.
+Наружу виден **только** nginx на 80/443. Backend и frontend слушают loopback. Юниты: `deploy/systemd/ag-co-worker-backend.service`, `deploy/systemd/ag-co-worker-frontend.service`. Секреты: `$DEPLOY_DIR/.env.prod` — `EnvironmentFile` у backend; frontend получает `PORT` / `BACKEND_URL` / auth из unit + shared env.
 
 ---
 
@@ -32,22 +33,19 @@
 ### 1. Подготовка машины (вручную, один раз)
 
 ```bash
-# Docker
-sudo apt update
-sudo apt install -y docker.io docker-compose-plugin
+# Node.js ≥ 20
+# (пример: NodeSource / nvm / distro package — как принято на машине)
 
 # Системный nginx
+sudo apt update
 sudo apt install -y nginx
 
 # certbot (для Let's Encrypt)
 sudo apt install -y certbot python3-certbot-nginx
 
-# Firewall — открываем только 80/443; 3004/3006/5432 остаются закрытыми.
+# Firewall — открываем только 80/443; 3006/3008 снаружи закрыты
 sudo ufw allow 80,443/tcp
 sudo ufw --force enable
-
-# Пользователь для деплоя (если ещё нет) — должен быть в группе docker
-sudo usermod -aG docker deploy
 ```
 
 ### 2. Получить TLS-сертификат
@@ -57,18 +55,18 @@ sudo certbot certonly --nginx -d ag.example.com
 # → /etc/letsencrypt/live/ag.example.com/{fullchain,privkey}.pem
 ```
 
-certbot установит systemd-timer, который будет обновлять сертификаты сам. После обновления нужен `sudo systemctl reload nginx` (certbot ставит renewal hook автоматически).
+certbot установит systemd-timer на обновление сертификатов. После обновления нужен `sudo systemctl reload nginx` (certbot ставит renewal hook автоматически).
 
 ### 3. nginx server block
 
 ```bash
-# На локальной машине — склонировали репо, смотрим эталон:
+# На локальной машине — эталон:
 cat deploy/nginx/ag_co_worker.conf
 
 # На сервере:
 sudo cp deploy/nginx/ag_co_worker.conf /etc/nginx/sites-available/
 
-# Внутри заменить <domain> на реальный (ag.example.com) в трёх местах:
+# Внутри заменить <domain> на реальный (ag.example.com) и пути к сертификатам:
 sudo sed -i 's|<domain>|ag.example.com|g' /etc/nginx/sites-available/ag_co_worker.conf
 
 sudo ln -s /etc/nginx/sites-available/ag_co_worker.conf /etc/nginx/sites-enabled/
@@ -88,8 +86,7 @@ cp deploy/.env.deploy.example deploy/.env.deploy
 # На сервере после первого git clone:
 cd /srv/ag_co_worker
 cp deploy/.env.prod.example .env.prod
-# Заполнить POSTGRES_PASSWORD, CORS_ORIGIN, AUTH_SERVICE_URL.
-# openssl rand -hex 32  — для пароля Postgres.
+# Заполнить CORS_ORIGIN, AUTH_SERVICE_URL, CALC_SERVICE_URL, ONEC_SERVICE_URL.
 chmod 600 .env.prod
 ```
 
@@ -102,10 +99,8 @@ make deploy-bootstrap   # локально
 Скрипт:
 1. Клонирует репо в `$DEPLOY_DIR`.
 2. Проверяет, что `.env.prod`, nginx и конфиг на месте.
-3. Поднимает postgres + backend.
-4. Прогоняет `prisma migrate deploy`.
-5. Поднимает frontend (пока без статики — dist ещё не залит).
-6. Дёргает `https://<domain>/health`.
+3. Ставит systemd-юниты из `deploy/systemd/` и поднимает backend + frontend.
+4. Дёргает `https://<domain>/health`.
 
 Сразу после bootstrap — залить фронт:
 ```bash
@@ -116,46 +111,14 @@ make deploy-frontend
 
 ## Регулярный деплой
 
-| Ситуация                              | Команда                         | Что произойдёт                                                                                                        |
-|---------------------------------------|----------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| Изменился код backend (без миграций)   | `make deploy-backend`            | git fetch + checkout backend/ → rebuild backend-образа → `up -d --no-deps backend` (postgres/frontend не трогаются).  |
-| Изменился frontend                     | `make deploy-frontend`           | Локально `vite build` → `rsync` dist на сервер. Контейнер frontend НЕ перезапускается, статика обновляется на лету.    |
-| Изменились `server.js` / frontend Dockerfile | `REBUILD=1 make deploy-frontend` | Плюсом пересобирается frontend-контейнер и перезапускается `--no-deps`.                                               |
-| Нужно применить миграции               | `make deploy-migrate`            | `docker compose run --rm backend npx prisma migrate deploy` — одноразовый контейнер, работающий backend не трогает.    |
-| Откат backend на прошлую ревизию       | `REV=<commit> make deploy-backend` | Тот же скрипт, но `git checkout $REV` вместо `origin/main`.                                                            |
-| Правка nginx конфига на сервере        | `make deploy-nginx-sync && make deploy-nginx-reload` | Залить шаблон из репо на сервер, валидировать `nginx -t`, перечитать. |
-| Посмотреть статус прод-стека           | `make deploy-status`             | `docker compose ps` + `curl /health`.                                                                                  |
-
-### Zero-downtime миграции (expand/contract)
-
-Для additive-изменений (новая nullable-колонка, новая таблица):
-```
-1. make deploy-migrate   ← применить миграцию, БД обновилась
-2. make deploy-backend   ← выкатить новый код, использующий новую колонку
-```
-
-Для breaking (rename/drop) — 2 этапа через промежуточный совместимый билд:
-```
-1. Деплой кода, совместимого и со старой, и с новой схемой:   make deploy-backend
-2. Миграция:                                                  make deploy-migrate
-3. (в следующий релиз) Деплой кода, использующего только новую схему: make deploy-backend
-```
-
----
-
-## Бэкапы БД
-
-Cron на сервере (под пользователем с правами на docker):
-```
-0 3 * * * cd /srv/ag_co_worker && docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U postgres ag_co_worker | gzip > /var/backups/ag_co_worker/$(date +\%F).sql.gz
-```
-
-Восстановление:
-```bash
-cd /srv/ag_co_worker
-gunzip -c /var/backups/ag_co_worker/2026-04-21.sql.gz \
-  | docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres -d ag_co_worker
-```
+| Ситуация | Команда | Что произойдёт |
+|----------|---------|----------------|
+| Изменился код backend | `make deploy-backend` | git fetch + checkout backend → на сервере `npm ci && npm run build` → `systemctl restart ag-co-worker-backend` (frontend не трогается). |
+| Изменился frontend (статика) | `make deploy-frontend` | Локально `vite build` → `rsync` dist на сервер. Frontend-юнит не перезапускается — `server.js` читает обновлённый `dist` на лету. |
+| Изменился `server.js` / prod-deps фронта | `REBUILD=1 make deploy-frontend` | Плюсом переустановка frontend prod-deps на сервере и `systemctl restart ag-co-worker-frontend`. |
+| Откат backend на прошлую ревизию | `REV=<commit> make deploy-backend` | Тот же скрипт, но `git checkout $REV` вместо `origin/main`. |
+| Правка nginx конфига на сервере | `make deploy-nginx-sync && make deploy-nginx-reload` | Залить шаблон из репо на сервер, валидировать `nginx -t`, перечитать. |
+| Посмотреть статус прод-стека | `make deploy-status` | `systemctl status` юнитов + `curl /health`. |
 
 ---
 
@@ -166,23 +129,21 @@ gunzip -c /var/backups/ag_co_worker/2026-04-21.sql.gz \
 make deploy-status
 
 # Логи приложения
-ssh $DEPLOY_HOST "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml logs --tail=200 -f backend"
-ssh $DEPLOY_HOST "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml logs --tail=200 -f frontend"
+ssh $DEPLOY_HOST "journalctl -u ag-co-worker-backend -n 200 -f"
+ssh $DEPLOY_HOST "journalctl -u ag-co-worker-frontend -n 200 -f"
 
 # Логи nginx
 ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.error.log"
 ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.access.log"
 
-# Проверка изоляции (все три должны быть "connection refused")
-nc -vz ag.example.com 3004
+# Проверка изоляции (оба должны быть "connection refused" снаружи)
 nc -vz ag.example.com 3006
-nc -vz ag.example.com 5432
+nc -vz ag.example.com 3008
 ```
 
 ## Что НЕ делают скрипты
 
 - Не создают и не пишут TLS-сертификаты (их ставит certbot отдельно).
-- Не перезапускают `postgres` никогда в обычном флоу.
 - Не пишут в `.env.prod` — он под контролем оператора.
 
 `deploy-nginx-sync.sh` синхронизирует шаблон `deploy/nginx/ag_co_worker.conf` на сервер и валидирует `nginx -t`; `deploy-nginx-reload.sh` перечитывает конфиг — это разделение позволяет CI прогнать sync без reload, увидеть ошибку и не убить трафик.
@@ -195,22 +156,21 @@ Workflow [.github/workflows/prod-deploy.yml](../.github/workflows/prod-deploy.ym
 
 ### Триггеры
 
-- **push в `main`** — полный rollout (backend → миграции [если есть] → nginx [если менялся] → frontend → smoke + Telegram).
-- **workflow_dispatch** (`Actions → Prod deploy → Run workflow`) — те же шаги, плюс ручные входы:
-  - `force_migrate: auto|yes|no` — по умолчанию `auto` (по diff). `yes`/`no` принудительно вкл/выкл `deploy-migrate.sh`.
-  - `rev` — необязательная ревизия (тег, ветка или SHA), которая попадёт в `DEPLOY_REV` и будет передана в `deploy-backend.sh` / `deploy-migrate.sh`. **Используется для отката**: `Run workflow → rev = <previous-sha>`.
+- **push в `main`** — полный rollout (backend → nginx [если менялся] → frontend → smoke + Telegram).
+- **workflow_dispatch** (`Actions → Prod deploy → Run workflow`) — те же шаги, плюс ручной вход:
+  - `rev` — необязательная ревизия (тег, ветка или SHA), которая попадёт в `DEPLOY_REV` и будет передана в `deploy-backend.sh`. **Используется для отката**: `Run workflow → rev = <previous-sha>`.
 
 ### Условия запуска шагов (на `push` в `main`)
 
 | Шаг | Когда запускается |
 |-----|---------------------|
-| `deploy-backend.sh` | если менялись `backend/**` или `docker-compose.prod.yml` |
-| `deploy-migrate.sh` | если менялись `backend/prisma/migrations/**` |
+| `deploy-backend.sh` | если менялись `backend/**` |
 | `deploy-nginx-sync.sh` + `deploy-nginx-reload.sh` | если менялись `deploy/nginx/**` |
 | `deploy-frontend.sh` | если менялись `frontend/**` |
+| `REBUILD=1` для frontend | если менялся `frontend/server.js` (или prod-deps фронта) |
 | `deploy-status.sh` | всегда (smoke test) |
 
-На `workflow_dispatch` все четыре rollout-шага запускаются принудительно (use case — force redeploy или откат через `rev`); миграции — по input'у `force_migrate`.
+На `workflow_dispatch` все rollout-шаги запускаются принудительно (use case — force redeploy или откат через `rev`).
 
 ### Требуемые GitHub Secrets
 
@@ -243,17 +203,19 @@ deploy ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/*, \
 ```
 Для `make deploy-nginx-reload` достаточно последних двух строк (они уже могли быть).
 
+Для установки/перезапуска юнитов при bootstrap и деплое deploy-пользователю также нужен NOPASSWD на `systemctl` для `ag-co-worker-backend` / `ag-co-worker-frontend` (и копирование unit-файлов в `/etc/systemd/system/` при bootstrap).
+
 ### Откат
 
 ```bash
 # Найти последний рабочий SHA в гите (например, тег предыдущего релиза)
-gh workflow run prod-deploy.yml -f rev=<previous-sha> -f force_migrate=no
+gh workflow run prod-deploy.yml -f rev=<previous-sha>
 ```
 
 Через UI: `Actions → Prod deploy → Run workflow → rev = …`.
 
 ### Что workflow НЕ делает
 
-- Не строит backend-образ в CI и не пушит в registry — `docker compose build backend` идёт **на сервере**, как и при ручном `make deploy-backend`. Это исключает необходимость в registry и сохраняет существующую модель «один источник правды — git на сервере».
+- Не собирает backend в CI — `npm ci && npm run build` идут **на сервере**, как и при ручном `make deploy-backend`. Источник правды — git checkout на сервере.
 - Не управляет certbot/Let's Encrypt — systemd-timer на сервере.
 - Не трогает `.env.prod` — никогда.

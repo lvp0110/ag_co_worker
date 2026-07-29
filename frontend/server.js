@@ -1,14 +1,12 @@
 /**
- * Prod-сервер фронта.
+ * Prod-сервер фронта (systemd: ag-co-worker-frontend).
  *
- * TLS и маршрутизация по домену — на хостовом nginx. Этот процесс:
- *   1) отдаёт статику из /app/dist (собранная vite-бандла);
- *   2) проксирует /api/* в backend-контейнер (сохраняя httpOnly cookies);
- *   3) делает SPA-fallback на index.html для любых non-asset GET-маршрутов.
- *
- * Слушает только HTTP на PORT (дефолт 3004). В docker-compose.prod.yml
- * публикуется как "127.0.0.1:3004:3004" — снаружи недоступен, трафик приходит
- * только от host nginx.
+ * TLS и маршрутизация по домену — на хостовом nginx → 127.0.0.1:PORT.
+ * Этот процесс:
+ *   1) отдаёт статику из DIST_DIR (vite build, rsync);
+ *   2) проксирует /api/* и /health в backend (BACKEND_URL);
+ *   3) проксирует /login и /auth/* во внешний auth (AUTH_SERVICE_URL);
+ *   4) SPA-fallback на index.html.
  */
 import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -37,9 +35,6 @@ app.set("trust proxy", "loopback");
 // Используем pathFilter — path сохраняется один-в-один.
 // `/health` тоже проксируем: это backend-ручка, её используют nginx-healthcheck'и
 // и мониторинг.
-// `/uploads/*` — статика, которую отдаёт сам backend (логотипы и прочие
-// пользовательские загрузки из named volume ag_co_worker_uploads). Без этой
-// строки фронт перехватывает их SPA-фолбэком и возвращает index.html.
 // Auth-сервис: /login и /auth/* (session, logout). Same-origin cookies.
 const authProxy = createProxyMiddleware({
   target: AUTH_URL,
@@ -54,13 +49,10 @@ const backendProxy = createProxyMiddleware({
   target: BACKEND_URL,
   changeOrigin: true,
   xfwd: true,
-  // Явная функция вместо glob-массива — однозначно отлавливает /api, /health
-  // и /uploads на любой глубине, не полагается на поведение micromatch в разных версиях.
   pathFilter: (pathname) =>
     pathname === "/health" ||
     pathname === "/api" ||
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/uploads/"),
+    pathname.startsWith("/api/"),
 });
 app.use(backendProxy);
 
@@ -95,7 +87,7 @@ const server = app.listen(PORT, () => {
   );
 });
 
-// Корректное завершение при docker stop / compose restart.
+// Корректное завершение при systemctl stop / restart.
 const shutdown = (signal) => {
   console.log(`[frontend] ${signal} received, closing...`);
   server.close(() => process.exit(0));

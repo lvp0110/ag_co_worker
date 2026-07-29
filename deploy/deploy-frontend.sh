@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Роллаут frontend: локальный vite build → rsync dist на сервер.
-# Контейнер frontend НЕ перезапускается — он читает dist/ через bind-mount,
-# express.static отдаёт новые файлы при следующем запросе. Zero downtime.
+# Процесс frontend НЕ перезапускается — express.static читает новые файлы
+# при следующем запросе (zero downtime для статики).
 #
-# Когда меняется server.js или package.prod.json — передайте REBUILD=1, тогда
-# скрипт дополнительно rebuild'ит frontend-контейнер.
+# Когда меняется server.js / зависимости прокси — REBUILD=1:
+#   git checkout frontend/ + npm ci --omit=dev + systemctl restart frontend.
 #
 # Использование:
 #   make deploy-frontend
@@ -16,24 +16,24 @@ REBUILD="${REBUILD:-0}"
 
 info "vite build (локально)"
 cd "$REPO_ROOT/frontend"
-# VITE_API_URL="" → в проде apiClient.js будет бить по относительному /api/*,
-# который обработает host nginx → frontend-container → proxy на backend.
+# VITE_API_URL="" → в проде apiClient.js бьёт по относительному /api/*
+# (nginx → frontend server.js → backend).
 VITE_API_URL="" npm run build
 cd "$REPO_ROOT"
 
 info "rsync frontend/dist → $DEPLOY_HOST:$DEPLOY_DIR/frontend/dist/"
-# --delete чтобы старые хешированные бандлы не копились вечно.
 rsync -az --delete \
   -e "ssh ${SSH_OPTS[*]}" \
   "$REPO_ROOT/frontend/dist/" \
   "$DEPLOY_HOST:$DEPLOY_DIR/frontend/dist/"
 
 if [ "$REBUILD" = "1" ]; then
-  info "REBUILD=1 → пересобираем frontend-контейнер"
-  # Сначала обновить server.js / package.prod.json / Dockerfile из git
-  remote "git fetch '$DEPLOY_REMOTE' && git checkout '$DEPLOY_REV' -- frontend/ docker-compose.prod.yml"
-  compose "build frontend"
-  compose "up -d --no-deps frontend"
+  info "REBUILD=1 → обновляем server.js + prod deps, restart $FRONTEND_UNIT"
+  remote "git fetch '$DEPLOY_REMOTE' && git checkout '$DEPLOY_REV' -- frontend/"
+  remote "cd frontend && npm ci --omit=dev"
+  svc "restart $FRONTEND_UNIT"
+  sleep 3
+  svc "is-active $FRONTEND_UNIT" || warn "$FRONTEND_UNIT не active"
 fi
 
 if [ -n "$DEPLOY_DOMAIN" ]; then

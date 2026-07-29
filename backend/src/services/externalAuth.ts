@@ -1,9 +1,6 @@
-import { type Role, type User } from "@prisma/client";
 import { env } from "../config/env.js";
-import { prisma } from "../lib/prisma.js";
 
-/** `department_id` отсутствует в сессии → отдел «не указан». */
-const NO_DEPARTMENT = 0;
+export type AuthRole = "USER" | "ADMIN";
 
 export type ExternalSessionUser = {
   user_id: string;
@@ -17,19 +14,32 @@ export type ExternalSessionUser = {
   department_id?: number;
 };
 
+/** Нормализованная сессия для `req.auth` — без локальной строки User. */
+export type RequestAuth = {
+  /** Внешний `user_id` из `/auth/session`. */
+  externalUserId: string;
+  /** Email владельца офферов (lowercase). */
+  email: string;
+  fullName: string;
+  role: AuthRole;
+};
+
 type ExternalApiResponse<T> = {
   code?: number;
   data?: T;
   error?: string;
 };
 
-const buildFullName = (u: ExternalSessionUser): string => {
+export const buildFullName = (u: ExternalSessionUser): string => {
   const name = [u.last_name, u.first_name, u.middle_name].filter(Boolean).join(" ").trim();
   return name || u.email;
 };
 
-export const mapRole = (roleType: string | undefined): Role =>
+export const mapRole = (roleType: string | undefined): AuthRole =>
   String(roleType || "").toLowerCase() === "admin" ? "ADMIN" : "USER";
+
+export const normalizeOwnerEmail = (email: string): string =>
+  String(email).trim().toLowerCase();
 
 /**
  * GET {AUTH_SERVICE_URL}/auth/session с пробросом Cookie.
@@ -69,40 +79,10 @@ export const fetchExternalSession = async (
   return data;
 };
 
-const readDepartmentId = (external: ExternalSessionUser): number => {
-  const raw = Number(external.department_id);
-  return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : NO_DEPARTMENT;
-};
-
-/**
- * Находит или создаёт локального User по email из внешней сессии.
- * Обновляет ФИО / role / isBlocked / отдел с внешнего сервиса.
- * Локальная строка нужна только как FK-якорь для офферов.
- */
-export const upsertLocalUserFromExternal = async (
-  external: ExternalSessionUser
-): Promise<User> => {
-  const email = String(external.email).trim().toLowerCase();
-  const fullName = buildFullName(external);
-  const role = mapRole(external.role_type);
-  const isBlocked = external.is_active === false;
-  const departmentId = readDepartmentId(external);
-
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return prisma.user.update({
-      where: { id: existing.id },
-      data: { fullName, role, isBlocked, departmentId },
-    });
-  }
-
-  return prisma.user.create({
-    data: {
-      email,
-      fullName,
-      role,
-      isBlocked,
-      departmentId,
-    },
-  });
-};
+/** Собирает `req.auth` из внешней сессии (без записи в локальную БД). */
+export const toRequestAuth = (external: ExternalSessionUser): RequestAuth => ({
+  externalUserId: String(external.user_id ?? "").trim(),
+  email: normalizeOwnerEmail(external.email),
+  fullName: buildFullName(external),
+  role: mapRole(external.role_type),
+});

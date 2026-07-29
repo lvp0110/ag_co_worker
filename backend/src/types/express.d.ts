@@ -1,14 +1,11 @@
 import "express";
+import type { RequestAuth } from "../services/externalAuth.js";
 
 declare global {
   namespace Express {
     interface Request {
-      auth?: {
-        /** Локальный UUID пользователя (к нему привязаны офферы). */
-        userId: string;
-        /** Роль из внешней сессии, а не из локальной БД. */
-        role: "USER" | "ADMIN";
-      };
+      /** Сессия внешнего auth; владелец офферов = `auth.email`. */
+      auth?: RequestAuth;
     }
   }
 }
