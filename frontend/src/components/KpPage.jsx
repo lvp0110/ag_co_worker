@@ -7,11 +7,8 @@ import {
   useState,
 } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import ConstructionList, {
-  ConstructionGrandTotalBlock,
-} from "./tables/ConstructionList";
+import ConstructionList from "./tables/ConstructionList";
 import {
-  computeGrandTotalRubForConstructions,
   formatKpComputedSum,
   formatRub,
   montageLineProductRub,
@@ -98,33 +95,6 @@ function serviceRowSum(priceStr, qtyStr) {
   return formatKpComputedSum(p * q);
 }
 
-/** Сумма монтажа по КП: отдельные цена×кол-во в каждой карточке (key_id). */
-function montageGrandTotalRubForKp(constructions, montageByKeyId) {
-  let sum = 0;
-  for (const c of constructions) {
-    const row = montageByKeyId[c.key_id];
-    if (!row) continue;
-    const p = parseKpDecimal(row.price);
-    const q = parseKpDecimal(row.quantity);
-    if (p !== null && q !== null) {
-      sum += p * q;
-    }
-  }
-  return sum;
-}
-
-/** Сумма блока «Услуги» (цена × количество по строкам). */
-function additionalServicesGrandTotalRubForKp(serviceRows) {
-  if (!Array.isArray(serviceRows)) return 0;
-  let sum = 0;
-  for (const row of serviceRows) {
-    const p = parseKpDecimal(row.price);
-    const q = parseKpDecimal(row.quantity);
-    if (p !== null && q !== null) sum += p * q;
-  }
-  return sum;
-}
-
 /** Сумма блока «Дополнительные материалы» (цена × количество по строкам). */
 function additionalMaterialsGrandTotalRubForKp(materialRows) {
   if (!Array.isArray(materialRows)) return 0;
@@ -135,21 +105,6 @@ function additionalMaterialsGrandTotalRubForKp(materialRows) {
     if (p !== null && q !== null) sum += p * q;
   }
   return sum;
-}
-
-function newCustomServiceRow() {
-  const id =
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `svc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  return {
-    id,
-    preset: false,
-    name: "",
-    price: "",
-    quantity: "",
-    unit: "",
-  };
 }
 
 function newCustomMaterialRow() {
@@ -256,13 +211,6 @@ const INITIAL_SERVICE_ROWS = [
     quantity: "",
     unit: "",
   },
-];
-
-const KP_SETTINGS_FIELDS = [
-  { key: "floor", label: "Монтаж пола, р/за м2" },
-  { key: "ceiling", label: "Монтаж потолка, р/за м2" },
-  { key: "cladding", label: "Монтаж облицовки, р/за м2" },
-  { key: "partition", label: "Монтаж перегородки, р/за м2" },
 ];
 
 function parseConstructionNumber(value) {
@@ -385,11 +333,9 @@ const KpPage = () => {
   const [grandTotalDiscountAmounts, setGrandTotalDiscountAmounts] = useState(
     emptyGrandTotalDiscountAmounts,
   );
-  const [settingsSectionOpen, setSettingsSectionOpen] = useState(false);
   /** Открыт ли блок доп. материалов по конструкциям: { [key_id]: boolean } */
   const [additionalMaterialsSectionOpenByKeyId, setAdditionalMaterialsSectionOpenByKeyId] =
     useState(() => ({}));
-  const [servicesSectionOpen, setServicesSectionOpen] = useState(false);
   /** Свёрнутость карточек конструкций: key_id → collapsed (true = свёрнута). */
   const [cardCollapseOverridesByKeyId, setCardCollapseOverridesByKeyId] =
     useState(() => ({}));
@@ -414,19 +360,10 @@ const KpPage = () => {
     return result;
   }, [materialRowsByKeyId]);
 
-  const additionalMaterialsTotalRub = useMemo(
-    () => Object.values(additionalMaterialsRubByKeyId).reduce((a, b) => a + b, 0),
-    [additionalMaterialsRubByKeyId],
-  );
   const dateInputValue = useMemo(
     () => normalizeDateForDateInput(form.date),
     [form.date],
   );
-  const servicesTotalRub = useMemo(
-    () => additionalServicesGrandTotalRubForKp(serviceRows),
-    [serviceRows],
-  );
-
   const [loadStatus, setLoadStatus] = useState("idle"); // 'idle'|'loading'|'loaded'|'error'|'forbidden'
   const [loadError, setLoadError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -492,8 +429,6 @@ const KpPage = () => {
     }
 
     let cancelled = false;
-    setSettingsSectionOpen(false);
-    setServicesSectionOpen(false);
     setLoadStatus("loading");
     setLoadError(null);
 
@@ -983,21 +918,6 @@ const KpPage = () => {
     });
   }, [form.region, selectedRegion, visibleRegionOptions]);
 
-  const updateServiceRow = (id, field) => (e) => {
-    const value = e.target.value;
-    setServiceRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
-    );
-  };
-
-  const addServiceRow = () => {
-    setServiceRows((rows) => [...rows, newCustomServiceRow()]);
-  };
-
-  const removeServiceRow = (id) => {
-    setServiceRows((rows) => rows.filter((r) => r.preset || r.id !== id));
-  };
-
   const updateMaterialRow = useCallback(
     (key_id, rowId, field) => (e) => {
       const value = e.target.value;
@@ -1109,41 +1029,6 @@ const KpPage = () => {
     });
   }, [grandTotalDiscounts, grandTotalDiscountAmounts, loadStatus]);
 
-  const handleGrandTotalDiscountChange = useCallback(
-    (section, rowKeyOrPatch, value) => {
-      setGrandTotalDiscounts((prev) => {
-        const sectionMap = { ...(prev[section] ?? {}) };
-        const applyOne = (rowKey, raw) => {
-          if (raw == null || String(raw).trim() === "") {
-            delete sectionMap[rowKey];
-          } else {
-            sectionMap[rowKey] = String(raw);
-          }
-        };
-        if (
-          rowKeyOrPatch &&
-          typeof rowKeyOrPatch === "object" &&
-          !Array.isArray(rowKeyOrPatch)
-        ) {
-          for (const [rowKey, raw] of Object.entries(rowKeyOrPatch)) {
-            applyOne(rowKey, raw);
-          }
-        } else if (rowKeyOrPatch != null) {
-          applyOne(rowKeyOrPatch, value);
-        }
-        return {
-          ...prev,
-          [section]: sectionMap,
-        };
-      });
-    },
-    [],
-  );
-
-  const handleGrandTotalDiscountAmountsChange = useCallback((amounts) => {
-    setGrandTotalDiscountAmounts(normalizeGrandTotalDiscountAmounts(amounts));
-  }, []);
-
   const addMaterialRow = useCallback(
     (key_id) => {
       setMaterialRowsByKeyId((prev) => {
@@ -1170,14 +1055,6 @@ const KpPage = () => {
     },
     [],
   );
-
-  const onKpSettingChange = (key) => (e) => {
-    setKpSettings((prev) => ({ ...prev, [key]: e.target.value }));
-  };
-
-  const toggleSettingsSection = () => {
-    setSettingsSectionOpen((prev) => !prev);
-  };
 
   const toggleCardCollapsed = useCallback((key_id) => {
     setCardCollapseOverridesByKeyId((prev) => ({
@@ -1964,58 +1841,6 @@ const KpPage = () => {
           </div>
         </section>
 
-        <section className="kp-page__settings" aria-label="Настройки КП">
-          <button
-            type="button"
-            className="kp-page__settings-toggle"
-            aria-expanded={settingsSectionOpen}
-            aria-controls="kp-settings-list"
-            onClick={toggleSettingsSection}
-          >
-            <span className="kp-page__settings-title-row">
-              <span className="kp-page__settings-title-inner">
-                <span
-                  className={`kp-collapsible-chevron${
-                    settingsSectionOpen
-                      ? " kp-collapsible-chevron--expanded"
-                      : ""
-                  }`}
-                  aria-hidden
-                />
-                <span className="kp-page__settings-title">Настройки КП</span>
-              </span>
-            </span>
-          </button>
-          {settingsSectionOpen && (
-            <ul id="kp-settings-list" className="kp-page__settings-list">
-              {KP_SETTINGS_FIELDS.map((item) => (
-                <li key={item.key} className="kp-page__settings-item">
-                  <label
-                    className="kp-page__settings-label"
-                    htmlFor={`kp-setting-${item.key}`}
-                  >
-                    {item.label}
-                  </label>
-                  <input
-                    id={`kp-setting-${item.key}`}
-                    className="kp-page__settings-input"
-                    type="number"
-                    inputMode="numeric"
-                    value={kpSettings[item.key]}
-                    onChange={onKpSettingChange(item.key)}
-                  />
-                </li>
-              ))}
-              <li className="kp-page__settings-item">
-                <span className="kp-page__settings-note">
-                  * Добавить монтажные ставки можно здесь или в карточке конструкции.
-                </span>
-              </li>
-            </ul>
-            
-          )}
-        </section>
-
         <div
           className="tables-and-buttons-container kp-page__tables"
           aria-label="Данные расчёта из калькулятора"
@@ -2055,213 +1880,6 @@ const KpPage = () => {
             </p>
           )}
         </div>
-
-        <div className="kp-page__services">
-          <KpCollapsibleExtraTable
-            tableId="kp-table-services"
-            ariaLabel="Дополнительные услуги"
-            title="Дополнительные услуги"
-            sectionOpen={servicesSectionOpen}
-            onToggleSection={() => setServicesSectionOpen((v) => !v)}
-            totalRub={servicesTotalRub}
-            colgroup={
-              <colgroup>
-                <col style={{ width: "60%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "10%" }} />
-              </colgroup>
-            }
-            footerRows={
-              <tr className="kp-page__services-add-row">
-                <td colSpan={5} className="kp-page__services-add-cell">
-                  <button
-                    type="button"
-                    className="kp-page__services-add"
-                    onClick={addServiceRow}
-                  >
-                    Добавить строку
-                  </button>
-                </td>
-              </tr>
-            }
-          >
-            {serviceRows.map((row) => {
-              const rowKey = `svc-${row.id}`;
-              const removeRowButton = row.preset ? null : (
-                <button
-                  type="button"
-                  className="kp-page__service-row-remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeServiceRow(row.id);
-                  }}
-                  aria-label="Удалить строку"
-                >
-                  ×
-                </button>
-              );
-              const nameTextarea = row.preset ? null : (
-                <textarea
-                  className="kp-page__services-input kp-page__services-textarea"
-                  value={row.name}
-                  onChange={(e) => {
-                    updateServiceRow(row.id, "name")(e);
-                    syncTextareaHeight(e.target);
-                  }}
-                  onInput={autoResizeNameField}
-                  aria-label="Название услуги"
-                  rows={1}
-                />
-              );
-              const nameCell = row.preset ? (
-                row.name
-              ) : isKpNarrow ? (
-                <div className="kp-page__service-name-cell">{nameTextarea}</div>
-              ) : (
-                <div className="kp-page__service-name-cell">
-                  {removeRowButton}
-                  {nameTextarea}
-                </div>
-              );
-              const priceInput = (
-                <input
-                  id={row.preset ? `kp-service-${row.id}-price` : undefined}
-                  type="text"
-                  className="kp-page__services-input"
-                  value={row.price}
-                  placeholder={KP_DECIMAL_PLACEHOLDER}
-                  onChange={updateServiceRow(row.id, "price")}
-                  aria-label={`Цена, ${row.name || "услуга"}`}
-                />
-              );
-              const quantityInput = (
-                <input
-                  id={
-                    row.preset ? `kp-service-${row.id}-quantity` : undefined
-                  }
-                  type="text"
-                  className="kp-page__services-input"
-                  value={row.quantity}
-                  placeholder={KP_DECIMAL_PLACEHOLDER}
-                  onChange={updateServiceRow(row.id, "quantity")}
-                  aria-label={`Количество, ${row.name || "услуга"}`}
-                />
-              );
-              const unitInput = (
-                <input
-                  id={row.preset ? `kp-service-${row.id}-unit` : undefined}
-                  type="text"
-                  className="kp-page__services-input"
-                  value={row.unit}
-                  onChange={updateServiceRow(row.id, "unit")}
-                  aria-label={`Единица измерения, ${row.name || "услуга"}`}
-                />
-              );
-              const sumInput = (
-                <input
-                  id={`kp-service-${row.id}-sum`}
-                  type="text"
-                  readOnly
-                  className="kp-page__services-input kp-page__services-input--computed"
-                  value={serviceRowSum(row.price, row.quantity)}
-                  aria-label={`Сумма, ${row.name || "услуга"} (цена × количество)`}
-                />
-              );
-              const detailFields = [
-                { id: "name", label: "Название", children: nameCell },
-                { id: "price", label: "Цена", children: priceInput },
-                { id: "quantity", label: "Количество", children: quantityInput },
-                { id: "unit", label: "Ед. изм.", children: unitInput },
-                { id: "sum", label: "Сумма", children: sumInput },
-              ];
-              const nameTdClass = row.preset
-                ? "kp-page__service-name-td--preset"
-                : undefined;
-              const rowCells = isKpNarrow ? (
-                <>
-                  <td className={nameTdClass}>
-                    {row.preset ? (
-                      <span className="kp-narrow-row-summary-name">
-                        {row.name?.trim() ? row.name : "—"}
-                      </span>
-                    ) : (
-                      <div className="kp-page__service-name-cell kp-narrow-row-summary-cell">
-                        {removeRowButton}
-                        <span className="kp-narrow-row-summary-name">
-                          {row.name?.trim() ? row.name : "—"}
-                        </span>
-                      </div>
-                    )}
-                  </td>
-                  <td />
-                  <td />
-                  <td />
-                  <td className="kp-narrow-row-summary-sum">
-                    {serviceRowSum(row.price, row.quantity)}
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td className={nameTdClass}>{nameCell}</td>
-                  <td>{priceInput}</td>
-                  <td>{quantityInput}</td>
-                  <td>{unitInput}</td>
-                  <td>{sumInput}</td>
-                </>
-              );
-              if (isKpNarrow) {
-                return (
-                  <KpNarrowExpandableRow
-                    key={row.id}
-                    rowKey={rowKey}
-                    expandedKey={expandedKey}
-                    onToggleRow={toggleRow}
-                    narrow
-                    colSpan={5}
-                    detailTitle={row.name?.trim() ? row.name : undefined}
-                    detailFields={detailFields}
-                  >
-                    {rowCells}
-                  </KpNarrowExpandableRow>
-                );
-              }
-              return <tr key={row.id}>{rowCells}</tr>;
-            })}
-          </KpCollapsibleExtraTable>
-        </div>
-
-        {calcTables.tableConstrToCalc != null &&
-          calcTables.ConstrToCalc.length > 0 && (
-            <ConstructionGrandTotalBlock
-              readOnly
-              grandTotalRub={computeGrandTotalRubForConstructions(
-                calcTables.ConstrToCalc,
-                calcTables.materialsByConstruction,
-                { forKp: true },
-              )}
-              montageGrandTotalRub={montageGrandTotalRubForKp(
-                calcTables.ConstrToCalc,
-                montageByKeyId,
-              )}
-              additionalServicesGrandTotalRub={additionalServicesGrandTotalRubForKp(
-                serviceRows,
-              )}
-              additionalMaterialsGrandTotalRub={additionalMaterialsTotalRub}
-              materialsByConstruction={calcTables.materialsByConstruction}
-              constructions={calcTables.ConstrToCalc}
-              montageByKeyId={montageByKeyId}
-              serviceRows={serviceRows}
-              materialRowsByKeyId={materialRowsByKeyId}
-              grandTotalDiscounts={grandTotalDiscounts}
-              onGrandTotalDiscountChange={handleGrandTotalDiscountChange}
-              onGrandTotalDiscountAmountsChange={
-                handleGrandTotalDiscountAmountsChange
-              }
-              wrapClassName="kp-page__construction-grand-total"
-            />
-          )}
 
         <div className="kp-page__save-bar">
           {saveError && (
