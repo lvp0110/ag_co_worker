@@ -44,6 +44,7 @@ import {
 } from "../utils/constructionSection";
 import { calculateConstruction } from "../services/constructionApi";
 import { createKpFromCalc } from "../services/offersApi";
+import { formatRequestError } from "../services/apiClient";
 import { buildCreateOfferPayload } from "../utils/offerMapper";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useCalcField } from "../stores/calculatorStore.js";
@@ -405,10 +406,15 @@ const Calculator = () => {
         },
       });
     } catch (err) {
+      const details = formatRequestError(err);
+      console.error("[kp] create failed:", err?.url, err?.status, err?.body, err);
       setModal({
         isOpen: true,
         title: "Ошибка",
-        html: `Не удалось создать КП.<br><br>${err?.message || ""}`,
+        html: `Не удалось создать КП.<br><br><pre style="text-align:left;white-space:pre-wrap;font-size:12px;max-height:40vh;overflow:auto;margin:0">${details
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</pre>`,
         icon: "error",
         imageUrl: null,
         confirmButtonText: "OK",

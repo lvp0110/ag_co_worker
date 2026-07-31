@@ -15,7 +15,7 @@
  * Не вызывайте auth по абсолютному URL с другого origin — cookies не сохранятся.
  */
 
-import { ApiError, request } from "./apiClient.js";
+import { ApiError, BASE_URL, request } from "./apiClient.js";
 
 const readCookie = (name) => {
   if (typeof document === "undefined") return "";
@@ -114,9 +114,22 @@ export const session = async () => {
   }
 };
 
+/** CSRF из cookie (для мутаций auth и выгрузки в 1С). */
+export const getCsrfToken = async () => readCookie("csrf_token");
+
+/** true, если фронт ходит на другой origin (GitHub Pages → :3005). */
+export const isCrossOriginAuth = () => {
+  if (typeof window === "undefined" || !BASE_URL) return false;
+  try {
+    return new URL(BASE_URL, window.location.origin).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+};
+
 /** POST /auth/logout */
 export const logout = async () => {
-  const csrf = readCookie("csrf_token");
+  const csrf = await getCsrfToken();
   const headers = {};
   if (csrf) headers["X-CSRF-Token"] = csrf;
   try {

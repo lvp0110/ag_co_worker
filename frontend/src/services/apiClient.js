@@ -23,11 +23,12 @@ const dispatchUnauthorized = () => {
 };
 
 class ApiError extends Error {
-  constructor(message, { status, body } = {}) {
+  constructor(message, { status, body, url } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.url = url;
   }
 }
 
@@ -78,7 +79,11 @@ const doFetch = async (path, init) => {
   });
 };
 
+const resolveUrl = (path) =>
+  path.startsWith("http") ? path : `${BASE_URL}${path}`;
+
 const fetchWithAuth = async (path, init = {}, options = {}) => {
+  const url = resolveUrl(path);
   const response = await doFetch(path, init);
 
   if (response.status === 404 && options.allowNotFound) {
@@ -88,17 +93,35 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
   if (response.status === 401) {
     if (!options.silent401) dispatchUnauthorized();
     const body = await parseResponse(response);
+    console.error("[api] 401", init.method || "GET", url, body);
     throw new ApiError(
       (body && typeof body === "object" && (body.error || body.message)) ||
         "Unauthorized",
-      { status: 401, body }
+      { status: 401, body, url }
     );
   }
 
   return response;
 };
 
+/** Текст ошибки с URL, статусом и телом ответа — для модалки / копирования. */
+export const formatRequestError = (err) => {
+  const lines = [];
+  if (err?.message) lines.push(String(err.message));
+  if (err?.url) lines.push(`URL: ${err.url}`);
+  if (err?.status != null) lines.push(`HTTP ${err.status}`);
+  if (err?.body !== undefined && err?.body !== null) {
+    lines.push(
+      typeof err.body === "string"
+        ? err.body
+        : JSON.stringify(err.body, null, 2)
+    );
+  }
+  return lines.filter(Boolean).join("\n") || "Неизвестная ошибка";
+};
+
 export const request = async (path, init = {}, options = {}) => {
+  const url = resolveUrl(path);
   const response = await fetchWithAuth(path, init, options);
 
   if (response.status === 404 && options.allowNotFound) {
@@ -110,7 +133,8 @@ export const request = async (path, init = {}, options = {}) => {
     const message =
       (body && typeof body === "object" && (body.error || body.message)) ||
       `HTTP ${response.status} ${response.statusText}`;
-    throw new ApiError(message, { status: response.status, body });
+    console.error("[api]", init.method || "GET", url, response.status, body);
+    throw new ApiError(message, { status: response.status, body, url });
   }
 
   return parseResponse(response);

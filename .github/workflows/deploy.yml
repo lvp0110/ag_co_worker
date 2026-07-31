@@ -43,6 +43,8 @@ jobs:
           # Без этого /api и /auth уходят на github.io → 404.
           # Override: Settings → Variables → VITE_API_URL
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://dev3.constrtodo.ru:3005' }}
+          # КП = POST /integration/onec/isolation/document (на :3005 нет /api/offers).
+          VITE_ONEC_DOCUMENT_DIRECT: ${{ vars.VITE_ONEC_DOCUMENT_DIRECT || 'true' }}
           # Hash-роутер: /calc не бьётся в настоящий 404 GitHub Pages
           VITE_ROUTER_HASH: "true"
         run: npm run build
