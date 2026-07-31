@@ -1,7 +1,23 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import { copyFileSync } from 'fs'
+import { copyFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
+
+/** Vite `base` — только pathname со слэшами. Полный URL ломает GH Pages (двойной путь). */
+function normalizeBase(raw) {
+  let v = String(raw || '/').trim()
+  if (!v) return '/'
+  if (/^https?:\/\//i.test(v)) {
+    try {
+      v = new URL(v).pathname
+    } catch {
+      v = '/'
+    }
+  }
+  if (!v.startsWith('/')) v = `/${v}`
+  if (!v.endsWith('/')) v = `${v}/`
+  return v
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -17,17 +33,23 @@ export default defineConfig(({ mode }) => {
     env.BACKEND_PROXY_TARGET || process.env.BACKEND_PROXY_TARGET || 'http://localhost:3007'
 
   return {
-  base: process.env.BASE_PATH || env.BASE_PATH || '/',
+  base: normalizeBase(process.env.BASE_PATH || env.BASE_PATH || '/'),
   plugins: [
     react(),
+    // SPA на GitHub Pages: 404.html + .nojekyll (иначе Jekyll может отдать README)
     {
-      name: 'copy-404',
+      name: 'gh-pages-spa',
       closeBundle() {
         const distPath = join(process.cwd(), 'dist')
         try {
           copyFileSync(join(distPath, 'index.html'), join(distPath, '404.html'))
         } catch (error) {
           console.warn('Could not copy index.html to 404.html:', error.message)
+        }
+        try {
+          writeFileSync(join(distPath, '.nojekyll'), '')
+        } catch (error) {
+          console.warn('Could not write .nojekyll:', error.message)
         }
       },
     },

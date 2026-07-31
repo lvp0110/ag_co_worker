@@ -11,9 +11,16 @@ const KpPage = lazy(() => import('./components/KpPage'));
 const PricePage = lazy(() => import('./components/PricePage'));
 const ProfilePage = lazy(() => import('./components/ProfilePage'));
 
-/** React Router basename без trailing slash. */
+/** React Router basename без trailing slash. Полный URL → только path. */
 const basename = (() => {
-  const raw = import.meta.env.BASE_URL || '/';
+  let raw = import.meta.env.BASE_URL || '/';
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      raw = new URL(raw).pathname;
+    } catch {
+      raw = '/';
+    }
+  }
   const trimmed = String(raw).replace(/\/$/, '');
   return trimmed || '/';
 })();

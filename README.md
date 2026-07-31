@@ -187,13 +187,13 @@ make build
 
 ## Деплой фронта на GitHub Pages
 
-Фронт автоматически собирается и публикуется через [.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main`.
+Фронт автоматически собирается и публикуется через [.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main` (`BASE_PATH=/ag_co_worker/`).
 
 Настройка один раз:
-1. В `Settings` → `Pages` → `Source` = **GitHub Actions**.
+1. В `Settings` → `Pages` → `Source` = **GitHub Actions** (не ветка `main` — иначе вместо приложения откроется README).
 2. После первого успешного деплоя ссылка: https://lvp0110.github.io/ag_co_worker/
 
-**Важно:** фронт для прода общается напрямую с `dev3.constrtodo.ru:3005`, так что на backend должен быть CORS для `https://lvp0110.github.io`. Если нужно чтобы прод-фронт смотрел на ваш задеплоенный backend — соберите с `VITE_API_URL=https://your-api.example.com npm run build`. Полноценный прод-стек (frontend + backend за host nginx + systemd) — см. [deploy/README.md](deploy/README.md).
+**Важно:** на Pages нет прокси `/api` и `/login`. Для полного функционала задайте repo Variable `VITE_API_URL` на публичный API с CORS для `https://lvp0110.github.io`. Полноценный прод-стек (frontend + backend за host nginx + systemd) — см. [deploy/README.md](deploy/README.md).
 
 ---
 
