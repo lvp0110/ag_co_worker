@@ -402,6 +402,7 @@ const Calculator = () => {
             data: created.data,
             error: created.error,
           },
+          constructions,
         },
       });
     } catch (err) {

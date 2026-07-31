@@ -4,6 +4,8 @@
 
 import { BASE_URL } from "./apiClient";
 import {
+  AG_CU_MEM_CIPHER,
+  buildUlMembraneMaterials,
   ecoSWoolFallbackCalcCode,
   isEcoSWoolCalcCode,
   isUlTapeCalcCode,
@@ -11,12 +13,39 @@ import {
   mapDefaultEcoWoolToEcoS,
   mapVibrosilSealantToUltracoustic,
   mapVibrostekMaterialsToUlTape,
+  normalizeCeilingMats,
   ulTapeFallbackCalcCodes,
 } from "../utils/calcUlTapeFallback.js";
 
 export const calculateConstruction = async (constrList) => {
   if (!constrList || constrList.length === 0) {
     return { data: [] };
+  }
+
+  // Внешний calc игнорирует CeilingMats — считаем базу и аддоны отдельно.
+  if (constrList.length === 1) {
+    const item = constrList[0];
+    const ceilingMats = normalizeCeilingMats(item.CeilingMats, item.CeilingMat);
+    if (ceilingMats.length > 0) {
+      const { CeilingMats: _cm, CeilingMat: _c1, ...base } = item;
+      const primary = await calculateConstruction([base]);
+      if (!primary?.data?.length) return { data: [] };
+      let merged = [...primary.data];
+      for (const matCode of ceilingMats) {
+        if (matCode === AG_CU_MEM_CIPHER) {
+          const membrane = buildUlMembraneMaterials(base.Area);
+          if (membrane.length) merged = [...merged, ...membrane];
+          continue;
+        }
+        const addon = await calculateConstruction([
+          { ...base, Code: matCode },
+        ]);
+        if (addon?.data?.length) {
+          merged = [...merged, ...addon.data];
+        }
+      }
+      return { data: merged };
+    }
   }
 
   const apiUrl = `${BASE_URL}/api/v1/calcIsolation/byProduct`;

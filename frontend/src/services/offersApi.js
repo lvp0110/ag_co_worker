@@ -32,7 +32,7 @@ export const createKpFromCalc = async ({ constructions }) => {
     body: { constructions },
   });
   logOnecResponse("POST /api/offers", body);
-  const saved = upsertKpDocumentFromOnec(body);
+  const saved = upsertKpDocumentFromOnec(body, { constructions });
   if (!saved) {
     const err = new Error(body?.error || "1С не вернула document_id");
     err.body = body;
