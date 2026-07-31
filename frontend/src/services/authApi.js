@@ -1,21 +1,26 @@
-import { ApiError, request } from "./apiClient.js";
-
 /**
- * Auth через внешний сервис (:3005):
- *   POST /login
- *   GET  /auth/session
- *   POST /auth/logout
+ * Клиент внешнего auth-сервиса (same-origin через Vite/nginx proxy).
  *
- * Ответ: { code, data, error }. Токены — httpOnly cookie `access_token`
- * + читаемый `csrf_token` (нужен заголовок X-CSRF-Token на мутациях).
- * В dev Vite проксирует /login и /auth на AUTH_PROXY_TARGET.
+ * Контракт:
+ *   POST /login           { email, password } → { code, data: User, error }
+ *   GET  /auth/session    → { code, data: User } | 404 без cookie
+ *   POST /auth/logout     (нужен X-CSRF-Token = cookie csrf_token)
+ *
+ * Cookies (ставит auth):
+ *   access_token  — httpOnly, сессия
+ *   csrf_token    — читаемый, для мутаций
+ *
+ * В dev Vite проксирует /login и /auth → AUTH_PROXY_TARGET (по умолчанию :3005).
+ * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
+ * Не вызывайте auth по абсолютному URL с другого origin — cookies не сохранятся.
  */
+
+import { ApiError, request } from "./apiClient.js";
 
 const readCookie = (name) => {
   if (typeof document === "undefined") return "";
   const prefix = `${name}=`;
-  const parts = document.cookie ? document.cookie.split("; ") : [];
-  for (const part of parts) {
+  for (const part of document.cookie ? document.cookie.split("; ") : []) {
     if (part.startsWith(prefix)) {
       return decodeURIComponent(part.slice(prefix.length));
     }
@@ -23,21 +28,16 @@ const readCookie = (name) => {
   return "";
 };
 
-/** Маппинг внешнего User → форма, которую ждут AuthContext / хедер / профиль. */
+/** Внешний User → форма для AuthContext / хедера / профиля. */
 export const mapExternalUser = (u) => {
   if (!u) return null;
-  const fullName = [u.last_name, u.first_name, u.middle_name].filter(Boolean).join(" ").trim();
+  const fullName = [u.last_name, u.first_name, u.middle_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const roleType = String(u.role_type || "").toLowerCase();
-  const phone =
-    u.phone ??
-    u.cellphone ??
-    u.phone_number ??
-    null;
-  const office =
-    u.office_address ??
-    u.officeAddress ??
-    u.address ??
-    null;
+  const phone = u.phone ?? u.cellphone ?? u.phone_number ?? null;
+  const office = u.office_address ?? u.officeAddress ?? u.address ?? null;
   return {
     id: u.user_id,
     full_name: fullName || u.email || "",
@@ -55,24 +55,48 @@ const unwrapUser = (body) => {
   const data = body?.data ?? body?.user ?? null;
   const user = mapExternalUser(data);
   if (!user) {
-    throw new ApiError(body?.error || "Invalid auth response", { status: 500, body });
+    throw new ApiError(body?.error || "Некорректный ответ auth", {
+      status: 500,
+      body,
+    });
   }
   return { user, raw: body };
 };
 
-/** POST /login — { email, password } → { user } */
+/** Человекочитаемая ошибка логина (auth часто отдаёт сырой bcrypt-текст). */
+export const formatAuthError = (err) => {
+  const raw = String(err?.message || err?.body?.error || "");
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("bcrypt") ||
+    lower.includes("invalid credential") ||
+    lower.includes("hashedpassword") ||
+    err?.status === 401
+  ) {
+    return "Неверный email или пароль.";
+  }
+  if (err?.status === 403 || lower.includes("blocked")) {
+    return "Аккаунт заблокирован.";
+  }
+  return raw.trim() || "Не удалось войти";
+};
+
+/** POST /login */
 export const login = async ({ email, password }) => {
   const body = await request(
     "/login",
-    { method: "POST", body: { email, password } },
+    {
+      method: "POST",
+      body: { email: String(email || "").trim().toLowerCase(), password },
+    },
     { skipAuthRetry: true }
   );
   return unwrapUser(body);
 };
 
 /**
- * GET /auth/session — текущий пользователь или null.
- * Без cookie бэк отвечает 404 — это нормальный «аноним», не ошибка.
+ * GET /auth/session → { user } | null.
+ * 404 без cookie — нормальный аноним.
  */
 export const session = async () => {
   try {
@@ -81,17 +105,16 @@ export const session = async () => {
       { method: "GET" },
       { skipAuthRetry: true, silent401: true, allowNotFound: true }
     );
-    if (!body) return null;
-    const data = body?.data ?? null;
-    if (!data) return null;
-    return { user: mapExternalUser(data), raw: body };
+    if (!body?.data) return null;
+    const user = mapExternalUser(body.data);
+    return user ? { user, raw: body } : null;
   } catch (err) {
     if (err?.status === 404 || err?.status === 401) return null;
     throw err;
   }
 };
 
-/** POST /auth/logout — сбрасывает cookies (нужен CSRF). */
+/** POST /auth/logout */
 export const logout = async () => {
   const csrf = readCookie("csrf_token");
   const headers = {};

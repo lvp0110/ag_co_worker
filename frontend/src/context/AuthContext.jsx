@@ -1,22 +1,28 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import * as authApi from "../services/authApi.js";
 
 const AuthContext = createContext(null);
 
 /**
- * Состояние:
- *   status: 'loading' — первичный bootstrap (GET /auth/session)
- *           'authed'  — пользователь залогинен, user заполнен
- *           'anon'    — пользователь не залогинен
+ * Авторизация только через внешний auth (cookie session).
  *
- * loginModal.isOpen — открывает ли LoginModal (рендерится глобально в App.jsx).
+ * status:
+ *   loading — идёт GET /auth/session
+ *   authed  — есть user
+ *   anon    — гость
  */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState("loading");
   const [loginModal, setLoginModal] = useState({ isOpen: false });
 
-  // bootstrap: GET /auth/session (404 без cookie = аноним)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -29,7 +35,7 @@ export function AuthProvider({ children }) {
           return;
         }
       } catch {
-        // сеть/5xx — считаем анонимом, LoginModal откроется по клику
+        // сеть / 5xx → гость
       }
       if (!cancelled) {
         setUser(null);
@@ -41,15 +47,14 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // глобальный слушатель: apiClient эмитит при 401
   useEffect(() => {
-    const handler = () => {
+    const onUnauthorized = () => {
       setUser(null);
       setStatus("anon");
       setLoginModal({ isOpen: true });
     };
-    window.addEventListener("auth:unauthorized", handler);
-    return () => window.removeEventListener("auth:unauthorized", handler);
+    window.addEventListener("auth:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
   }, []);
 
   const login = useCallback(async (credentials) => {
