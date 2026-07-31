@@ -1,7 +1,7 @@
-# Статический фронт → GitHub Pages (https://lvp0110.github.io/ag_co_worker/)
+# Статический фронт → ветка gh-pages → https://lvp0110.github.io/ag_co_worker/
 #
-# Один раз: Settings → Pages → Source = GitHub Actions
-# (не Deploy from branch / main — иначе вместо приложения будет README).
+# Workflow сам переключает Pages на ветку gh-pages (иначе при Source=main
+# GitHub отдаёт README вместо приложения).
 name: Deploy GitHub Pages
 
 on:
@@ -10,16 +10,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
-  id-token: write
 
 concurrency:
   group: github-pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -39,25 +38,36 @@ jobs:
       - name: Build
         working-directory: frontend
         env:
-          # Только pathname репозитория — НЕ полный https://….github.io/…
+          # Только pathname — НЕ полный https://….github.io/…
           BASE_PATH: /ag_co_worker/
-          # Опционально: публичный API (Settings → Variables → VITE_API_URL).
-          # Иначе /api и /login уйдут на github.io и не сработают.
           VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npm run build
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: frontend/dist
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: frontend/dist
+          publish_branch: gh-pages
+          force_orphan: true
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Point GitHub Pages at gh-pages (not main/README)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/pages"
+          AUTH=( -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" )
+          BODY='{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'
+          CODE=$(curl -sS -o /tmp/pages-resp.json -w "%{http_code}" -X PUT "${AUTH[@]}" "$API" -d "$BODY" || true)
+          echo "PUT /pages → HTTP $CODE"
+          cat /tmp/pages-resp.json || true
+          if [[ "$CODE" == "404" ]]; then
+            CODE=$(curl -sS -o /tmp/pages-resp.json -w "%{http_code}" -X POST "${AUTH[@]}" "$API" -d "$BODY" || true)
+            echo "POST /pages → HTTP $CODE"
+            cat /tmp/pages-resp.json || true
+          fi
+          if [[ "$CODE" != "200" && "$CODE" != "201" && "$CODE" != "204" ]]; then
+            echo "::warning::Не удалось переключить Pages на gh-pages (нужны права admin)."
+            echo "Сделайте вручную: Settings → Pages → Deploy from a branch → gh-pages / (root)"
+          fi

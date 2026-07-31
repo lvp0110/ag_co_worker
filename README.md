@@ -190,7 +190,9 @@ make build
 Фронт автоматически собирается и публикуется через [.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main` (`BASE_PATH=/ag_co_worker/`).
 
 Настройка один раз:
-1. В `Settings` → `Pages` → `Source` = **GitHub Actions** (не ветка `main` — иначе вместо приложения откроется README).
+1. В `Settings` → `Pages` → `Deploy from a branch` → ветка **gh-pages**, folder **/ (root)**.
+   Не выбирайте `main` — иначе вместо приложения откроется README.
+   Workflow при деплое сам пытается переключить источник на `gh-pages`.
 2. После первого успешного деплоя ссылка: https://lvp0110.github.io/ag_co_worker/
 
 **Важно:** на Pages нет прокси `/api` и `/login`. Для полного функционала задайте repo Variable `VITE_API_URL` на публичный API с CORS для `https://lvp0110.github.io`. Полноценный прод-стек (frontend + backend за host nginx + systemd) — см. [deploy/README.md](deploy/README.md).
