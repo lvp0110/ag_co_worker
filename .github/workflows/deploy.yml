@@ -40,7 +40,11 @@ jobs:
         env:
           # Только pathname — НЕ полный https://….github.io/…
           BASE_PATH: /ag_co_worker/
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          # Без этого /api и /auth уходят на github.io → 404.
+          # Override: Settings → Variables → VITE_API_URL
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://dev3.constrtodo.ru:3005' }}
+          # Hash-роутер: /calc не бьётся в настоящий 404 GitHub Pages
+          VITE_ROUTER_HASH: "true"
         run: npm run build
 
       - name: Deploy to gh-pages

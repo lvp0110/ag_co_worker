@@ -1,5 +1,11 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+} from 'react-router-dom';
 import AppLayout from './components/AppLayout';
 import Calculator from './components/Calculator';
 import LoginModal from './components/LoginModal';
@@ -11,8 +17,17 @@ const KpPage = lazy(() => import('./components/KpPage'));
 const PricePage = lazy(() => import('./components/PricePage'));
 const ProfilePage = lazy(() => import('./components/ProfilePage'));
 
-/** React Router basename без trailing slash. Полный URL → только path. */
+/**
+ * HashRouter на GitHub Pages (VITE_ROUTER_HASH=true): нет серверного SPA-fallback,
+ * иначе /ag_co_worker/calc отдаёт настоящий 404.
+ */
+const useHashRouter =
+  String(import.meta.env.VITE_ROUTER_HASH || '').toLowerCase() === 'true';
+const Router = useHashRouter ? HashRouter : BrowserRouter;
+
+/** BrowserRouter basename. HashRouter basename не нужен (hash после origin+base). */
 const basename = (() => {
+  if (useHashRouter) return undefined;
   let raw = import.meta.env.BASE_URL || '/';
   if (/^https?:\/\//i.test(raw)) {
     try {

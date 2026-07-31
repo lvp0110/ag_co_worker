@@ -195,7 +195,7 @@ make build
    Workflow при деплое сам пытается переключить источник на `gh-pages`.
 2. После первого успешного деплоя ссылка: https://lvp0110.github.io/ag_co_worker/
 
-**Важно:** на Pages нет прокси `/api` и `/login`. Для полного функционала задайте repo Variable `VITE_API_URL` на публичный API с CORS для `https://lvp0110.github.io`. Полноценный прод-стек (frontend + backend за host nginx + systemd) — см. [deploy/README.md](deploy/README.md).
+**Важно:** на Pages нет прокси `/api` и `/login`. Сборка Pages по умолчанию ходит на `https://dev3.constrtodo.ru:3005` (`VITE_API_URL`) и использует HashRouter (`/#/calc`). Override — repo Variable `VITE_API_URL`; на API нужен CORS для `https://lvp0110.github.io`. Логин с github.io требует cookie `SameSite=None` на auth. Полноценный прод-стек — см. [deploy/README.md](deploy/README.md).
 
 ---
 
