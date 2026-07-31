@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
+import { formatAuthError } from "../services/authApi.js";
 import "./LoginModal.css";
 
 export default function LoginModal() {
@@ -39,11 +40,11 @@ export default function LoginModal() {
     setError(null);
     setSubmitting(true);
     try {
-      await login({ email: email.trim().toLowerCase(), password });
+      await login({ email, password });
       setEmail("");
       setPassword("");
     } catch (err) {
-      setError(err?.message || "Не удалось войти");
+      setError(formatAuthError(err));
     } finally {
       setSubmitting(false);
     }
@@ -55,7 +56,12 @@ export default function LoginModal() {
 
   return (
     <div className="login-modal__backdrop" onClick={onBackdropClick}>
-      <div className="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
+      <div
+        className="login-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-modal-title"
+      >
         <button
           type="button"
           className="login-modal__close"
@@ -64,7 +70,9 @@ export default function LoginModal() {
         >
           ×
         </button>
-        <h2 id="login-modal-title" className="login-modal__title">Вход</h2>
+        <h2 id="login-modal-title" className="login-modal__title">
+          Вход
+        </h2>
         <form onSubmit={onSubmit} className="login-modal__form" noValidate>
           <label className="login-modal__field">
             <span>Email</span>
@@ -88,8 +96,16 @@ export default function LoginModal() {
               minLength={6}
             />
           </label>
-          {error && <div className="login-modal__error" role="alert">{error}</div>}
-          <button type="submit" className="login-modal__submit" disabled={submitting}>
+          {error ? (
+            <div className="login-modal__error" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <button
+            type="submit"
+            className="login-modal__submit"
+            disabled={submitting}
+          >
             {submitting ? "Вход..." : "Войти"}
           </button>
         </form>

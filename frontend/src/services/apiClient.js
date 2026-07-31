@@ -1,17 +1,20 @@
 /**
- * Единая точка общения с API (auth на :3005 + offers/calc на нашем backend).
+ * Единая точка HTTP-запросов.
  *
- * В dev и prod ходим относительными URL'ами (BASE_URL = ""):
- *   /login, /auth/*  → auth-сервис (Vite/nginx proxy)
- *   /api/*           → наш backend (в dev /api/v1|/api/v2 → calc :3005)
+ * Always relative (BASE_URL = ""):
+ *   /login, /auth/*  → auth (Vite / server.js proxy)
+ *   /api/*           → backend (offers) / calc (/api/v1|/api/v2 в dev)
  *
- * Авторизация — httpOnly cookie `access_token` (+ `csrf_token` для мутаций auth).
- * На 401 эмитим DOM event `auth:unauthorized` (AuthContext открывает LoginModal).
+ * credentials: 'include' — cookie access_token / csrf_token.
+ * На 401 → window event `auth:unauthorized` (AuthContext открывает LoginModal).
+ * Не добавляйте Authorization header — только cookies.
  */
 
-// Пустая строка = same-origin. VITE_API_URL — override для staging.
 const DEFAULT_BASE_URL = "";
-export const BASE_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+export const BASE_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE_URL).replace(
+  /\/$/,
+  ""
+);
 
 const dispatchUnauthorized = () => {
   if (typeof window !== "undefined") {
@@ -61,7 +64,9 @@ const buildHeaders = (init) => {
 const doFetch = async (path, init) => {
   const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
   const body =
-    init.body !== undefined && typeof init.body !== "string" && !(init.body instanceof FormData)
+    init.body !== undefined &&
+    typeof init.body !== "string" &&
+    !(init.body instanceof FormData)
       ? JSON.stringify(init.body)
       : init.body;
 
@@ -76,7 +81,6 @@ const doFetch = async (path, init) => {
 const fetchWithAuth = async (path, init = {}, options = {}) => {
   const response = await doFetch(path, init);
 
-  // 404 на /auth/session = «нет сессии» — вызывающий код сам решает.
   if (response.status === 404 && options.allowNotFound) {
     return response;
   }
@@ -85,7 +89,8 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
     if (!options.silent401) dispatchUnauthorized();
     const body = await parseResponse(response);
     throw new ApiError(
-      (body && typeof body === "object" && (body.error || body.message)) || "Unauthorized",
+      (body && typeof body === "object" && (body.error || body.message)) ||
+        "Unauthorized",
       { status: 401, body }
     );
   }
@@ -93,14 +98,6 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
   return response;
 };
 
-/**
- * Главный метод для запросов.
- *  - path: '/api/...', '/login', '/auth/...' или полный URL
- *  - init: { method, body (object|string), headers }
- *  - options.skipAuthRetry: оставлен для совместимости (refresh больше нет)
- *  - options.silent401: не эмитить auth:unauthorized
- *  - options.allowNotFound: вернуть null на 404 вместо ошибки
- */
 export const request = async (path, init = {}, options = {}) => {
   const response = await fetchWithAuth(path, init, options);
 
