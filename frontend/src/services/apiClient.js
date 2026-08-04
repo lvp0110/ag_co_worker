@@ -3,6 +3,7 @@
  *
  * Always relative (BASE_URL = ""):
  *   /login, /auth/*  → auth (Vite / server.js proxy)
+ *   /admin/*         → auth/calc (:3005) admin materials/constructions
  *   /api/*           → backend (offers) / calc (/api/v1|/api/v2 в dev)
  *
  * credentials: 'include' — cookie access_token / csrf_token.

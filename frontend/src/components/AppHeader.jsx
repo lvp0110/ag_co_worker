@@ -55,6 +55,15 @@ function IconLogout() {
   );
 }
 
+function IconAdmin() {
+  return (
+    <svg {...iconProps}>
+      <path d="M12 3l7 3v5c0 4.5-2.8 7.8-7 9-4.2-1.2-7-4.5-7-9V6l7-3z" />
+      <path d="M9.5 12l1.8 1.8L15 10" />
+    </svg>
+  );
+}
+
 export default function AppHeader() {
   const innerRef = useRef(null);
   const logoSrc = `${import.meta.env.BASE_URL}logo1.png`;
@@ -139,6 +148,25 @@ export default function AppHeader() {
             </HeaderIcon>
             <span className="app-header__label">Прайс</span>
           </NavLink>
+          {user?.role === "ADMIN" && (
+            <NavLink
+              to="/admin?list=materials"
+              className={({ isActive }) =>
+                `app-header__link${
+                  isActive || location.pathname.startsWith("/admin")
+                    ? " app-header__link--active"
+                    : ""
+                }`
+              }
+              title="Админка"
+              aria-label="Админка"
+            >
+              <HeaderIcon>
+                <IconAdmin />
+              </HeaderIcon>
+              <span className="app-header__label">Админка</span>
+            </NavLink>
+          )}
         </nav>
         <div className="app-header__auth">
           {status === "loading" ? null : user ? (

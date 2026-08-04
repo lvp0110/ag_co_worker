@@ -72,6 +72,17 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      // Admin materials/constructions API (:3005). Точный /admin — SPA-роут, не проксируем.
+      '/admin/materials': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
+      '/admin/constructions': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
       '/api/v1': {
         target: calcTarget,
         changeOrigin: true,

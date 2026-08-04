@@ -10,7 +10,7 @@
  *   access_token  — httpOnly, сессия
  *   csrf_token    — читаемый, для мутаций
  *
- * В dev Vite проксирует /login и /auth → AUTH_PROXY_TARGET (по умолчанию :3005).
+ * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
  * Не вызывайте auth по абсолютному URL с другого origin — cookies не сохранятся.
  */
