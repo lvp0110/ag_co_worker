@@ -58,6 +58,20 @@ ssh_exec() {
   ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "$@"
 }
 
+# Для команд с sudo. Если есть локальный TTY — выделяем его на той стороне (-t),
+# иначе sudo не сможет запросить пароль и упадёт с
+# «sudo: a terminal is required to read the password».
+# В CI (без TTY) -t не добавляем: там sudo обязан быть NOPASSWD.
+ssh_sudo() {
+  if [ -t 0 ] && [ -t 1 ]; then
+    # ControlMaster с -t не дружит — для интерактивной сессии идём напрямую.
+    ssh -t ${DEPLOY_SSH_KEY_FILE:+-o IdentitiesOnly=yes -i "$DEPLOY_SSH_KEY_FILE"} \
+      "$DEPLOY_HOST" "$@"
+  else
+    ssh_exec "$@"
+  fi
+}
+
 # Выполнить команды на сервере В ДИРЕКТОРИИ проекта. Передаётся единой строкой.
 remote() {
   local cmd="$*"

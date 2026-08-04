@@ -41,6 +41,8 @@ build/
 
 # Prod-deploy local secrets
 deploy/.env.deploy
+# Отрендеренный nginx-конфиг (deploy-nginx-sync.sh кладёт его в staging на сервере)
+deploy/nginx/*.rendered.conf
 backend/.env.prod
 .env.prod
 

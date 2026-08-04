@@ -4,10 +4,8 @@
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
-info "nginx -t"
-ssh_exec "sudo nginx -t"
-
-info "systemctl reload nginx"
-ssh_exec "sudo systemctl reload nginx"
+# ssh_sudo, а не ssh_exec: без NOPASSWD-sudo нужен TTY для запроса пароля.
+info "nginx -t && systemctl reload nginx"
+ssh_sudo "sudo nginx -t && sudo systemctl reload nginx"
 
 ok "nginx перечитан"
