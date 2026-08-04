@@ -9,7 +9,7 @@
 #   frontend       → http://localhost:5175
 # Auth / calc / 1С → http://localhost:3005  (внешний сервис)
 #
-# Prod: host Node + systemd (без Docker). См. deploy/README.md.
+# Prod: Docker Compose на webtest, домен isocalc.constrtodo.ru. См. deploy/README.md.
 
 SHELL := /bin/bash
 BACKEND_DIR := backend
@@ -17,8 +17,8 @@ FRONTEND_DIR := frontend
 
 .PHONY: help setup install reinstall env \
         backend frontend dev stop build clean status \
-        deploy-bootstrap deploy-backend deploy-frontend \
-        deploy-nginx-sync deploy-nginx-reload deploy-status
+        deploy-bootstrap deploy-backend deploy-frontend deploy-all \
+        deploy-nginx-sync deploy-nginx-reload deploy-status deploy-logs
 
 .DEFAULT_GOAL := help
 
@@ -102,23 +102,31 @@ status: ## Проверить занятость портов
 	  fi; \
 	done
 
-# ─── prod deploy (SSH + systemd) ────────────────────────────────────────────
+# ─── prod deploy (SSH + Docker Compose) ─────────────────────────────────────
 # Требуется deploy/.env.deploy (копия из deploy/.env.deploy.example).
+# Сборка идёт НА СЕРВЕРЕ внутри образов (Node 22) — локальный Node не нужен.
 
-deploy-bootstrap: ## Первый запуск на чистом сервере (git + systemd units + npm build)
+deploy-bootstrap: ## Первый запуск на сервере (git clone + docker compose up --build)
 	bash deploy/bootstrap.sh
 
-deploy-backend: ## Роллаут backend (npm ci/build + systemctl restart). REV=<commit> для точечной ревизии
+deploy-backend: ## Роллаут backend-контейнера. REV=<commit> для точечной ревизии
 	bash deploy/deploy-backend.sh
 
-deploy-frontend: ## Локальный vite build + rsync dist. REBUILD=1 если менялся server.js
+deploy-frontend: ## Роллаут frontend-контейнера (vite build внутри образа). REV=<commit>
 	bash deploy/deploy-frontend.sh
 
-deploy-nginx-sync: ## Залить nginx server block из deploy/nginx/ на сервер и валидировать nginx -t
+deploy-all: ## Роллаут обоих сервисов
+	bash deploy/deploy-backend.sh
+	bash deploy/deploy-frontend.sh
+
+deploy-nginx-sync: ## Залить nginx server block на сервер и валидировать nginx -t (нужен sudo)
 	bash deploy/deploy-nginx-sync.sh
 
-deploy-nginx-reload: ## nginx -t && systemctl reload nginx на сервере
+deploy-nginx-reload: ## nginx -t && systemctl reload nginx на сервере (нужен sudo)
 	bash deploy/deploy-nginx-reload.sh
 
-deploy-status: ## Состояние прод-стека (systemctl + curl /health)
+deploy-status: ## Состояние прод-стека (compose ps + health)
 	bash deploy/deploy-status.sh
+
+deploy-logs: ## Логи контейнеров. SERVICE=backend|frontend TAIL=500 FOLLOW=1
+	bash deploy/deploy-logs.sh

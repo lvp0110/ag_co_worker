@@ -1,44 +1,35 @@
 #!/usr/bin/env bash
-# Роллаут frontend: локальный vite build → rsync dist на сервер.
-# Процесс frontend НЕ перезапускается — express.static читает новые файлы
-# при следующем запросе (zero downtime для статики).
+# Роллаут frontend (Docker): vite build происходит НА СЕРВЕРЕ внутри образа.
 #
-# Когда меняется server.js / зависимости прокси — REBUILD=1:
-#   git checkout frontend/ + npm ci --omit=dev + systemctl restart frontend.
+# Отличие от прежней схемы (локальный vite build + rsync dist): локальный Node
+# больше не нужен, а хостовой Node 18 (слишком старый для vite 7) не участвует —
+# сборка идёт в образе на Node 22.
 #
 # Использование:
 #   make deploy-frontend
-#   REBUILD=1 make deploy-frontend
+#   REV=<commit|tag> make deploy-frontend
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
-REBUILD="${REBUILD:-0}"
+REV="${REV:-$DEPLOY_REV}"
+info "rollout frontend на $DEPLOY_HOST: rev=$REV"
 
-info "vite build (локально)"
-cd "$REPO_ROOT/frontend"
-# VITE_API_URL="" → в проде apiClient.js бьёт по относительному /api/*
-# (nginx → frontend server.js → backend).
-VITE_API_URL="" npm run build
-cd "$REPO_ROOT"
+remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- frontend/ docker-compose.prod.yml"
 
-info "rsync frontend/dist → $DEPLOY_HOST:$DEPLOY_DIR/frontend/dist/"
-rsync -az --delete \
-  -e "ssh ${SSH_OPTS[*]}" \
-  "$REPO_ROOT/frontend/dist/" \
-  "$DEPLOY_HOST:$DEPLOY_DIR/frontend/dist/"
+info "build + up frontend (vite build внутри образа)"
+dc "up -d --build frontend"
 
-if [ "$REBUILD" = "1" ]; then
-  info "REBUILD=1 → обновляем server.js + prod deps, restart $FRONTEND_UNIT"
-  remote "git fetch '$DEPLOY_REMOTE' && git checkout '$DEPLOY_REV' -- frontend/"
-  remote "cd frontend && npm ci --omit=dev"
-  svc "restart $FRONTEND_UNIT"
-  sleep 3
-  svc "is-active $FRONTEND_UNIT" || warn "$FRONTEND_UNIT не active"
-fi
+info "ждём health"
+wait_health 30 || warn "frontend не поднялся — смотрите make deploy-logs"
+
+info "последние 40 строк логов frontend:"
+dc "logs --tail 40 --no-log-prefix frontend" || true
 
 if [ -n "$DEPLOY_DOMAIN" ]; then
   info "smoke https://$DEPLOY_DOMAIN/"
-  curl -fso /dev/null --retry 3 "https://$DEPLOY_DOMAIN/" && ok "фронт отвечает" || warn "фронт не отвечает"
+  curl -fsS -o /dev/null --retry 3 --retry-delay 2 -w "  HTTP %{http_code}\n" "https://$DEPLOY_DOMAIN/" \
+    && ok "фронт отвечает через домен" \
+    || warn "через домен не отвечает — проверьте nginx server block"
 fi
 
 ok "frontend выкачен"

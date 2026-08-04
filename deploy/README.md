@@ -1,111 +1,88 @@
-# Deploy ag_co_worker — Linux-сервер
+# Deploy ag_co_worker → isocalc.constrtodo.ru
 
-Кратко: один Linux-сервер, приложение как два Node-процесса под **systemd**, TLS и маршрутизация по домену — на **хостовом nginx**. Деплой — SSH из локального Makefile. **Локальной БД нет** — КП в 1С, auth/calc — во внешнем сервисе.
+Прод: **Docker Compose** на `51.250.51.86` (hostname `webtest`, Ubuntu 24.04), TLS и маршрутизация по домену — на **хостовом nginx**. Деплой — SSH из локального Makefile или из GitHub Actions. **Локальной БД нет** — КП уходят в 1С, auth/calc — во внешнем сервисе.
+
+Машина общая: рядом живут `constr-todo-web`, `hr-todo-web`, `ag_sound_calc`, `acoustic_calc`, `cad-*`. Все — в Docker, исходники в `/home/leonidl/<project>`. Этот проект следует той же конвенции.
 
 ## Архитектура
 
 ```
-Интернет  :443 / :80 (redirect)
+Интернет :443 / :80 (redirect)
    ↓
 [host nginx]  /etc/nginx/sites-enabled/ag_co_worker.conf
-   └─ server_name ag.example.com
-      ssl_certificate …
-      proxy_pass → 127.0.0.1:3008
+   └─ server_name isocalc.constrtodo.ru
+      ssl_certificate /home/leonidl/certs/{fullchain,privkey}.pem   (wildcard *.constrtodo.ru)
+      proxy_pass → 127.0.0.1:3007
    ↓
-[frontend]  systemd: ag-co-worker-frontend.service
-            node server.js  (bind 127.0.0.1:3008)
-   ├─ express.static(frontend/dist)   ← статика (rsync сюда)
-   └─ /api/*, /health  →  http://127.0.0.1:3006
+[frontend]  контейнер ag_co_worker-frontend   127.0.0.1:3007 → :3008
+   ├─ express.static(/app/dist)        ← vite build, собран внутри образа
+   ├─ /api/*, /health   → http://backend:3006
+   └─ /login, /auth/*   → AUTH_SERVICE_URL (внешний)
    ↓
-[backend]   systemd: ag-co-worker-backend.service
-            node dist/index.js  (bind 127.0.0.1:3006)
-   └─ Node/Express (прокси calc + POST /api/offers → 1С)
+[backend]   контейнер ag_co_worker-backend    :3006 (ТОЛЬКО в compose-сети)
+   └─ Express: прокси calc + POST /api/offers → 1С
    ↓
-[внешний сервис :3005]  auth / calc / 1С
+[внешний сервис] https://dev3.constrtodo.ru:3005 — auth / calc / 1С
 ```
 
-Наружу виден **только** nginx на 80/443. Backend и frontend слушают loopback. Юниты: `deploy/systemd/ag-co-worker-backend.service`, `deploy/systemd/ag-co-worker-frontend.service`. Секреты: `$DEPLOY_DIR/.env.prod` — `EnvironmentFile` у backend; frontend получает `PORT` / `BACKEND_URL` / auth из unit + shared env.
+Наружу смотрит только nginx на 80/443. Frontend опубликован на loopback, **у backend host-порта нет вообще** — он доступен лишь по compose-сети.
+
+### Почему именно такие порты
+
+| Порт | Кто | Замечание |
+|------|-----|-----------|
+| `127.0.0.1:3007` | frontend (host) | Свободен. 3000–3006 на машине заняты соседями. |
+| `3008` | frontend (в контейнере) | — |
+| `3006` | backend (только в compose-сети) | На **хосте** 3006 занят `cad-api` — конфликта нет, потому что мы этот порт не публикуем. |
+
+`:3005` на хосте — это контейнер `hr-todo-web`, **не наш auth-сервис**. Поэтому в `.env.prod` нельзя писать `AUTH_SERVICE_URL=http://127.0.0.1:3005` — нужен `https://dev3.constrtodo.ru:3005`.
 
 ---
 
-## Первый запуск сервера
+## Первый запуск
 
-### 1. Подготовка машины (вручную, один раз)
+### 1. Предусловия на сервере (один раз, под root)
 
-```bash
-# Node.js ≥ 20
-# (пример: NodeSource / nvm / distro package — как принято на машине)
+Docker и группа `docker` на webtest уже настроены (docker 27.4, compose v2.31, `leonidl` в группе). Node на хосте — 18, но он **не участвует**: и vite, и tsc собираются внутри образов на Node 22.
 
-# Системный nginx
-sudo apt update
-sudo apt install -y nginx
+Сертификат тоже уже есть: общий wildcard `*.constrtodo.ru` (GlobalSign, до 2026-12-07) в `/home/leonidl/certs`. **Certbot не нужен.**
 
-# certbot (для Let's Encrypt)
-sudo apt install -y certbot python3-certbot-nginx
+### 2. nginx server block (нужен sudo с паролем)
 
-# Firewall — открываем только 80/443; 3006/3008 снаружи закрыты
-sudo ufw allow 80,443/tcp
-sudo ufw --force enable
-```
-
-### 2. Получить TLS-сертификат
+Без этого блока `isocalc.constrtodo.ru` попадает в чужой catch-all и отдаёт постороннюю страницу.
 
 ```bash
-sudo certbot certonly --nginx -d ag.example.com
-# → /etc/letsencrypt/live/ag.example.com/{fullchain,privkey}.pem
-```
-
-certbot установит systemd-timer на обновление сертификатов. После обновления нужен `sudo systemctl reload nginx` (certbot ставит renewal hook автоматически).
-
-### 3. nginx server block
-
-```bash
-# На локальной машине — эталон:
-cat deploy/nginx/ag_co_worker.conf
-
-# На сервере:
-sudo cp deploy/nginx/ag_co_worker.conf /etc/nginx/sites-available/
-
-# Внутри заменить <domain> на реальный (ag.example.com) и пути к сертификатам:
-sudo sed -i 's|<domain>|ag.example.com|g' /etc/nginx/sites-available/ag_co_worker.conf
-
-sudo ln -s /etc/nginx/sites-available/ag_co_worker.conf /etc/nginx/sites-enabled/
+ssh leonidl@51.250.51.86
+cd /home/leonidl/ag_co_worker   # после шага 3, либо просто скопируйте файл руками
+sudo sed -e 's|<domain>|isocalc.constrtodo.ru|g' \
+         -e 's|<cert_dir>|/home/leonidl/certs|g' \
+         deploy/nginx/ag_co_worker.conf \
+  | sudo tee /etc/nginx/sites-available/ag_co_worker.conf >/dev/null
+sudo ln -sf /etc/nginx/sites-available/ag_co_worker.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### 4. Положить секреты и настроить локальный `.env.deploy`
+### 3. `.env.prod` на сервере
 
-**На локальной машине:**
 ```bash
-cp deploy/.env.deploy.example deploy/.env.deploy
-# Заполнить DEPLOY_HOST / DEPLOY_DIR / DEPLOY_DOMAIN.
-```
-
-**На сервере** (потом положит туда `make deploy-bootstrap`, но `.env.prod` нужно подготовить заранее):
-```bash
-# На сервере после первого git clone:
-cd /srv/ag_co_worker
+ssh leonidl@51.250.51.86
+git clone https://github.com/lvp0110/ag_co_worker.git /home/leonidl/ag_co_worker
+cd /home/leonidl/ag_co_worker
 cp deploy/.env.prod.example .env.prod
-# Заполнить CORS_ORIGIN, AUTH_SERVICE_URL, CALC_SERVICE_URL, ONEC_SERVICE_URL.
 chmod 600 .env.prod
+# Проверить AUTH_SERVICE_URL / CALC_SERVICE_URL / ONEC_SERVICE_URL.
 ```
 
-### 5. Первый запуск
+`bootstrap.sh` сделает clone сам, но `.env.prod` он не создаёт и не перезаписывает — файл под контролем оператора.
+
+### 4. Локальный `.env.deploy` и bootstrap
 
 ```bash
-make deploy-bootstrap   # локально
+cp deploy/.env.deploy.example deploy/.env.deploy   # уже заполнен под isocalc
+make deploy-bootstrap
 ```
 
-Скрипт:
-1. Клонирует репо в `$DEPLOY_DIR`.
-2. Проверяет, что `.env.prod`, nginx и конфиг на месте.
-3. Ставит systemd-юниты из `deploy/systemd/` и поднимает backend + frontend.
-4. Дёргает `https://<domain>/health`.
-
-Сразу после bootstrap — залить фронт:
-```bash
-make deploy-frontend
-```
+`bootstrap.sh`: clone/fetch → проверка предусловий (docker, доступ без sudo, nginx) → `docker compose up -d --build` → health → smoke по домену.
 
 ---
 
@@ -113,109 +90,115 @@ make deploy-frontend
 
 | Ситуация | Команда | Что произойдёт |
 |----------|---------|----------------|
-| Изменился код backend | `make deploy-backend` | git fetch + checkout backend → на сервере `npm ci && npm run build` → `systemctl restart ag-co-worker-backend` (frontend не трогается). |
-| Изменился frontend (статика) | `make deploy-frontend` | Локально `vite build` → `rsync` dist на сервер. Frontend-юнит не перезапускается — `server.js` читает обновлённый `dist` на лету. |
-| Изменился `server.js` / prod-deps фронта | `REBUILD=1 make deploy-frontend` | Плюсом переустановка frontend prod-deps на сервере и `systemctl restart ag-co-worker-frontend`. |
-| Откат backend на прошлую ревизию | `REV=<commit> make deploy-backend` | Тот же скрипт, но `git checkout $REV` вместо `origin/main`. |
-| Правка nginx конфига на сервере | `make deploy-nginx-sync && make deploy-nginx-reload` | Залить шаблон из репо на сервер, валидировать `nginx -t`, перечитать. |
-| Посмотреть статус прод-стека | `make deploy-status` | `systemctl status` юнитов + `curl /health`. |
+| Менялся backend | `make deploy-backend` | `git checkout backend/` → `docker compose up -d --build backend` → health через compose-сеть. |
+| Менялся frontend | `make deploy-frontend` | `git checkout frontend/` → `up -d --build frontend` (vite build внутри образа) → health + smoke по домену. |
+| Менялось всё | `make deploy-all` | Оба сервиса по очереди. |
+| Откат | `REV=<sha> make deploy-backend` | Тот же скрипт, но `git checkout <sha>` вместо `origin/main`. |
+| Правка nginx | `make deploy-nginx-sync && make deploy-nginx-reload` | Требует NOPASSWD-sudo (см. ниже). Иначе — вручную по шагу 2. |
+| Статус | `make deploy-status` | `compose ps` + ревизия + health фронта, backend и домена. |
+| Логи | `make deploy-logs` | `SERVICE=backend`, `TAIL=500`, `FOLLOW=1`. |
+
+Локальный Node для деплоя **не нужен** — вся сборка на сервере в образах.
+
+---
+
+## GitHub Actions auto-deploy (push в `main`)
+
+[.github/workflows/prod-deploy.yml](../.github/workflows/prod-deploy.yml) дёргает те же `deploy/*.sh`. Node в runner'е не ставится.
+
+### Триггеры
+
+- **push в `main`** — селективный rollout по изменённым путям + smoke + Telegram.
+- **workflow_dispatch** — все шаги принудительно, плюс вход `rev` для **отката**.
+
+### Условия шагов (на push)
+
+| Шаг | Когда |
+|-----|-------|
+| `deploy-backend.sh` | менялись `backend/**` или `docker-compose.prod.yml` |
+| `deploy-frontend.sh` | менялись `frontend/**` или `docker-compose.prod.yml` |
+| nginx sync + reload | менялись `deploy/nginx/**` **и** переменная `NGINX_AUTOSYNC=true` |
+| `deploy-status.sh` | всегда |
+
+### Требуемые GitHub Secrets
+
+`Settings → Secrets and variables → Actions → Repository secrets`:
+
+| Секрет | Значение для isocalc |
+|--------|----------------------|
+| `DEPLOY_HOST` | `leonidl@51.250.51.86` |
+| `DEPLOY_DIR` | `/home/leonidl/ag_co_worker` |
+| `DEPLOY_DOMAIN` | `isocalc.constrtodo.ru` |
+| `DEPLOY_CERT_DIR` | `/home/leonidl/certs` |
+| `DEPLOY_SSH_KEY` | приватный ed25519-ключ deploy-юзера (полный PEM с `-----BEGIN…END-----`) |
+| `DEPLOY_KNOWN_HOSTS` | `51.250.51.86 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDxXwEwTYlSMhk6S1PEVAjmWI/ZEYfOYKZfqOBoedgXH` |
+| `TELEGRAM_BOT_TOKEN` | токен бота |
+| `TELEGRAM_CHAT_ID` | id чата (для группы — с `-100…`) |
+
+Переменная (не секрет), `Settings → Variables`:
+
+| Переменная | Смысл |
+|------------|-------|
+| `NGINX_AUTOSYNC` | `true` — разрешить CI синхронизировать nginx-конфиг. Требует NOPASSWD-sudo. По умолчанию выключено. |
+
+### SSH-ключ для CI
+
+Сейчас локальный `deploy/.env.deploy` указывает на `~/.ssh/hrtodo_deploy` — это рабочий ключ, но он «чужой» (от hr-todo-web). Лучше завести отдельный:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/isocalc_deploy -C "github-actions ag_co_worker" -N ""
+ssh-copy-id -i ~/.ssh/isocalc_deploy.pub leonidl@51.250.51.86
+```
+
+Затем в `deploy/.env.deploy` поменять `DEPLOY_SSH_KEY_FILE=~/.ssh/isocalc_deploy`, а содержимое `~/.ssh/isocalc_deploy` (приватный!) положить в секрет `DEPLOY_SSH_KEY`.
+
+### NOPASSWD-sudo (опционально, только для авто-nginx)
+
+Деплой контейнеров sudo **не требует** — `leonidl` в группе `docker`. Sudo нужен исключительно для nginx. Если хотите, чтобы CI сам применял конфиг, `/etc/sudoers.d/deploy-nginx`:
+
+```
+leonidl ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/*, \
+                             /usr/bin/ln -sf /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*, \
+                             /usr/sbin/nginx -t, \
+                             /bin/systemctl reload nginx
+```
+
+После этого выставить `NGINX_AUTOSYNC=true`.
+
+### Откат
+
+```bash
+gh workflow run prod-deploy.yml -f rev=<previous-sha>
+```
+
+Или UI: `Actions → Prod deploy → Run workflow → rev = …`.
 
 ---
 
 ## Диагностика
 
 ```bash
-# Статус прод-стека
-make deploy-status
+make deploy-status                          # compose ps + health
+make deploy-logs                            # логи обоих сервисов
+SERVICE=backend FOLLOW=1 make deploy-logs   # follow только backend
 
-# Логи приложения
-ssh $DEPLOY_HOST "journalctl -u ag-co-worker-backend -n 200 -f"
-ssh $DEPLOY_HOST "journalctl -u ag-co-worker-frontend -n 200 -f"
+# nginx (нужен sudo)
+ssh leonidl@51.250.51.86 "sudo tail -f /var/log/nginx/ag_co_worker.error.log"
 
-# Логи nginx
-ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.error.log"
-ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.access.log"
-
-# Проверка изоляции (оба должны быть "connection refused" снаружи)
-nc -vz ag.example.com 3006
-nc -vz ag.example.com 3008
+# Изоляция: снаружи должно быть закрыто
+nc -vz 51.250.51.86 3007    # ожидаем refused (только loopback)
+nc -vz 51.250.51.86 3006    # ожидаем refused
 ```
 
-## Что НЕ делают скрипты
+Частые случаи:
 
-- Не создают и не пишут TLS-сертификаты (их ставит certbot отдельно).
-- Не пишут в `.env.prod` — он под контролем оператора.
+- **Домен отдаёт постороннюю страницу** — не активирован nginx server block (шаг 2).
+- **502 от nginx** — фронт-контейнер лежит: `make deploy-logs`.
+- **Логин не работает** — проверьте `AUTH_SERVICE_URL` в `.env.prod`: `127.0.0.1:3005` на этой машине это hr-todo-web, нужен `https://dev3.constrtodo.ru:3005`.
+- **backend недоступен для фронта** — в `.env.prod` появился `HOST=127.0.0.1`. Его быть не должно: внутри контейнера нужен bind на `0.0.0.0`.
 
-`deploy-nginx-sync.sh` синхронизирует шаблон `deploy/nginx/ag_co_worker.conf` на сервер и валидирует `nginx -t`; `deploy-nginx-reload.sh` перечитывает конфиг — это разделение позволяет CI прогнать sync без reload, увидеть ошибку и не убить трафик.
+## Что скрипты НЕ делают
 
----
-
-## GitHub Actions auto-deploy (push в `main`)
-
-Workflow [.github/workflows/prod-deploy.yml](../.github/workflows/prod-deploy.yml) делает то же самое, что `make deploy-*` локально: SSH-ится на прод, дёргает скрипты из `deploy/`. CI работает как «удалённая dev-машина» — никакой особой логики дублирующей `deploy/*.sh` в workflow нет.
-
-### Триггеры
-
-- **push в `main`** — полный rollout (backend → nginx [если менялся] → frontend → smoke + Telegram).
-- **workflow_dispatch** (`Actions → Prod deploy → Run workflow`) — те же шаги, плюс ручной вход:
-  - `rev` — необязательная ревизия (тег, ветка или SHA), которая попадёт в `DEPLOY_REV` и будет передана в `deploy-backend.sh`. **Используется для отката**: `Run workflow → rev = <previous-sha>`.
-
-### Условия запуска шагов (на `push` в `main`)
-
-| Шаг | Когда запускается |
-|-----|---------------------|
-| `deploy-backend.sh` | если менялись `backend/**` |
-| `deploy-nginx-sync.sh` + `deploy-nginx-reload.sh` | если менялись `deploy/nginx/**` |
-| `deploy-frontend.sh` | если менялись `frontend/**` |
-| `REBUILD=1` для frontend | если менялся `frontend/server.js` (или prod-deps фронта) |
-| `deploy-status.sh` | всегда (smoke test) |
-
-На `workflow_dispatch` все rollout-шаги запускаются принудительно (use case — force redeploy или откат через `rev`).
-
-### Требуемые GitHub Secrets
-
-`Settings → Secrets and variables → Actions → Repository secrets`:
-
-| Секрет | Назначение |
-|--------|------------|
-| `DEPLOY_HOST` | SSH-цель, формат `deploy@ag.example.com` |
-| `DEPLOY_DIR` | абсолютный путь репо на сервере (например `/srv/ag_co_worker`) |
-| `DEPLOY_DOMAIN` | домен (для curl-smoke и подстановки `<domain>` в `server_name` nginx) |
-| `DEPLOY_CERT_DIR` | **опционально.** Абсолютный путь к директории с `fullchain.pem` / `privkey.pem`. Если не задано — fallback на `/etc/letsencrypt/live/$DEPLOY_DOMAIN`. Примеры: `/etc/letsencrypt/live/constrtodo.ru` (wildcard certbot), `/home/leonidl/certs` (cert вне certbot). |
-| `DEPLOY_SSH_KEY` | приватный ed25519-ключ deploy-юзера (полный PEM, включая `-----BEGIN…END-----`) |
-| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 <host>` — отпечаток сервера, чтобы CI не цеплялся к TOFU |
-| `TELEGRAM_BOT_TOKEN` | токен бота для уведомлений |
-| `TELEGRAM_CHAT_ID` | id чата (для группового чата с `-100…`) |
-
-Получить fingerprint сервера для `DEPLOY_KNOWN_HOSTS`:
-```bash
-ssh-keyscan -t ed25519 ag.example.com
-```
-
-### NOPASSWD-sudo на сервере (нужно для CI и для `make deploy-nginx-sync`)
-
-Файл `/etc/sudoers.d/deploy-nginx`:
-```
-deploy ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/*, \
-                            /usr/bin/ln -sf /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*, \
-                            /usr/sbin/nginx -t, \
-                            /bin/systemctl reload nginx
-```
-Для `make deploy-nginx-reload` достаточно последних двух строк (они уже могли быть).
-
-Для установки/перезапуска юнитов при bootstrap и деплое deploy-пользователю также нужен NOPASSWD на `systemctl` для `ag-co-worker-backend` / `ag-co-worker-frontend` (и копирование unit-файлов в `/etc/systemd/system/` при bootstrap).
-
-### Откат
-
-```bash
-# Найти последний рабочий SHA в гите (например, тег предыдущего релиза)
-gh workflow run prod-deploy.yml -f rev=<previous-sha>
-```
-
-Через UI: `Actions → Prod deploy → Run workflow → rev = …`.
-
-### Что workflow НЕ делает
-
-- Не собирает backend в CI — `npm ci && npm run build` идут **на сервере**, как и при ручном `make deploy-backend`. Источник правды — git checkout на сервере.
-- Не управляет certbot/Let's Encrypt — systemd-timer на сервере.
-- Не трогает `.env.prod` — никогда.
+- Не ставят и не обновляют TLS-сертификаты (wildcard живёт вне проекта).
+- Не пишут `.env.prod` — он под контролем оператора.
+- Не ставят nginx server block без NOPASSWD-sudo — по умолчанию это ручной шаг.

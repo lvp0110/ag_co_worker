@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Роллаут backend на сервер (systemd). Frontend не трогаем.
+# Роллаут backend (Docker). Frontend-контейнер не трогаем.
+#
+# Сборка идёт на сервере внутри образа (Node 22), поэтому локальный Node не нужен.
 #
 # Использование:
-#   make deploy-backend                     # выкатывает ветку из .env.deploy (origin/main)
+#   make deploy-backend                     # ревизия из .env.deploy (origin/main)
 #   REV=<commit|tag> make deploy-backend    # откат/выкат конкретной ревизии
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
@@ -10,21 +12,20 @@ source "$(dirname "$0")/_lib.sh"
 REV="${REV:-$DEPLOY_REV}"
 info "rollout backend на $DEPLOY_HOST: rev=$REV"
 
-remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- backend/"
+# compose-файл берём из той же ревизии — в нём порты и env_file.
+remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- backend/ docker-compose.prod.yml"
 
-info "npm ci + build backend"
-remote "cd backend && npm ci && npm run build"
+info "build + up backend"
+dc "up -d --build backend"
 
-info "restart $BACKEND_UNIT"
-svc "restart $BACKEND_UNIT"
-
-info "ждём health (~5s)"
+info "ждём, пока backend поднимется"
 sleep 5
-svc "is-active $BACKEND_UNIT" || warn "$BACKEND_UNIT не active"
-remote "curl -fsS -o /dev/null http://127.0.0.1:3006/health && echo 'backend /health OK'" \
-  || warn "backend /health не отвечает"
+check_backend || true
 
-info "последние 40 строк journal:"
-remote "sudo journalctl -u '$BACKEND_UNIT' -n 40 --no-pager" || true
+info "последние 40 строк логов backend:"
+dc "logs --tail 40 --no-log-prefix backend" || true
+
+info "статус:"
+dc "ps backend"
 
 ok "backend выкачен"
