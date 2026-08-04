@@ -19,6 +19,10 @@ remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- frontend/ docker-co
 info "build + up frontend (vite build внутри образа)"
 dc "up -d --build frontend"
 
+# HEAD после path-checkout не двигается — фиксируем ревизию в маркер,
+# иначе deploy-status.sh покажет неправду.
+mark_deployed frontend "$REV"
+
 info "ждём health"
 wait_health 30 || warn "frontend не поднялся — смотрите make deploy-logs"
 

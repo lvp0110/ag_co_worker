@@ -18,6 +18,10 @@ remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- backend/ docker-com
 info "build + up backend"
 dc "up -d --build backend"
 
+# HEAD после path-checkout не двигается — фиксируем ревизию в маркер,
+# иначе deploy-status.sh покажет неправду.
+mark_deployed backend "$REV"
+
 info "ждём, пока backend поднимется"
 sleep 5
 check_backend || true

@@ -16,8 +16,14 @@ FAILED=0
 info "compose ps:"
 dc "ps" || { warn "docker compose ps не выполнился (репо на сервере есть? был ли bootstrap?)"; FAILED=1; }
 
-info "ревизия на сервере:"
-remote "git log -1 --format='%h %s (%ci)'" || warn "не удалось прочитать ревизию"
+info "выкаченные ревизии (sha / когда / коммит):"
+show_deployed
+
+# HEAD показываем отдельно и с честной подписью: роллаут делает
+# `git checkout <rev> -- <paths>` и HEAD не двигает, так что HEAD отражает
+# только последний bootstrap, а не текущий деплой.
+info "HEAD чекаута (двигается только при bootstrap):"
+remote "git log -1 --format='  %h %s (%ci)'" || warn "не удалось прочитать HEAD"
 
 # ss на хосте — намеренно ssh_exec, а не remote: проверка порта не должна
 # зависеть от существования $DEPLOY_DIR.

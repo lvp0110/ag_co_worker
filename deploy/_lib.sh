@@ -107,3 +107,30 @@ check_backend() {
   warn "backend /health не отвечает"
   return 1
 }
+
+# ─── маркеры выкаченных ревизий ─────────────────────────────────────────────
+# Роллаут делает `git checkout <rev> -- <paths>`: файлы обновляются, а HEAD
+# остаётся на месте. Поэтому `git log -1` на сервере НЕ показывает выкаченное.
+# Каждый сервис пишет свою ревизию в отдельный маркер — backend и frontend
+# сознательно могут стоять на разных ревизиях.
+
+# mark_deployed <service> <rev>
+mark_deployed() {
+  local service="$1" rev="$2"
+  remote "printf '%s\t%s\t%s\n' \
+    \"\$(git rev-parse --short '$rev')\" \
+    \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \
+    \"\$(git log -1 --format=%s '$rev')\" > '.deployed-$service'"
+}
+
+show_deployed() {
+  local svc line
+  for svc in backend frontend; do
+    line="$(remote "cat '.deployed-$svc' 2>/dev/null || true" 2>/dev/null || true)"
+    if [ -n "$line" ]; then
+      printf '  %-9s %s\n' "$svc" "$line"
+    else
+      printf '  %-9s маркера нет (роллаут этим скриптом ещё не делался)\n' "$svc"
+    fi
+  done
+}
