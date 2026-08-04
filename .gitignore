@@ -43,6 +43,8 @@ build/
 deploy/.env.deploy
 # Отрендеренный nginx-конфиг (deploy-nginx-sync.sh кладёт его в staging на сервере)
 deploy/nginx/*.rendered.conf
+# Маркеры выкаченных ревизий (пишутся на сервере при каждом роллауте)
+.deployed-*
 backend/.env.prod
 .env.prod
 

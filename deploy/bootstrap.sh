@@ -67,6 +67,11 @@ fi
 info "сборка и запуск контейнеров (Node 22 внутри образов)"
 dc "up -d --build"
 
+# bootstrap двигает HEAD целиком, но маркеры инициализируем сразу — чтобы
+# deploy-status.sh с первого запуска показывал ревизии, а не «маркера нет».
+mark_deployed backend "$REV"
+mark_deployed frontend "$REV"
+
 info "ждём health"
 wait_health 30 || true
 check_backend || true
