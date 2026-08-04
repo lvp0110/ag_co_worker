@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
-# Первый запуск на чистой машине (без Docker).
-# Предварительные требования (вручную):
-#   1. Node.js ≥ 20 (node + npm в PATH для user deploy).
-#   2. nginx + certbot, сертификат в /etc/letsencrypt/live/<domain>/.
-#   3. Конфиг nginx активирован (deploy/nginx/ag_co_worker.conf).
-#   4. Пользователь DEPLOY_HOST с правом на DEPLOY_DIR и passwordless sudo
-#      для systemctl/journalctl по юнитам ag-co-worker-*.
-#   5. deploy/.env.deploy заполнен; на сервере .env.prod рядом с репо.
+# Первый запуск на сервере (Docker Compose).
+#
+# Предварительные требования на сервере (делаются один раз, вручную, под root):
+#   1. Docker + compose plugin, а deploy-пользователь — в группе docker.
+#      На webtest уже так: leonidl входит в docker, docker 27.4 / compose v2.31.
+#   2. nginx с активированным конфигом deploy/nginx/ag_co_worker.conf
+#      (см. deploy/README.md — «nginx server block»). Нужен sudo, поэтому
+#      этот шаг НЕ автоматизирован.
+#   3. TLS-сертификат. На webtest это общий wildcard *.constrtodo.ru в
+#      /home/leonidl/certs — certbot не нужен.
+#   4. $DEPLOY_DIR/.env.prod (из deploy/.env.prod.example, chmod 600).
+#      Скрипт его не создаёт и не перезаписывает — он под контролем оператора.
+#
+# Использование:
+#   make deploy-bootstrap                  # ревизия из .env.deploy
+#   REV=origin/<branch> make deploy-bootstrap   # проверить ветку до мержа
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
+
+REV="${REV:-$DEPLOY_REV}"
 
 REPO_URL="${REPO_URL:-}"
 if [ -z "$REPO_URL" ]; then
@@ -25,50 +35,49 @@ ssh_exec "
   else
     cd '$DEPLOY_DIR' && git fetch --all
   fi
-  cd '$DEPLOY_DIR' && git checkout '$DEPLOY_REV'
+  cd '$DEPLOY_DIR' && git checkout '$REV'
 "
 ok "репо на сервере"
 
-info "проверка предварительных условий на сервере"
+info "проверка предусловий на сервере"
 remote '
-  test -f .env.prod || { echo "✗ '"'"'.env.prod'"'"' нет в корне checkout'"'"'а. Скопируйте deploy/.env.prod.example → .env.prod и заполните."; exit 1; }
-  command -v node >/dev/null 2>&1 || { echo "✗ node не установлен (нужен ≥20)"; exit 1; }
-  command -v npm >/dev/null 2>&1 || { echo "✗ npm не установлен"; exit 1; }
-  command -v nginx >/dev/null 2>&1 || { echo "✗ nginx не установлен. sudo apt install nginx"; exit 1; }
-  ls /etc/nginx/sites-enabled/ag_co_worker.conf >/dev/null 2>&1 || { echo "✗ /etc/nginx/sites-enabled/ag_co_worker.conf не активирован. См. deploy/README.md."; exit 1; }
-  sudo nginx -t 2>&1
-  node -v
+  test -f .env.prod || {
+    echo "✗ .env.prod нет в корне checkout'"'"'а."
+    echo "  На сервере: cp deploy/.env.prod.example .env.prod && chmod 600 .env.prod"
+    echo "  Затем заполнить AUTH_SERVICE_URL / CALC_SERVICE_URL / ONEC_SERVICE_URL."
+    exit 1
+  }
+  command -v docker >/dev/null 2>&1 || { echo "✗ docker не установлен"; exit 1; }
+  docker compose version >/dev/null 2>&1 || { echo "✗ docker compose plugin не установлен"; exit 1; }
+  docker info >/dev/null 2>&1 || { echo "✗ нет доступа к docker без sudo — добавьте пользователя в группу docker"; exit 1; }
+  command -v nginx >/dev/null 2>&1 || { echo "✗ nginx не установлен"; exit 1; }
+  docker --version; docker compose version
 '
 ok "предусловия выполнены"
 
-info "ставим systemd unit-ы"
-# Подставляем реальный DEPLOY_DIR в unit-файлы (шаблоны содержат /srv/ag_co_worker).
-ssh_exec "
-  set -e
-  sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-backend.service' \
-    | sudo tee /etc/systemd/system/$BACKEND_UNIT.service >/dev/null
-  sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-frontend.service' \
-    | sudo tee /etc/systemd/system/$FRONTEND_UNIT.service >/dev/null
-  sudo systemctl daemon-reload
-"
-
-info "сборка backend"
-remote "cd backend && npm ci && npm run build"
-
-info "prod-deps frontend (server.js)"
-remote "mkdir -p frontend/dist && cd frontend && npm ci --omit=dev"
-
-info "включаем и запускаем сервисы"
-svc "enable --now $BACKEND_UNIT"
-svc "enable --now $FRONTEND_UNIT"
-sleep 3
-svc "is-active $BACKEND_UNIT"
-svc "is-active $FRONTEND_UNIT"
-
-if [ -n "$DEPLOY_DOMAIN" ]; then
-  info "smoke-check https://$DEPLOY_DOMAIN/health"
-  curl -fs --retry 5 --retry-delay 2 "https://$DEPLOY_DOMAIN/health" \
-    || warn "health не отвечает — смотрите nginx и journalctl -u $BACKEND_UNIT / $FRONTEND_UNIT"
+# nginx-конфиг ставится отдельно (нужен sudo). Не падаем, но громко предупреждаем:
+# без него домен будет уходить в чужой catch-all server block.
+if remote "test -e /etc/nginx/sites-enabled/ag_co_worker.conf"; then
+  ok "nginx server block активирован"
+else
+  warn "/etc/nginx/sites-enabled/ag_co_worker.conf НЕ активирован."
+  warn "Домен будет попадать в чужой catch-all. См. deploy/README.md → «nginx server block»."
 fi
 
-ok "bootstrap завершён. Дальше: make deploy-frontend (вылить статику)."
+info "сборка и запуск контейнеров (Node 22 внутри образов)"
+dc "up -d --build"
+
+info "ждём health"
+wait_health 30 || true
+check_backend || true
+
+info "статус:"
+dc "ps"
+
+if [ -n "$DEPLOY_DOMAIN" ]; then
+  info "smoke https://$DEPLOY_DOMAIN/health"
+  curl -fsS --retry 5 --retry-delay 2 -o /dev/null -w "  HTTP %{http_code}\n" "https://$DEPLOY_DOMAIN/health" \
+    || warn "через домен не отвечает — проверьте nginx server block и логи (make deploy-logs)"
+fi
+
+ok "bootstrap завершён"

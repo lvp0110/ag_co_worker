@@ -14,7 +14,7 @@
 | КП | 1С (`ONEC_SERVICE_URL`); список/карточка на клиенте — `sessionStorage` из ответов 1С |
 | API-документация | OpenAPI + Swagger UI (`@asteasolutions/zod-to-openapi`) |
 | Внешний сервис | `:3005` — auth, calc, 1С (локально `localhost:3005`, staging `dev3.constrtodo.ru:3005`) |
-| Prod | host nginx + systemd (`ag-co-worker-backend` / `ag-co-worker-frontend`) |
+| Prod | host nginx + Docker Compose (`ag_co_worker-backend` / `ag_co_worker-frontend`) → https://isocalc.constrtodo.ru |
 
 ---
 
@@ -69,9 +69,9 @@ make dev
 | `make clean` | Удалить `node_modules` и `dist` в backend и frontend |
 | `make status` | Что где крутится (процессы + порты) |
 
-Prod-деплой: `make deploy-backend`, `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
+Prod-деплой: `make deploy-backend`, `make deploy-frontend`, `make deploy-all`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`. Подробности — в [deploy/README.md](deploy/README.md).
 
-Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3008` (frontend `node server.js`) → `127.0.0.1:3006` (backend `node dist/index.js`). Юниты — `deploy/systemd/*.service`, секреты — `$DEPLOY_DIR/.env.prod`.
+Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3007` (frontend-контейнер, `node server.js`) → `backend:3006` по compose-сети (host-порта у backend нет). Стек — [docker-compose.prod.yml](docker-compose.prod.yml), секреты — `$DEPLOY_DIR/.env.prod`. Сборка (vite и tsc) идёт на сервере внутри образов на Node 22.
 
 ---
 
@@ -119,8 +119,9 @@ ag_co_worker/
 │   ├── index.html
 │   ├── vite.config.js
 │   └── package.json
-├── deploy/                         ← SSH-деплой, nginx, systemd, bootstrap
-│   └── systemd/                    ← ag-co-worker-backend/frontend.service
+├── deploy/                         ← SSH-деплой, nginx server block, bootstrap
+│   └── nginx/                      ← ag_co_worker.conf (шаблон server block)
+├── docker-compose.prod.yml         ← прод-стек (backend + frontend)
 ├── Makefile                        ← все команды разработки и деплоя
 └── .github/workflows/              ← GitHub Pages + prod-deploy
 ```
