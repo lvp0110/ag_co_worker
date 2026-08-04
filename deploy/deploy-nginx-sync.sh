@@ -61,7 +61,9 @@ ssh_exec "mkdir -p '$REMOTE_STAGE_DIR'"
 rsync -az -e "ssh ${SSH_OPTS[*]}" "$LOCAL_RENDERED" "$DEPLOY_HOST:$REMOTE_STAGE_FILE"
 
 info "копирую staging → $SYSTEM_CONF и валидирую nginx -t"
-ssh_exec "sudo cp '$REMOTE_STAGE_FILE' '$SYSTEM_CONF' && \
+# ssh_sudo, а не ssh_exec: без NOPASSWD-sudo нужен TTY для запроса пароля.
+# Все три sudo в одной сессии — пароль спросят один раз.
+ssh_sudo "sudo cp '$REMOTE_STAGE_FILE' '$SYSTEM_CONF' && \
   sudo ln -sf '$SYSTEM_CONF' '$SYSTEM_LINK' && \
   sudo nginx -t"
 
