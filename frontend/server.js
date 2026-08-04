@@ -42,6 +42,22 @@ const authProxy = createProxyMiddleware({
   xfwd: true,
   pathFilter: (pathname) =>
     pathname === "/login" || pathname === "/auth" || pathname.startsWith("/auth/"),
+  on: {
+    proxyReq: (proxyReq) => {
+      // Снимаем Origin перед отправкой в auth-сервис.
+      //
+      // Браузер присылает Origin даже на same-origin POST. Этот хоп —
+      // server-to-server, CORS к нему неприменим, но auth-сервис всё равно
+      // сверяет Origin со своим allowlist'ом (там только dev'ый
+      // http://localhost:5175) и на всё остальное отвечает 403 с пустым телом.
+      // Запрос без Origin он обрабатывает нормально.
+      //
+      // Защиту это не ослабляет: Origin-проверка отсекает только браузеры,
+      // любой не-браузерный клиент просто не посылает заголовок. CSRF здесь
+      // держится на csrf_token + X-CSRF-Token, а не на Origin.
+      proxyReq.removeHeader("origin");
+    },
+  },
 });
 app.use(authProxy);
 
