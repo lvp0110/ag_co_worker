@@ -113,6 +113,56 @@
   line-height: 1.4;
 }
 
+.admin-page__category-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.admin-page__category-btn {
+  /* Override global Calculator.css button { width:100%; height:120px } */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #c9d0d6;
+  background: #fff;
+  color: #3d7a96;
+  font-family: "Montserrat", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.admin-page__category-btn:hover {
+  background: rgba(108, 171, 200, 0.15);
+  color: #2a5f78;
+  opacity: 1;
+}
+
+.admin-page__category-btn--active {
+  background: #6cabc8;
+  border-color: #6cabc8;
+  color: #fff;
+}
+
+.admin-page__category-btn--active:hover {
+  background: #5a9bb8;
+  border-color: #5a9bb8;
+  color: #fff;
+  opacity: 1;
+}
+
 .admin-page__table--selectable {
   pointer-events: auto;
 }
@@ -150,6 +200,61 @@
 
 .admin-page__composition-head {
   margin-bottom: 10px;
+}
+
+.admin-page__composition-head--spaced {
+  margin-top: 16px;
+}
+
+.admin-page__replacements {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 2px;
+}
+
+.admin-page__replacement {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  pointer-events: auto;
+}
+
+.admin-page__replacement-type {
+  /* Override global Calculator.css span { pointer-events:none; display:flex } */
+  display: block;
+  min-width: 140px;
+  flex: 0 1 200px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: auto;
+  justify-content: flex-start;
+}
+
+.admin-page__select {
+  flex: 1 1 240px;
+  max-width: 480px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #c9d0d6;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+  font-family: "Montserrat", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.admin-page__select:focus {
+  outline: 2px solid #6cabc8;
+  outline-offset: 1px;
 }
 
 .admin-page__composition-title {
