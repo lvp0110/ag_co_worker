@@ -130,24 +130,28 @@
 
 .admin-page__create-fields {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-bottom: 8px;
+  max-width: 420px;
 }
 
 .admin-page__field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1 1 160px;
-  min-width: 140px;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
   margin: 0;
   pointer-events: auto;
 }
 
 .admin-page__field--action {
   flex: 0 0 auto;
+  max-width: none;
   min-width: 0;
 }
 
@@ -163,9 +167,9 @@
 
 .admin-page__input {
   width: 100%;
-  height: auto;
+  height: 38px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 0 10px;
   border: 1px solid #c9d0d6;
   border-radius: 6px;
   background: #fff;
@@ -173,6 +177,7 @@
   font-family: "Montserrat", sans-serif;
   font-size: 13px;
   font-weight: 500;
+  line-height: 36px;
   box-shadow: none;
   box-sizing: border-box;
 }
@@ -182,10 +187,15 @@
   outline-offset: 1px;
 }
 
+/* В колонке формы: без flex-grow от .admin-page__select, ширина = ячейке */
 .admin-page__select--full {
-  max-width: none;
   width: 100%;
-  flex: none;
+  max-width: 100%;
+}
+
+.admin-page__create-submit {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .admin-page__success {
@@ -383,9 +393,9 @@
   flex: 1 1 240px;
   max-width: 480px;
   width: auto;
-  height: auto;
+  height: 38px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 0 10px;
   border: 1px solid #c9d0d6;
   border-radius: 6px;
   background: #fff;
@@ -393,6 +403,7 @@
   font-family: "Montserrat", sans-serif;
   font-size: 13px;
   font-weight: 500;
+  line-height: 36px;
   box-shadow: none;
   cursor: pointer;
   box-sizing: border-box;
@@ -401,6 +412,14 @@
 .admin-page__select:focus {
   outline: 2px solid #6cabc8;
   outline-offset: 1px;
+}
+
+/* После .admin-page__select: иначе flex-basis 240px в колонке раздувает высоту */
+.admin-page__select--full {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  height: 38px;
 }
 
 .admin-page__composition-title {
@@ -476,6 +495,26 @@
   overflow-x: auto;
   border: 1px solid #c9d0d6;
   border-radius: 6px;
+}
+
+.admin-page__meta-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #e8ecef;
+  border-radius: 8px;
+  background: #fff;
+  max-width: 420px;
+}
+
+.admin-page__meta-form .admin-page__composition-title {
+  margin: 0;
+}
+
+.admin-page__meta-form .admin-page__hint {
+  margin: 0;
 }
 
 .admin-page__table {

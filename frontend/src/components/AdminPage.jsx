@@ -17,6 +17,7 @@ import {
   listAdminConstructions,
   listAdminMaterials,
   pickCategoryIdFromRows,
+  updateAdminConstruction,
   updateAdminConstructionMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
@@ -92,8 +93,6 @@ const CONSTRUCTION_COLUMNS = [
 
 const CONSTRUCTION_DETAIL_FIELDS = [
   { key: "id", label: "ID" },
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
   { key: "type_id", label: "ID типа" },
   { key: "type_code", label: "Код типа" },
   { key: "type_name", label: "Тип" },
@@ -463,8 +462,13 @@ function MaterialDetail({ code, label }) {
   );
 }
 
-function ConstructionDetail({ constructionId, label, categoryCode }) {
+function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) {
   const [detail, setDetail] = useState(null);
+  const [editCode, setEditCode] = useState("");
+  const [editName, setEditName] = useState("");
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [metaError, setMetaError] = useState(null);
+  const [metaSuccess, setMetaSuccess] = useState(null);
   const [defaultMaterials, setDefaultMaterials] = useState([]);
   const [replacementGroups, setReplacementGroups] = useState([]);
   const [optionalMaterials, setOptionalMaterials] = useState([]);
@@ -570,6 +574,10 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
         if (cancelled) return;
         setCatalogMaterials(catalog);
         setDetail(data?.detail ?? null);
+        setEditCode(String(data?.detail?.code ?? ""));
+        setEditName(String(data?.detail?.name ?? ""));
+        setMetaError(null);
+        setMetaSuccess(null);
         const enriched = enrichCompositionFromMaterialsCatalog(
           {
             defaultMaterials: data?.defaultMaterials ?? [],
@@ -602,6 +610,10 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
       } catch (err) {
         if (!cancelled) {
           setDetail(null);
+          setEditCode("");
+          setEditName("");
+          setMetaError(null);
+          setMetaSuccess(null);
           setDefaultMaterials([]);
           setReplacementGroups([]);
           setOptionalMaterials([]);
@@ -640,6 +652,52 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
   const handleAddQueryChange = (groupKey, value) => {
     setAddQueryByGroup((prev) => ({ ...prev, [groupKey]: value }));
     setAddByGroup((prev) => ({ ...prev, [groupKey]: "" }));
+  };
+
+  const handleSaveConstructionMeta = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!detail) return;
+
+    const code = editCode.trim();
+    const name = editName.trim();
+    const typeId = Number(detail.type_id ?? detail.type?.id);
+    const categoryId = Number(detail.category_id ?? detail.category?.id);
+
+    if (!code || !name) {
+      setMetaError("Код и название не должны быть пустыми.");
+      setMetaSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(typeId) || typeId <= 0) {
+      setMetaError("У конструкции нет type_id — сохранить нельзя.");
+      setMetaSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(categoryId) || categoryId <= 0) {
+      setMetaError("У конструкции нет category_id — сохранить нельзя.");
+      setMetaSuccess(null);
+      return;
+    }
+
+    setSavingMeta(true);
+    setMetaError(null);
+    setMetaSuccess(null);
+    try {
+      await updateAdminConstruction(constructionId, {
+        code,
+        name,
+        type_id: typeId,
+        category_id: categoryId,
+      });
+      setDetail((prev) => (prev ? { ...prev, code, name } : prev));
+      setMetaSuccess("Код и название сохранены.");
+      onUpdated?.({ id: constructionId, code, name });
+    } catch (err) {
+      setMetaError(formatRequestError(err));
+    } finally {
+      setSavingMeta(false);
+    }
   };
 
   const handleAddMaterial = async (group, groupKey) => {
@@ -849,6 +907,75 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
         </p>
       ) : (
         <>
+          <form
+            className="admin-page__meta-form"
+            onSubmit={handleSaveConstructionMeta}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="admin-page__composition-title">
+              Редактирование конструкции
+            </h3>
+            <p className="admin-page__hint">
+              Код и название можно менять только в открытой карточке.
+            </p>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Код</span>
+              <input
+                type="text"
+                className="admin-page__input"
+                value={editCode}
+                disabled={savingMeta}
+                onChange={(e) => {
+                  setEditCode(e.target.value);
+                  setMetaSuccess(null);
+                }}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Название</span>
+              <input
+                type="text"
+                className="admin-page__input"
+                value={editName}
+                disabled={savingMeta}
+                onChange={(e) => {
+                  setEditName(e.target.value);
+                  setMetaSuccess(null);
+                }}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <button
+              type="submit"
+              className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
+              disabled={
+                savingMeta ||
+                !editCode.trim() ||
+                !editName.trim() ||
+                (editCode.trim() === String(detail.code ?? "").trim() &&
+                  editName.trim() === String(detail.name ?? "").trim())
+              }
+            >
+              {savingMeta ? "Сохранение…" : "Сохранить"}
+            </button>
+            {metaError && (
+              <div className="admin-page__error" role="alert">
+                <p className="admin-page__error-title">
+                  Не удалось сохранить
+                </p>
+                <pre className="admin-page__error-body">{metaError}</pre>
+              </div>
+            )}
+            {metaSuccess && (
+              <p className="admin-page__success" role="status">
+                {metaSuccess}
+              </p>
+            )}
+          </form>
+
           <KeyValueTable fields={CONSTRUCTION_DETAIL_FIELDS} data={detail} />
 
           <div className="admin-page__composition-head admin-page__composition-head--spaced">
@@ -1341,6 +1468,14 @@ function ConstructionsListPanel() {
     setSelectedId((prev) => (prev === id ? null : id));
   };
 
+  const handleConstructionUpdated = ({ id, code, name }) => {
+    setRows((prev) =>
+      prev.map((item) =>
+        getConstructionId(item) === id ? { ...item, code, name } : item
+      )
+    );
+  };
+
   const handleCreateConstruction = async (e) => {
     e.preventDefault();
     if (!isSoundCategory) return;
@@ -1500,25 +1635,20 @@ function ConstructionsListPanel() {
                 )}
               </select>
             </label>
-            <div className="admin-page__field admin-page__field--action">
-              <span className="admin-page__field-label" aria-hidden="true">
-                &nbsp;
-              </span>
-              <button
-                type="submit"
-                className="admin-page__btn admin-page__btn--inline"
-                disabled={
-                  creating ||
-                  loading ||
-                  !createCode.trim() ||
-                  !createName.trim() ||
-                  !createTypeId ||
-                  !soundCategoryId
-                }
-              >
-                {creating ? "Создание…" : "Создать"}
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
+              disabled={
+                creating ||
+                loading ||
+                !createCode.trim() ||
+                !createName.trim() ||
+                !createTypeId ||
+                !soundCategoryId
+              }
+            >
+              {creating ? "Создание…" : "Создать"}
+            </button>
           </div>
           {createError && (
             <div className="admin-page__error" role="alert">
@@ -1537,7 +1667,8 @@ function ConstructionsListPanel() {
       )}
 
       <p className="admin-page__hint">
-        Нажмите на строку, чтобы раскрыть карточку конструкции.
+        Нажмите на строку, чтобы раскрыть карточку конструкции. Код и название
+        редактируются внутри карточки.
       </p>
 
       {error && (
@@ -1585,6 +1716,7 @@ function ConstructionsListPanel() {
                           constructionId={id}
                           label={selectedLabel}
                           categoryCode={category}
+                          onUpdated={handleConstructionUpdated}
                         />
                       ) : null
                     }

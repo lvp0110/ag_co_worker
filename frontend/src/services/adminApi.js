@@ -6,6 +6,8 @@
  *   GET /admin/constructions?type=&category=
  *   POST /admin/constructions
  *     → body: { code, name, type_id, category_id }
+ *   PUT /admin/constructions/{id}
+ *     → body: { code, name, type_id, category_id }
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
  *   POST /admin/constructions/{id}/materials
@@ -291,6 +293,28 @@ export const createAdminConstruction = async (payload) => {
 
   return request("/admin/constructions", {
     method: "POST",
+    headers,
+    body: {
+      code: String(payload.code || "").trim(),
+      name: String(payload.name || "").trim(),
+      type_id: Number(payload.type_id),
+      category_id: Number(payload.category_id),
+    },
+  });
+};
+
+/**
+ * PUT /admin/constructions/{id} — обновить код/название/тип/категорию.
+ * @param {string|number} id
+ * @param {{ code: string, name: string, type_id: number, category_id: number }} payload
+ */
+export const updateAdminConstruction = async (id, payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/admin/constructions/${encodeURIComponent(id)}`, {
+    method: "PUT",
     headers,
     body: {
       code: String(payload.code || "").trim(),
