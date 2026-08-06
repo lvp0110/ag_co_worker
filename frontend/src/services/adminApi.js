@@ -535,10 +535,16 @@ export const addAdminConstructionOptionalMaterial = async (
   );
 };
 
-/** Каталог materials с usage === "si" (звукоизоляция). */
-export const filterMaterialsByUsageSi = (materials) => {
+/** Каталог materials с заданным usage (si / ac / vi). */
+export const filterMaterialsByUsage = (materials, usage) => {
   if (!Array.isArray(materials)) return [];
+  const target = String(usage || "").trim().toLowerCase();
+  if (!target) return materials;
   return materials.filter(
-    (mat) => String(mat?.usage || "").trim().toLowerCase() === "si"
+    (mat) => String(mat?.usage || "").trim().toLowerCase() === target
   );
 };
+
+/** Каталог materials с usage === "si" (звукоизоляция). */
+export const filterMaterialsByUsageSi = (materials) =>
+  filterMaterialsByUsage(materials, "si");

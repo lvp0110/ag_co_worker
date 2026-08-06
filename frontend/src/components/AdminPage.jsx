@@ -8,6 +8,7 @@ import {
   collectReplacementMaterialTypes,
   createAdminConstruction,
   enrichCompositionFromMaterialsCatalog,
+  filterMaterialsByUsage,
   filterMaterialsByUsageSi,
   getAdminConstructionById,
   getAdminMaterialByCode,
@@ -104,6 +105,12 @@ const CONSTRUCTION_DETAIL_FIELDS = [
 const CONSTRUCTION_CATEGORY_FILTERS = [
   { code: "sound", label: "Звукоизоляция" },
   { code: "acoustic", label: "Акустика" },
+];
+
+const MATERIAL_USAGE_FILTERS = [
+  { code: "si", label: "Звукоизоляция" },
+  { code: "ac", label: "Акустика" },
+  { code: "vi", label: "Виброизоляция" },
 ];
 
 const COMPOSITION_COLUMNS = [
@@ -243,6 +250,7 @@ function MaterialsListPanel() {
   const [error, setError] = useState(null);
   const [query, setQuery] = useState("");
   const [selectedCode, setSelectedCode] = useState(null);
+  const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,12 +274,22 @@ function MaterialsListPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    setSelectedCode(null);
+    setQuery("");
+  }, [usage]);
+
+  const usageRows = useMemo(
+    () => filterMaterialsByUsage(rows, usage),
+    [rows, usage]
+  );
+
   const filtered = useMemo(
     () =>
-      rows.filter((row) =>
+      usageRows.filter((row) =>
         matchesQuery(row, query.trim(), ["code", "name", "type", "units"])
       ),
-    [rows, query]
+    [usageRows, query]
   );
 
   const selectedRow = useMemo(
@@ -300,7 +318,7 @@ function MaterialsListPanel() {
         <h2 className="admin-page__card-title">
           Материалы
           <span className="admin-page__count">
-            {loading ? "…" : `${filtered.length} / ${rows.length}`}
+            {loading ? "…" : `${filtered.length} / ${usageRows.length}`}
           </span>
         </h2>
         <input
@@ -312,6 +330,31 @@ function MaterialsListPanel() {
           disabled={loading}
           aria-label="Поиск материалов"
         />
+      </div>
+
+      <div
+        className="admin-page__category-toggle"
+        role="group"
+        aria-label="Раздел материалов"
+      >
+        {MATERIAL_USAGE_FILTERS.map((item) => {
+          const active = usage === item.code;
+          return (
+            <button
+              key={item.code}
+              type="button"
+              className={
+                active
+                  ? "admin-page__category-btn admin-page__category-btn--active"
+                  : "admin-page__category-btn"
+              }
+              aria-pressed={active}
+              onClick={() => setUsage(item.code)}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
 
       <p className="admin-page__hint">
@@ -331,9 +374,9 @@ function MaterialsListPanel() {
         </p>
       ) : !filtered.length ? (
         <p className="admin-page__empty admin-page__empty--inline">
-          {rows.length
+          {usageRows.length
             ? "Ничего не найдено по запросу."
-            : "Список материалов пуст."}
+            : "В этом разделе нет материалов."}
         </p>
       ) : (
         <div className="admin-page__table-wrap">
