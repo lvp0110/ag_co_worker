@@ -7,6 +7,9 @@ import {
   collectConstructionTypes,
   collectReplacementMaterialTypes,
   createAdminConstruction,
+  deleteAdminConstruction,
+  deleteAdminConstructionMaterial,
+  deleteAdminConstructionOptionalMaterial,
   enrichCompositionFromMaterialsCatalog,
   filterMaterialsByUsage,
   filterMaterialsByUsageSi,
@@ -121,12 +124,22 @@ const COMPOSITION_COLUMNS = [
   { key: "weight", label: "Вес" },
 ];
 
-function pickDefaultMaterialId(materials) {
-  if (!Array.isArray(materials) || !materials.length) return "";
-  const preferred = materials.find((m) => m.is_default);
-  const chosen = preferred ?? materials[0];
-  const article = String(chosen.code || chosen.material_code || "").trim();
-  return article || String(chosen.material_id ?? chosen.id ?? "");
+function DeleteIconButton({ deleting, disabled, label, onClick }) {
+  return (
+    <button
+      type="button"
+      className="admin-page__btn admin-page__btn--icon admin-page__btn--danger"
+      disabled={disabled || deleting}
+      aria-label={deleting ? `Удаление ${label}` : `Удалить ${label}`}
+      title="Удалить"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
+    >
+      {deleting ? "…" : "×"}
+    </button>
+  );
 }
 
 function materialOptionLabel(mat) {
@@ -505,17 +518,23 @@ function MaterialDetail({ code, label }) {
   );
 }
 
-function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) {
+function ConstructionDetail({
+  constructionId,
+  label,
+  categoryCode,
+  onUpdated,
+  onDeleted,
+}) {
   const [detail, setDetail] = useState(null);
   const [editCode, setEditCode] = useState("");
   const [editName, setEditName] = useState("");
   const [savingMeta, setSavingMeta] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [metaError, setMetaError] = useState(null);
   const [metaSuccess, setMetaSuccess] = useState(null);
   const [defaultMaterials, setDefaultMaterials] = useState([]);
   const [replacementGroups, setReplacementGroups] = useState([]);
   const [optionalMaterials, setOptionalMaterials] = useState([]);
-  const [selectedByGroup, setSelectedByGroup] = useState({});
   const [catalogMaterials, setCatalogMaterials] = useState([]);
   const [addByGroup, setAddByGroup] = useState({});
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
@@ -530,6 +549,8 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
   const [addError, setAddError] = useState(null);
   const [optionalAddError, setOptionalAddError] = useState(null);
   const [defaultAddError, setDefaultAddError] = useState(null);
+  const [deletingMaterialId, setDeletingMaterialId] = useState(null);
+  const [deletingOptionalId, setDeletingOptionalId] = useState(null);
   const [promoteError, setPromoteError] = useState(null);
   const [addingGroupKey, setAddingGroupKey] = useState(null);
   const [addingOptional, setAddingOptional] = useState(false);
@@ -576,6 +597,58 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
   const replacementMaterialTypes = useMemo(
     () => collectReplacementMaterialTypes(replacementGroups),
     [replacementGroups]
+  );
+
+  const defaultMaterialsColumns = useMemo(
+    () => [
+      ...COMPOSITION_COLUMNS,
+      {
+        key: "actions",
+        label: "",
+        render: (row) => {
+          const itemId = Number(row.id);
+          const article = String(
+            row.code || row.material_code || itemId || ""
+          ).trim();
+          return (
+            <DeleteIconButton
+              deleting={deletingMaterialId === itemId}
+              disabled={!Number.isFinite(itemId) || itemId <= 0}
+              label={article}
+              onClick={() => handleDeleteCompositionMaterial(row, "default")}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletingMaterialId]
+  );
+
+  const optionalMaterialsColumns = useMemo(
+    () => [
+      ...COMPOSITION_COLUMNS,
+      {
+        key: "actions",
+        label: "",
+        render: (row) => {
+          const itemId = Number(row.id);
+          const article = String(
+            row.code || row.material_code || itemId || ""
+          ).trim();
+          return (
+            <DeleteIconButton
+              deleting={deletingOptionalId === itemId}
+              disabled={!Number.isFinite(itemId) || itemId <= 0}
+              label={article}
+              onClick={() => handleDeleteOptionalMaterial(row)}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletingOptionalId]
   );
 
   const optionalArticles = useMemo(() => {
@@ -634,14 +707,6 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
         setDefaultMaterials(defaults);
         setReplacementGroups(groups);
         setOptionalMaterials(enriched.optionalMaterials);
-        const initial = {};
-        for (const group of groups) {
-          const key = String(
-            group.group ?? getReplacementMaterialTypeId(group) ?? ""
-          );
-          initial[key] = pickDefaultMaterialId(group.materials);
-        }
-        setSelectedByGroup(initial);
         setAddByGroup({});
         setAddQueryByGroup({});
         setOptionalAddArticle("");
@@ -660,7 +725,6 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
           setDefaultMaterials([]);
           setReplacementGroups([]);
           setOptionalMaterials([]);
-          setSelectedByGroup({});
           setAddByGroup({});
           setAddQueryByGroup({});
           setOptionalAddArticle("");
@@ -683,10 +747,6 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
   useEffect(() => {
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [constructionId]);
-
-  const handleGroupChange = (groupKey, value) => {
-    setSelectedByGroup((prev) => ({ ...prev, [groupKey]: value }));
-  };
 
   const handleAddChange = (groupKey, value) => {
     setAddByGroup((prev) => ({ ...prev, [groupKey]: value }));
@@ -740,6 +800,29 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
       setMetaError(formatRequestError(err));
     } finally {
       setSavingMeta(false);
+    }
+  };
+
+  const handleDeleteConstruction = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!detail || deleting) return;
+
+    const code = String(detail.code || editCode || constructionId).trim();
+    const ok = window.confirm(
+      `Удалить конструкцию «${code}»? Это действие нельзя отменить.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    setMetaError(null);
+    setMetaSuccess(null);
+    try {
+      await deleteAdminConstruction(constructionId);
+      onDeleted?.({ id: constructionId });
+    } catch (err) {
+      setMetaError(formatRequestError(err));
+      setDeleting(false);
     }
   };
 
@@ -874,6 +957,70 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
     }
   };
 
+  const handleDeleteCompositionMaterial = async (row, source = "default") => {
+    const itemId = Number(row.id);
+    const setErr =
+      source === "replacement" ? setAddError : setDefaultAddError;
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      setErr("У записи состава нет id — удалить нельзя.");
+      return;
+    }
+
+    const article = String(row.code || row.material_code || itemId).trim();
+    const isDefault = Boolean(row.is_default);
+    let message = `Удалить материал «${article}» из материалов по умолчанию?`;
+    if (source === "replacement") {
+      message = isDefault
+        ? `Удалить «${article}» из группы замены? Это default-вариант группы.`
+        : `Удалить «${article}» из группы замены?`;
+    } else if (
+      row.replacement_group != null &&
+      row.replacement_group !== ""
+    ) {
+      message = `Удалить «${article}» из состава? Он также является default в группе замены ${row.replacement_group}.`;
+    }
+    if (!window.confirm(message)) return;
+
+    setDeletingMaterialId(itemId);
+    setErr(null);
+    try {
+      await deleteAdminConstructionMaterial(constructionId, itemId);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setErr(formatRequestError(err));
+    } finally {
+      setDeletingMaterialId(null);
+    }
+  };
+
+  const handleDeleteOptionalMaterial = async (row) => {
+    const itemId = Number(row.id);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      setOptionalAddError("У записи доп. материала нет id — удалить нельзя.");
+      return;
+    }
+
+    const article = String(row.code || row.material_code || itemId).trim();
+    if (
+      !window.confirm(
+        `Удалить «${article}» из дополнительных материалов?`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingOptionalId(itemId);
+    setOptionalAddError(null);
+    try {
+      await deleteAdminConstructionOptionalMaterial(constructionId, itemId);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setOptionalAddError(formatRequestError(err));
+    } finally {
+      setDeletingOptionalId(null);
+    }
+  };
+
   const handlePromoteDefaultToReplacement = async () => {
     const itemId = Number(promoteItemId);
     const typeId = Number(promoteTypeId);
@@ -959,7 +1106,8 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
               Редактирование конструкции
             </h3>
             <p className="admin-page__hint">
-              Код и название можно менять только в открытой карточке.
+              Код и название можно менять только в открытой карточке. Удаление
+              тоже только отсюда.
             </p>
             <label className="admin-page__field">
               <span className="admin-page__field-label">Код</span>
@@ -967,7 +1115,7 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
                 type="text"
                 className="admin-page__input"
                 value={editCode}
-                disabled={savingMeta}
+                disabled={savingMeta || deleting}
                 onChange={(e) => {
                   setEditCode(e.target.value);
                   setMetaSuccess(null);
@@ -982,7 +1130,7 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
                 type="text"
                 className="admin-page__input"
                 value={editName}
-                disabled={savingMeta}
+                disabled={savingMeta || deleting}
                 onChange={(e) => {
                   setEditName(e.target.value);
                   setMetaSuccess(null);
@@ -991,24 +1139,33 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
                 autoComplete="off"
               />
             </label>
-            <button
-              type="submit"
-              className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
-              disabled={
-                savingMeta ||
-                !editCode.trim() ||
-                !editName.trim() ||
-                (editCode.trim() === String(detail.code ?? "").trim() &&
-                  editName.trim() === String(detail.name ?? "").trim())
-              }
-            >
-              {savingMeta ? "Сохранение…" : "Сохранить"}
-            </button>
+            <div className="admin-page__meta-actions">
+              <button
+                type="submit"
+                className="admin-page__btn admin-page__btn--inline"
+                disabled={
+                  savingMeta ||
+                  deleting ||
+                  !editCode.trim() ||
+                  !editName.trim() ||
+                  (editCode.trim() === String(detail.code ?? "").trim() &&
+                    editName.trim() === String(detail.name ?? "").trim())
+                }
+              >
+                {savingMeta ? "Сохранение…" : "Сохранить"}
+              </button>
+              <button
+                type="button"
+                className="admin-page__btn admin-page__btn--inline admin-page__btn--danger"
+                disabled={savingMeta || deleting}
+                onClick={handleDeleteConstruction}
+              >
+                {deleting ? "Удаление…" : "Удалить"}
+              </button>
+            </div>
             {metaError && (
               <div className="admin-page__error" role="alert">
-                <p className="admin-page__error-title">
-                  Не удалось сохранить
-                </p>
+                <p className="admin-page__error-title">Ошибка</p>
                 <pre className="admin-page__error-body">{metaError}</pre>
               </div>
             )}
@@ -1033,14 +1190,14 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
           {defaultAddError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
-                Не удалось добавить материал по умолчанию
+                Ошибка материалов по умолчанию
               </p>
               <pre className="admin-page__error-body">{defaultAddError}</pre>
             </div>
           )}
 
           <SimpleTable
-            columns={COMPOSITION_COLUMNS}
+            columns={defaultMaterialsColumns}
             rows={defaultMaterials}
             emptyText="Нет материалов по умолчанию."
           />
@@ -1182,7 +1339,7 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
           {addError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
-                Не удалось добавить материал
+                Ошибка заменяемых материалов
               </p>
               <pre className="admin-page__error-body">{addError}</pre>
             </div>
@@ -1199,7 +1356,6 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
                   group.group ?? getReplacementMaterialTypeId(group) ?? idx
                 );
                 const typeLabel = groupTypeLabel(group);
-                const value = selectedByGroup[groupKey] ?? "";
                 const inGroupArticles = new Set(
                   (group.materials || [])
                     .map((m) =>
@@ -1222,39 +1378,56 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
 
                 return (
                   <div key={groupKey} className="admin-page__replacement-block">
-                    <label className="admin-page__replacement">
-                      <span className="admin-page__replacement-type">
-                        {typeLabel}
-                      </span>
-                      <select
-                        className="admin-page__select"
-                        value={value}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleGroupChange(groupKey, e.target.value);
-                        }}
-                        aria-label={`Замена: ${typeLabel}`}
-                      >
-                        {!group.materials?.length ? (
-                          <option value="">Нет вариантов</option>
-                        ) : (
-                          group.materials.map((mat, matIdx) => {
-                            const article = String(
-                              mat.code || mat.material_code || ""
-                            ).trim();
-                            const optValue =
-                              article ||
-                              String(mat.material_id ?? mat.id ?? matIdx);
-                            return (
-                              <option key={optValue} value={optValue}>
+                    <div className="admin-page__replacement-type">
+                      {typeLabel}
+                    </div>
+
+                    {group.materials?.length ? (
+                      <ul className="admin-page__replacement-list">
+                        {group.materials.map((mat, matIdx) => {
+                          const itemId = Number(mat.id);
+                          const article = String(
+                            mat.code || mat.material_code || itemId || matIdx
+                          ).trim();
+                          return (
+                            <li
+                              key={
+                                Number.isFinite(itemId) && itemId > 0
+                                  ? itemId
+                                  : `${groupKey}-${article}-${matIdx}`
+                              }
+                              className="admin-page__replacement-list-item"
+                            >
+                              <span className="admin-page__replacement-list-label">
                                 {materialOptionLabel(mat)}
-                              </option>
-                            );
-                          })
-                        )}
-                      </select>
-                    </label>
+                                {mat.is_default ? (
+                                  <span className="admin-page__pill">
+                                    default
+                                  </span>
+                                ) : null}
+                              </span>
+                              <DeleteIconButton
+                                deleting={deletingMaterialId === itemId}
+                                disabled={
+                                  !Number.isFinite(itemId) || itemId <= 0
+                                }
+                                label={article}
+                                onClick={() =>
+                                  handleDeleteCompositionMaterial(
+                                    mat,
+                                    "replacement"
+                                  )
+                                }
+                              />
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="admin-page__empty admin-page__empty--inline">
+                        Нет вариантов в группе.
+                      </p>
+                    )}
 
                     <div className="admin-page__replacement-add">
                       <input
@@ -1333,14 +1506,14 @@ function ConstructionDetail({ constructionId, label, categoryCode, onUpdated }) 
           {optionalAddError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
-                Не удалось добавить доп. материал
+                Ошибка дополнительных материалов
               </p>
               <pre className="admin-page__error-body">{optionalAddError}</pre>
             </div>
           )}
 
           <SimpleTable
-            columns={COMPOSITION_COLUMNS}
+            columns={optionalMaterialsColumns}
             rows={optionalMaterials}
             emptyText="Нет дополнительных материалов."
           />
@@ -1517,6 +1690,11 @@ function ConstructionsListPanel() {
         getConstructionId(item) === id ? { ...item, code, name } : item
       )
     );
+  };
+
+  const handleConstructionDeleted = ({ id }) => {
+    setRows((prev) => prev.filter((item) => getConstructionId(item) !== id));
+    setSelectedId((prev) => (prev === id ? null : prev));
   };
 
   const handleCreateConstruction = async (e) => {
@@ -1760,6 +1938,7 @@ function ConstructionsListPanel() {
                           label={selectedLabel}
                           categoryCode={category}
                           onUpdated={handleConstructionUpdated}
+                          onDeleted={handleConstructionDeleted}
                         />
                       ) : null
                     }

@@ -10,3 +10,8 @@
   display: flex;
   flex-direction: column;
 }
+
+.app-layout__main--dark {
+  background: #0f1419;
+  color: #e2e8f0;
+}

@@ -8,14 +8,17 @@
  *     → body: { code, name, type_id, category_id }
  *   PUT /admin/constructions/{id}
  *     → body: { code, name, type_id, category_id }
+ *   DELETE /admin/constructions/{id}
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
  *   POST /admin/constructions/{id}/materials
  *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
  *   PUT /admin/constructions/{id}/materials/{itemId}
  *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
+ *   DELETE /admin/constructions/{id}/materials/{itemId}
  *   POST /admin/constructions/{id}/optional-materials
  *     → body: { id, weight, sort_order }  // доп. материал (не база и не замена)
+ *   DELETE /admin/constructions/{id}/optional-materials/{itemId}
  *
  * Same-origin через Vite / frontend server.js proxy → AUTH_SERVICE_URL.
  * Нужна cookie access_token (роль admin на стороне сервиса).
@@ -326,6 +329,21 @@ export const updateAdminConstruction = async (id, payload) => {
 };
 
 /**
+ * DELETE /admin/constructions/{id} — удалить конструкцию.
+ * @param {string|number} id
+ */
+export const deleteAdminConstruction = async (id) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/admin/constructions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers,
+  });
+};
+
+/**
  * Уникальные типы конструкций из списка (для селекта при создании).
  * @param {object[]} rows
  * @returns {{ id: number, code: string, name: string }[]}
@@ -461,6 +479,27 @@ export const updateAdminConstructionMaterial = async (
 };
 
 /**
+ * DELETE /admin/constructions/{id}/materials/{itemId} — удалить запись состава.
+ * itemId = id строки composition (construction_materials.id).
+ */
+export const deleteAdminConstructionMaterial = async (
+  constructionId,
+  itemId
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/materials/${encodeURIComponent(itemId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  );
+};
+
+/**
  * Типы материалов для групп замены (materials_types из seed ConstrTodo).
  * id из живых групп перекрывает seed при совпадении code.
  */
@@ -531,6 +570,27 @@ export const addAdminConstructionOptionalMaterial = async (
       method: "POST",
       headers,
       body,
+    }
+  );
+};
+
+/**
+ * DELETE /admin/constructions/{id}/optional-materials/{itemId}.
+ * itemId = id записи construction_optional_materials.
+ */
+export const deleteAdminConstructionOptionalMaterial = async (
+  constructionId,
+  itemId
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/optional-materials/${encodeURIComponent(itemId)}`,
+    {
+      method: "DELETE",
+      headers,
     }
   );
 };
