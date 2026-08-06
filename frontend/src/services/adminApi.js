@@ -4,9 +4,13 @@
  *   GET /admin/materials
  *   GET /admin/materials/{code}
  *   GET /admin/constructions?type=&category=
+ *   POST /admin/constructions
+ *     → body: { code, name, type_id, category_id }
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
  *   POST /admin/constructions/{id}/materials
+ *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
+ *   PUT /admin/constructions/{id}/materials/{itemId}
  *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
  *   POST /admin/constructions/{id}/optional-materials
  *     → body: { id, weight, sort_order }  // доп. материал (не база и не замена)
@@ -277,6 +281,67 @@ export const listAdminConstructions = async (filters = {}) => {
 };
 
 /**
+ * POST /admin/constructions — создать конструкцию.
+ * @param {{ code: string, name: string, type_id: number, category_id: number }} payload
+ */
+export const createAdminConstruction = async (payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request("/admin/constructions", {
+    method: "POST",
+    headers,
+    body: {
+      code: String(payload.code || "").trim(),
+      name: String(payload.name || "").trim(),
+      type_id: Number(payload.type_id),
+      category_id: Number(payload.category_id),
+    },
+  });
+};
+
+/**
+ * Уникальные типы конструкций из списка (для селекта при создании).
+ * @param {object[]} rows
+ * @returns {{ id: number, code: string, name: string }[]}
+ */
+export const collectConstructionTypes = (rows) => {
+  const byId = new Map();
+  for (const row of rows || []) {
+    const id = Number(row?.type_id ?? row?.type?.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      code: String(row.type_code ?? row.type?.code ?? "").trim(),
+      name: String(row.type_name ?? row.type?.name ?? "").trim(),
+    });
+  }
+  return [...byId.values()].sort((a, b) =>
+    (a.name || a.code).localeCompare(b.name || b.code, "ru")
+  );
+};
+
+/**
+ * category_id из строк списка для кода категории (sound / acoustic).
+ * @param {object[]} rows
+ * @param {string} categoryCode
+ * @returns {number|null}
+ */
+export const pickCategoryIdFromRows = (rows, categoryCode) => {
+  const code = String(categoryCode || "").trim();
+  if (!code) return null;
+  for (const row of rows || []) {
+    const rowCode = String(row?.category_code ?? row?.category?.code ?? "").trim();
+    if (rowCode !== code) continue;
+    const id = Number(row.category_id ?? row.category?.id);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+  return null;
+};
+
+/**
  * GET /admin/constructions/{id} — карточка конструкции + composition.
  * @param {string|number} id
  * @returns {Promise<{ detail: object, defaultMaterials: object[], replacementGroups: object[], optionalMaterials: object[] }|null>}
@@ -315,8 +380,9 @@ export const getAdminConstructionMaterials = async (id) => {
 };
 
 /**
- * POST /admin/constructions/{id}/materials — добавить в группу замены.
+ * POST /admin/constructions/{id}/materials — в группу замены или в default_materials.
  * id = materials.id из GET /admin/materials для выбранного артикула (code).
+ * Для материалов по умолчанию: is_default=true, replacement_group=null.
  */
 export const addAdminConstructionMaterial = async (constructionId, payload) => {
   const csrf = await getCsrfToken();
@@ -336,6 +402,82 @@ export const addAdminConstructionMaterial = async (constructionId, payload) => {
       headers,
       body,
     }
+  );
+};
+
+/**
+ * PUT /admin/constructions/{id}/materials/{itemId} — обновить запись состава.
+ * itemId = id строки composition (construction_materials.id).
+ * body.id = materials.id.
+ * Чтобы сделать default заменяемой позицией: is_default=true + replacement_group + type_id.
+ */
+export const updateAdminConstructionMaterial = async (
+  constructionId,
+  itemId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const body = { ...payload };
+  if (body.id == null && body.material_id != null) {
+    body.id = body.material_id;
+  }
+  delete body.material_id;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/materials/${encodeURIComponent(itemId)}`,
+    {
+      method: "PUT",
+      headers,
+      body,
+    }
+  );
+};
+
+/**
+ * Типы материалов для групп замены (materials_types из seed ConstrTodo).
+ * id из живых групп перекрывает seed при совпадении code.
+ */
+export const KNOWN_REPLACEMENT_MATERIAL_TYPES = [
+  { id: 1, code: "tape", name: "лента" },
+  { id: 2, code: "roll", name: "рулон" },
+  { id: 3, code: "stud", name: "стойка" },
+  { id: 4, code: "runner", name: "направляющий" },
+  { id: 5, code: "panel", name: "панель" },
+  { id: 6, code: "filling", name: "заполнение" },
+  { id: 7, code: "screw", name: "крепеж" },
+  { id: 8, code: "hunger", name: "подвес" },
+  { id: 9, code: "thing", name: "штучный" },
+];
+
+/**
+ * Список типов для UI: seed + типы из уже загруженных групп замены.
+ * @param {object[]} replacementGroups
+ * @returns {{ id: number, code: string, name: string }[]}
+ */
+export const collectReplacementMaterialTypes = (replacementGroups) => {
+  const byCode = new Map(
+    KNOWN_REPLACEMENT_MATERIAL_TYPES.map((t) => [t.code, { ...t }])
+  );
+  for (const group of replacementGroups || []) {
+    const id = Number(getReplacementMaterialTypeId(group));
+    const code = String(
+      group.replacement_material_type_code ??
+        group.replacement_material_type?.code ??
+        ""
+    ).trim();
+    const name = String(
+      group.replacement_material_type_name ??
+        group.replacement_material_type?.name ??
+        ""
+    ).trim();
+    if (!code || !Number.isFinite(id) || id <= 0) continue;
+    byCode.set(code, { id, code, name: name || code });
+  }
+  return [...byCode.values()].sort((a, b) =>
+    (a.name || a.code).localeCompare(b.name || b.code, "ru")
   );
 };
 

@@ -4,6 +4,9 @@ import { useAuth } from "../context/AuthContext.jsx";
 import {
   addAdminConstructionMaterial,
   addAdminConstructionOptionalMaterial,
+  collectConstructionTypes,
+  collectReplacementMaterialTypes,
+  createAdminConstruction,
   enrichCompositionFromMaterialsCatalog,
   filterMaterialsByUsageSi,
   getAdminConstructionById,
@@ -13,6 +16,8 @@ import {
   getReplacementMaterialTypeId,
   listAdminConstructions,
   listAdminMaterials,
+  pickCategoryIdFromRows,
+  updateAdminConstructionMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
 import "./AdminPage.css";
@@ -469,18 +474,61 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
   const [optionalAddArticle, setOptionalAddArticle] = useState("");
   const [optionalAddQuery, setOptionalAddQuery] = useState("");
+  const [defaultAddArticle, setDefaultAddArticle] = useState("");
+  const [defaultAddQuery, setDefaultAddQuery] = useState("");
+  const [promoteItemId, setPromoteItemId] = useState("");
+  const [promoteTypeId, setPromoteTypeId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [addError, setAddError] = useState(null);
   const [optionalAddError, setOptionalAddError] = useState(null);
+  const [defaultAddError, setDefaultAddError] = useState(null);
+  const [promoteError, setPromoteError] = useState(null);
   const [addingGroupKey, setAddingGroupKey] = useState(null);
   const [addingOptional, setAddingOptional] = useState(false);
+  const [addingDefault, setAddingDefault] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const panelRef = useRef(null);
 
   const siCatalog = useMemo(
     () => filterMaterialsByUsageSi(catalogMaterials),
     [catalogMaterials]
+  );
+
+  const defaultArticles = useMemo(() => {
+    const set = new Set();
+    for (const row of defaultMaterials) {
+      const article = String(row.code || row.material_code || "").trim();
+      if (article) set.add(article);
+    }
+    return set;
+  }, [defaultMaterials]);
+
+  const defaultCandidates = useMemo(() => {
+    return siCatalog
+      .filter((mat) => {
+        const article = String(mat.code || "").trim();
+        if (!article) return false;
+        return !defaultArticles.has(article);
+      })
+      .filter((mat) =>
+        matchesQuery(mat, defaultAddQuery.trim(), ["code", "name", "type"])
+      );
+  }, [siCatalog, defaultArticles, defaultAddQuery]);
+
+  /** Материалы по умолчанию без группы — кандидаты в заменяемые позиции. */
+  const promotableDefaults = useMemo(
+    () =>
+      defaultMaterials.filter(
+        (row) => row.replacement_group == null || row.replacement_group === ""
+      ),
+    [defaultMaterials]
+  );
+
+  const replacementMaterialTypes = useMemo(
+    () => collectReplacementMaterialTypes(replacementGroups),
+    [replacementGroups]
   );
 
   const optionalArticles = useMemo(() => {
@@ -512,6 +560,8 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
       setError(null);
       setAddError(null);
       setOptionalAddError(null);
+      setDefaultAddError(null);
+      setPromoteError(null);
       try {
         const [data, catalog] = await Promise.all([
           getAdminConstructionById(constructionId),
@@ -545,6 +595,10 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
         setAddQueryByGroup({});
         setOptionalAddArticle("");
         setOptionalAddQuery("");
+        setDefaultAddArticle("");
+        setDefaultAddQuery("");
+        setPromoteItemId("");
+        setPromoteTypeId("");
       } catch (err) {
         if (!cancelled) {
           setDetail(null);
@@ -556,6 +610,10 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
           setAddQueryByGroup({});
           setOptionalAddArticle("");
           setOptionalAddQuery("");
+          setDefaultAddArticle("");
+          setDefaultAddQuery("");
+          setPromoteItemId("");
+          setPromoteTypeId("");
           setError(formatRequestError(err));
         }
       } finally {
@@ -673,6 +731,97 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
     }
   };
 
+  const handleAddDefaultMaterial = async () => {
+    const article = String(defaultAddArticle || "").trim();
+    if (!article) {
+      setDefaultAddError("Выберите материал из каталога по артикулу.");
+      return;
+    }
+
+    const catalogItem = siCatalog.find(
+      (m) => String(m.code || "").trim() === article
+    );
+    const materialId = Number(catalogItem?.id);
+    if (!catalogItem || !Number.isFinite(materialId) || materialId <= 0) {
+      setDefaultAddError(
+        `Артикул «${article}» не найден в /admin/materials (usage=si).`
+      );
+      return;
+    }
+
+    const maxSort = defaultMaterials.reduce(
+      (max, m) => Math.max(max, Number(m.sort_order) || 0),
+      0
+    );
+
+    setAddingDefault(true);
+    setDefaultAddError(null);
+    try {
+      await addAdminConstructionMaterial(constructionId, {
+        id: materialId,
+        weight: 1,
+        sort_order: maxSort + 1,
+        is_default: true,
+        replacement_group: null,
+        replacement_material_type_id: null,
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setDefaultAddError(formatRequestError(err));
+    } finally {
+      setAddingDefault(false);
+    }
+  };
+
+  const handlePromoteDefaultToReplacement = async () => {
+    const itemId = Number(promoteItemId);
+    const typeId = Number(promoteTypeId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      setPromoteError("Выберите материал из списка по умолчанию.");
+      return;
+    }
+    if (!Number.isFinite(typeId) || typeId <= 0) {
+      setPromoteError("Выберите тип группы замены.");
+      return;
+    }
+
+    const row = promotableDefaults.find((m) => Number(m.id) === itemId);
+    if (!row) {
+      setPromoteError("Выбранный материал уже в группе замены или не найден.");
+      return;
+    }
+
+    const materialId = Number(row.material_id ?? row.material?.id);
+    if (!Number.isFinite(materialId) || materialId <= 0) {
+      setPromoteError("У записи состава нет material.id.");
+      return;
+    }
+
+    const nextGroup =
+      replacementGroups.reduce(
+        (max, g) => Math.max(max, Number(g.group) || 0),
+        0
+      ) + 1;
+
+    setPromoting(true);
+    setPromoteError(null);
+    try {
+      await updateAdminConstructionMaterial(constructionId, itemId, {
+        id: materialId,
+        weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
+        sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+        is_default: true,
+        replacement_group: nextGroup,
+        replacement_material_type_id: typeId,
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setPromoteError(formatRequestError(err));
+    } finally {
+      setPromoting(false);
+    }
+  };
+
   return (
     <div className="admin-page__composition" ref={panelRef}>
       <div className="admin-page__composition-head">
@@ -710,11 +859,78 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
               </span>
             </h3>
           </div>
+
+          {defaultAddError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Не удалось добавить материал по умолчанию
+              </p>
+              <pre className="admin-page__error-body">{defaultAddError}</pre>
+            </div>
+          )}
+
           <SimpleTable
             columns={COMPOSITION_COLUMNS}
             rows={defaultMaterials}
             emptyText="Нет материалов по умолчанию."
           />
+
+          <div className="admin-page__optional-add">
+            <input
+              type="search"
+              className="admin-page__search admin-page__search--inline"
+              placeholder="Поиск по артикулу, названию…"
+              value={defaultAddQuery}
+              disabled={addingDefault || !siCatalog.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setDefaultAddQuery(e.target.value);
+                setDefaultAddArticle("");
+              }}
+              aria-label="Поиск материала по умолчанию usage=si"
+            />
+            <select
+              className="admin-page__select"
+              value={defaultAddArticle}
+              disabled={addingDefault || !defaultCandidates.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setDefaultAddArticle(e.target.value);
+              }}
+              aria-label="Добавить материал по умолчанию usage=si"
+            >
+              <option value="">
+                {!siCatalog.length
+                  ? "Нет материалов с usage=si"
+                  : defaultCandidates.length
+                    ? `Добавить из каталога… (${defaultCandidates.length})`
+                    : defaultAddQuery.trim()
+                      ? "Ничего не найдено по запросу"
+                      : "Все подходящие уже в составе"}
+              </option>
+              {defaultCandidates.map((mat) => {
+                const article = String(mat.code || "").trim();
+                return (
+                  <option key={article} value={article}>
+                    {materialOptionLabel(mat)}
+                  </option>
+                );
+              })}
+            </select>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={addingDefault || !defaultAddArticle}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddDefaultMaterial();
+              }}
+            >
+              {addingDefault ? "Добавление…" : "Добавить"}
+            </button>
+          </div>
 
           <div className="admin-page__composition-head admin-page__composition-head--spaced">
             <h3 className="admin-page__composition-title">
@@ -723,6 +939,74 @@ function ConstructionDetail({ constructionId, label, categoryCode }) {
                 {replacementGroups.length} групп
               </span>
             </h3>
+          </div>
+          <p className="admin-page__hint">
+            Выберите материал из списка по умолчанию и тип группы — он станет
+            заменяемой позицией (default в новой группе).
+          </p>
+
+          {promoteError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Не удалось добавить в заменяемые
+              </p>
+              <pre className="admin-page__error-body">{promoteError}</pre>
+            </div>
+          )}
+
+          <div className="admin-page__optional-add">
+            <select
+              className="admin-page__select"
+              value={promoteItemId}
+              disabled={promoting || !promotableDefaults.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setPromoteItemId(e.target.value);
+              }}
+              aria-label="Материал по умолчанию для заменяемой позиции"
+            >
+              <option value="">
+                {!promotableDefaults.length
+                  ? "Нет материалов по умолчанию без группы"
+                  : `Из материалов по умолчанию… (${promotableDefaults.length})`}
+              </option>
+              {promotableDefaults.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {materialOptionLabel(row)}
+                </option>
+              ))}
+            </select>
+            <select
+              className="admin-page__select"
+              value={promoteTypeId}
+              disabled={promoting || !replacementMaterialTypes.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setPromoteTypeId(e.target.value);
+              }}
+              aria-label="Тип группы замены"
+            >
+              <option value="">Тип группы…</option>
+              {replacementMaterialTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name || type.code}
+                  {type.code ? ` (${type.code})` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={promoting || !promoteItemId || !promoteTypeId}
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePromoteDefaultToReplacement();
+              }}
+            >
+              {promoting ? "Добавление…" : "В заменяемые"}
+            </button>
           </div>
 
           {addError && (
@@ -962,6 +1246,15 @@ function ConstructionsListPanel() {
   const [category, setCategory] = useState(
     CONSTRUCTION_CATEGORY_FILTERS[0].code
   );
+  const [reloadToken, setReloadToken] = useState(0);
+  const [createCode, setCreateCode] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createTypeId, setCreateTypeId] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+  const [createSuccess, setCreateSuccess] = useState(null);
+
+  const isSoundCategory = category === "sound";
 
   useEffect(() => {
     let cancelled = false;
@@ -984,7 +1277,37 @@ function ConstructionsListPanel() {
     return () => {
       cancelled = true;
     };
+  }, [category, reloadToken]);
+
+  useEffect(() => {
+    setCreateCode("");
+    setCreateName("");
+    setCreateError(null);
+    setCreateSuccess(null);
   }, [category]);
+
+  const constructionTypes = useMemo(
+    () => collectConstructionTypes(rows),
+    [rows]
+  );
+
+  const soundCategoryId = useMemo(
+    () => pickCategoryIdFromRows(rows, "sound"),
+    [rows]
+  );
+
+  useEffect(() => {
+    if (!isSoundCategory) return;
+    if (
+      createTypeId &&
+      constructionTypes.some((t) => String(t.id) === String(createTypeId))
+    ) {
+      return;
+    }
+    setCreateTypeId(
+      constructionTypes.length ? String(constructionTypes[0].id) : ""
+    );
+  }, [isSoundCategory, constructionTypes, createTypeId]);
 
   const filtered = useMemo(
     () =>
@@ -1016,6 +1339,54 @@ function ConstructionsListPanel() {
       return;
     }
     setSelectedId((prev) => (prev === id ? null : id));
+  };
+
+  const handleCreateConstruction = async (e) => {
+    e.preventDefault();
+    if (!isSoundCategory) return;
+
+    const code = createCode.trim();
+    const name = createName.trim();
+    const typeId = Number(createTypeId);
+    const categoryId = soundCategoryId;
+
+    if (!code || !name) {
+      setCreateError("Укажите код и название конструкции.");
+      setCreateSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(typeId) || typeId <= 0) {
+      setCreateError("Выберите тип конструкции.");
+      setCreateSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(categoryId) || categoryId <= 0) {
+      setCreateError(
+        "Не удалось определить category_id звукоизоляции из списка."
+      );
+      setCreateSuccess(null);
+      return;
+    }
+
+    setCreating(true);
+    setCreateError(null);
+    setCreateSuccess(null);
+    try {
+      await createAdminConstruction({
+        code,
+        name,
+        type_id: typeId,
+        category_id: categoryId,
+      });
+      setCreateCode("");
+      setCreateName("");
+      setCreateSuccess(`Конструкция «${code}» создана.`);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setCreateError(formatRequestError(err));
+    } finally {
+      setCreating(false);
+    }
   };
 
   const selectedLabel = selectedRow
@@ -1067,6 +1438,103 @@ function ConstructionsListPanel() {
           );
         })}
       </div>
+
+      {isSoundCategory && (
+        <form
+          className="admin-page__create-form"
+          onSubmit={handleCreateConstruction}
+        >
+          <h3 className="admin-page__create-title">
+            Новая конструкция звукоизоляции
+          </h3>
+          <p className="admin-page__hint">
+            Создаёт запись через POST /admin/constructions. Материалы можно
+            добавить после открытия карточки.
+          </p>
+          <div className="admin-page__create-fields">
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Код</span>
+              <input
+                type="text"
+                className="admin-page__input"
+                value={createCode}
+                onChange={(e) => setCreateCode(e.target.value)}
+                placeholder="Например AG.W199"
+                disabled={creating || loading}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Название</span>
+              <input
+                type="text"
+                className="admin-page__input"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="Название конструкции"
+                disabled={creating || loading}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Тип</span>
+              <select
+                className="admin-page__select admin-page__select--full"
+                value={createTypeId}
+                onChange={(e) => setCreateTypeId(e.target.value)}
+                disabled={creating || loading || !constructionTypes.length}
+                required
+                aria-label="Тип конструкции"
+              >
+                {!constructionTypes.length ? (
+                  <option value="">Нет типов в списке</option>
+                ) : (
+                  constructionTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name || type.code || `ID ${type.id}`}
+                      {type.code ? ` (${type.code})` : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <div className="admin-page__field admin-page__field--action">
+              <span className="admin-page__field-label" aria-hidden="true">
+                &nbsp;
+              </span>
+              <button
+                type="submit"
+                className="admin-page__btn admin-page__btn--inline"
+                disabled={
+                  creating ||
+                  loading ||
+                  !createCode.trim() ||
+                  !createName.trim() ||
+                  !createTypeId ||
+                  !soundCategoryId
+                }
+              >
+                {creating ? "Создание…" : "Создать"}
+              </button>
+            </div>
+          </div>
+          {createError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Не удалось создать конструкцию
+              </p>
+              <pre className="admin-page__error-body">{createError}</pre>
+            </div>
+          )}
+          {createSuccess && (
+            <p className="admin-page__success" role="status">
+              {createSuccess}
+            </p>
+          )}
+        </form>
+      )}
 
       <p className="admin-page__hint">
         Нажмите на строку, чтобы раскрыть карточку конструкции.
