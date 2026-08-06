@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
+  addAdminConstructionMaterial,
+  addAdminConstructionOptionalMaterial,
   enrichCompositionFromMaterialsCatalog,
+  filterMaterialsByUsageSi,
   getAdminConstructionById,
   getAdminMaterialByCode,
   getConstructionId,
   getMaterialCode,
+  getReplacementMaterialTypeId,
   listAdminConstructions,
   listAdminMaterials,
 } from "../services/adminApi.js";
@@ -56,13 +60,28 @@ const CONSTRUCTION_COLUMNS = [
   {
     key: "type",
     label: "Тип",
-    render: (row) => cell(row.type_name ?? row.type_code ?? row.type_id),
+    render: (row) =>
+      cell(
+        row.type_name ??
+          row.type_code ??
+          row.type?.name ??
+          row.type?.code ??
+          row.type_id ??
+          row.type?.id
+      ),
   },
   {
     key: "category",
     label: "Категория",
     render: (row) =>
-      cell(row.category_name ?? row.category_code ?? row.category_id),
+      cell(
+        row.category_name ??
+          row.category_code ??
+          row.category?.name ??
+          row.category?.code ??
+          row.category_id ??
+          row.category?.id
+      ),
   },
 ];
 
@@ -95,7 +114,8 @@ function pickDefaultMaterialId(materials) {
   if (!Array.isArray(materials) || !materials.length) return "";
   const preferred = materials.find((m) => m.is_default);
   const chosen = preferred ?? materials[0];
-  return String(chosen.material_id ?? chosen.id ?? chosen.code ?? "");
+  const article = String(chosen.code || chosen.material_code || "").trim();
+  return article || String(chosen.material_id ?? chosen.id ?? "");
 }
 
 function materialOptionLabel(mat) {
@@ -106,9 +126,17 @@ function materialOptionLabel(mat) {
 }
 
 function groupTypeLabel(group) {
+  const nested = group.replacement_material_type;
+  if (nested && typeof nested === "object") {
+    return (
+      nested.name ||
+      nested.code ||
+      (group.group != null ? `Группа ${group.group}` : "Замена")
+    );
+  }
   return (
     group.replacement_material_type_name ||
-    group.replacement_material_type ||
+    (typeof nested === "string" ? nested : null) ||
     (group.group != null ? `Группа ${group.group}` : "Замена")
   );
 }
@@ -116,6 +144,9 @@ function groupTypeLabel(group) {
 function cell(value) {
   if (value == null || value === "") return "—";
   if (typeof value === "boolean") return value ? "да" : "нет";
+  if (typeof value === "object") {
+    return cell(value.name ?? value.code ?? value.id ?? null);
+  }
   return String(value);
 }
 
@@ -427,14 +458,51 @@ function MaterialDetail({ code, label }) {
   );
 }
 
-function ConstructionDetail({ constructionId, label }) {
+function ConstructionDetail({ constructionId, label, categoryCode }) {
   const [detail, setDetail] = useState(null);
   const [defaultMaterials, setDefaultMaterials] = useState([]);
   const [replacementGroups, setReplacementGroups] = useState([]);
+  const [optionalMaterials, setOptionalMaterials] = useState([]);
   const [selectedByGroup, setSelectedByGroup] = useState({});
+  const [catalogMaterials, setCatalogMaterials] = useState([]);
+  const [addByGroup, setAddByGroup] = useState({});
+  const [addQueryByGroup, setAddQueryByGroup] = useState({});
+  const [optionalAddArticle, setOptionalAddArticle] = useState("");
+  const [optionalAddQuery, setOptionalAddQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [addError, setAddError] = useState(null);
+  const [optionalAddError, setOptionalAddError] = useState(null);
+  const [addingGroupKey, setAddingGroupKey] = useState(null);
+  const [addingOptional, setAddingOptional] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const panelRef = useRef(null);
+
+  const siCatalog = useMemo(
+    () => filterMaterialsByUsageSi(catalogMaterials),
+    [catalogMaterials]
+  );
+
+  const optionalArticles = useMemo(() => {
+    const set = new Set();
+    for (const row of optionalMaterials) {
+      const article = String(row.code || row.material_code || "").trim();
+      if (article) set.add(article);
+    }
+    return set;
+  }, [optionalMaterials]);
+
+  const optionalCandidates = useMemo(() => {
+    return siCatalog
+      .filter((mat) => {
+        const article = String(mat.code || "").trim();
+        if (!article) return false;
+        return !optionalArticles.has(article);
+      })
+      .filter((mat) =>
+        matchesQuery(mat, optionalAddQuery.trim(), ["code", "name", "type"])
+      );
+  }, [siCatalog, optionalArticles, optionalAddQuery]);
 
   useEffect(() => {
     if (constructionId == null) return undefined;
@@ -442,17 +510,21 @@ function ConstructionDetail({ constructionId, label }) {
     (async () => {
       setLoading(true);
       setError(null);
+      setAddError(null);
+      setOptionalAddError(null);
       try {
         const [data, catalog] = await Promise.all([
           getAdminConstructionById(constructionId),
           listAdminMaterials().catch(() => []),
         ]);
         if (cancelled) return;
+        setCatalogMaterials(catalog);
         setDetail(data?.detail ?? null);
         const enriched = enrichCompositionFromMaterialsCatalog(
           {
             defaultMaterials: data?.defaultMaterials ?? [],
             replacementGroups: data?.replacementGroups ?? [],
+            optionalMaterials: data?.optionalMaterials ?? [],
           },
           catalog
         );
@@ -460,18 +532,30 @@ function ConstructionDetail({ constructionId, label }) {
         const groups = enriched.replacementGroups;
         setDefaultMaterials(defaults);
         setReplacementGroups(groups);
+        setOptionalMaterials(enriched.optionalMaterials);
         const initial = {};
         for (const group of groups) {
-          const key = String(group.group ?? group.replacement_material_type_id ?? "");
+          const key = String(
+            group.group ?? getReplacementMaterialTypeId(group) ?? ""
+          );
           initial[key] = pickDefaultMaterialId(group.materials);
         }
         setSelectedByGroup(initial);
+        setAddByGroup({});
+        setAddQueryByGroup({});
+        setOptionalAddArticle("");
+        setOptionalAddQuery("");
       } catch (err) {
         if (!cancelled) {
           setDetail(null);
           setDefaultMaterials([]);
           setReplacementGroups([]);
+          setOptionalMaterials([]);
           setSelectedByGroup({});
+          setAddByGroup({});
+          setAddQueryByGroup({});
+          setOptionalAddArticle("");
+          setOptionalAddQuery("");
           setError(formatRequestError(err));
         }
       } finally {
@@ -481,7 +565,7 @@ function ConstructionDetail({ constructionId, label }) {
     return () => {
       cancelled = true;
     };
-  }, [constructionId]);
+  }, [constructionId, reloadToken]);
 
   useEffect(() => {
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -489,6 +573,104 @@ function ConstructionDetail({ constructionId, label }) {
 
   const handleGroupChange = (groupKey, value) => {
     setSelectedByGroup((prev) => ({ ...prev, [groupKey]: value }));
+  };
+
+  const handleAddChange = (groupKey, value) => {
+    setAddByGroup((prev) => ({ ...prev, [groupKey]: value }));
+  };
+
+  const handleAddQueryChange = (groupKey, value) => {
+    setAddQueryByGroup((prev) => ({ ...prev, [groupKey]: value }));
+    setAddByGroup((prev) => ({ ...prev, [groupKey]: "" }));
+  };
+
+  const handleAddMaterial = async (group, groupKey) => {
+    // value селекта = артикул (materials.code)
+    const article = String(addByGroup[groupKey] || "").trim();
+    if (!article) {
+      setAddError("Выберите материал из каталога по артикулу.");
+      return;
+    }
+    const typeId = getReplacementMaterialTypeId(group);
+    if (group.group == null || typeId == null) {
+      setAddError("У группы замены нет type/group — добавить нельзя.");
+      return;
+    }
+
+    const catalogItem = siCatalog.find(
+      (m) => String(m.code || "").trim() === article
+    );
+    const materialId = Number(catalogItem?.id);
+    if (!catalogItem || !Number.isFinite(materialId) || materialId <= 0) {
+      setAddError(
+        `Артикул «${article}» не найден в /admin/materials (usage=si).`
+      );
+      return;
+    }
+
+    const sample = group.materials?.[0];
+    const maxSort = (group.materials || []).reduce(
+      (max, m) => Math.max(max, Number(m.sort_order) || 0),
+      0
+    );
+
+    setAddingGroupKey(groupKey);
+    setAddError(null);
+    try {
+      // POST: id = materials.id для выбранного артикула
+      await addAdminConstructionMaterial(constructionId, {
+        id: materialId,
+        weight: Number(sample?.weight) > 0 ? Number(sample.weight) : 1,
+        sort_order: maxSort + 1,
+        is_default: false,
+        replacement_group: Number(group.group),
+        replacement_material_type_id: Number(typeId),
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setAddError(formatRequestError(err));
+    } finally {
+      setAddingGroupKey(null);
+    }
+  };
+
+  const handleAddOptionalMaterial = async () => {
+    const article = String(optionalAddArticle || "").trim();
+    if (!article) {
+      setOptionalAddError("Выберите материал из каталога по артикулу.");
+      return;
+    }
+
+    const catalogItem = siCatalog.find(
+      (m) => String(m.code || "").trim() === article
+    );
+    const materialId = Number(catalogItem?.id);
+    if (!catalogItem || !Number.isFinite(materialId) || materialId <= 0) {
+      setOptionalAddError(
+        `Артикул «${article}» не найден в /admin/materials (usage=si).`
+      );
+      return;
+    }
+
+    const maxSort = optionalMaterials.reduce(
+      (max, m) => Math.max(max, Number(m.sort_order) || 0),
+      0
+    );
+
+    setAddingOptional(true);
+    setOptionalAddError(null);
+    try {
+      await addAdminConstructionOptionalMaterial(constructionId, {
+        id: materialId,
+        weight: 1,
+        sort_order: maxSort + 1,
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setOptionalAddError(formatRequestError(err));
+    } finally {
+      setAddingOptional(false);
+    }
   };
 
   return (
@@ -543,6 +725,15 @@ function ConstructionDetail({ constructionId, label }) {
             </h3>
           </div>
 
+          {addError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Не удалось добавить материал
+              </p>
+              <pre className="admin-page__error-body">{addError}</pre>
+            </div>
+          )}
+
           {!replacementGroups.length ? (
             <p className="admin-page__empty admin-page__empty--inline">
               Нет групп замены.
@@ -551,48 +742,211 @@ function ConstructionDetail({ constructionId, label }) {
             <div className="admin-page__replacements">
               {replacementGroups.map((group, idx) => {
                 const groupKey = String(
-                  group.group ?? group.replacement_material_type_id ?? idx
+                  group.group ?? getReplacementMaterialTypeId(group) ?? idx
                 );
                 const typeLabel = groupTypeLabel(group);
                 const value = selectedByGroup[groupKey] ?? "";
+                const inGroupArticles = new Set(
+                  (group.materials || [])
+                    .map((m) =>
+                      String(m.code || m.material_code || "").trim()
+                    )
+                    .filter(Boolean)
+                );
+                const addQuery = addQueryByGroup[groupKey] ?? "";
+                const candidates = siCatalog
+                  .filter((mat) => {
+                    const article = String(mat.code || "").trim();
+                    if (!article) return false;
+                    return !inGroupArticles.has(article);
+                  })
+                  .filter((mat) =>
+                    matchesQuery(mat, addQuery.trim(), ["code", "name", "type"])
+                  );
+                const addValue = addByGroup[groupKey] ?? "";
+                const adding = addingGroupKey === groupKey;
+
                 return (
-                  <label
-                    key={groupKey}
-                    className="admin-page__replacement"
-                  >
-                    <span className="admin-page__replacement-type">
-                      {typeLabel}
-                    </span>
-                    <select
-                      className="admin-page__select"
-                      value={value}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        handleGroupChange(groupKey, e.target.value);
-                      }}
-                      aria-label={`Замена: ${typeLabel}`}
-                    >
-                      {!group.materials?.length ? (
-                        <option value="">Нет вариантов</option>
-                      ) : (
-                        group.materials.map((mat, matIdx) => {
-                          const optValue = String(
-                            mat.material_id ?? mat.id ?? mat.code ?? matIdx
-                          );
+                  <div key={groupKey} className="admin-page__replacement-block">
+                    <label className="admin-page__replacement">
+                      <span className="admin-page__replacement-type">
+                        {typeLabel}
+                      </span>
+                      <select
+                        className="admin-page__select"
+                        value={value}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleGroupChange(groupKey, e.target.value);
+                        }}
+                        aria-label={`Замена: ${typeLabel}`}
+                      >
+                        {!group.materials?.length ? (
+                          <option value="">Нет вариантов</option>
+                        ) : (
+                          group.materials.map((mat, matIdx) => {
+                            const article = String(
+                              mat.code || mat.material_code || ""
+                            ).trim();
+                            const optValue =
+                              article ||
+                              String(mat.material_id ?? mat.id ?? matIdx);
+                            return (
+                              <option key={optValue} value={optValue}>
+                                {materialOptionLabel(mat)}
+                              </option>
+                            );
+                          })
+                        )}
+                      </select>
+                    </label>
+
+                    <div className="admin-page__replacement-add">
+                      <input
+                        type="search"
+                        className="admin-page__search admin-page__search--inline"
+                        placeholder="Поиск по артикулу, названию…"
+                        value={addQuery}
+                        disabled={adding || !siCatalog.length}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleAddQueryChange(groupKey, e.target.value);
+                        }}
+                        aria-label="Поиск материала usage=si для добавления"
+                      />
+                      <select
+                        className="admin-page__select"
+                        value={addValue}
+                        disabled={adding || !candidates.length}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleAddChange(groupKey, e.target.value);
+                        }}
+                        aria-label="Добавить материал usage=si"
+                      >
+                        <option value="">
+                          {!siCatalog.length
+                            ? "Нет материалов с usage=si"
+                            : candidates.length
+                              ? `Добавить из каталога… (${candidates.length})`
+                              : addQuery.trim()
+                                ? "Ничего не найдено по запросу"
+                                : "Все подходящие уже в группе"}
+                        </option>
+                        {candidates.map((mat) => {
+                          const article = String(mat.code || "").trim();
                           return (
-                            <option key={optValue} value={optValue}>
+                            <option key={article} value={article}>
                               {materialOptionLabel(mat)}
                             </option>
                           );
-                        })
-                      )}
-                    </select>
-                  </label>
+                        })}
+                      </select>
+                      <button
+                        type="button"
+                        className="admin-page__btn admin-page__btn--inline"
+                        disabled={adding || !addValue}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddMaterial(group, groupKey);
+                        }}
+                      >
+                        {adding ? "Добавление…" : "Добавить"}
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           )}
+
+          <div className="admin-page__composition-head admin-page__composition-head--spaced">
+            <h3 className="admin-page__composition-title">
+              Дополнительные материалы
+              <span className="admin-page__count">
+                {optionalMaterials.length} мат.
+              </span>
+            </h3>
+          </div>
+          <p className="admin-page__hint">
+            Не входят в базовый состав и не являются заменой — могут быть
+            включены дополнительно.
+          </p>
+
+          {optionalAddError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Не удалось добавить доп. материал
+              </p>
+              <pre className="admin-page__error-body">{optionalAddError}</pre>
+            </div>
+          )}
+
+          <SimpleTable
+            columns={COMPOSITION_COLUMNS}
+            rows={optionalMaterials}
+            emptyText="Нет дополнительных материалов."
+          />
+
+          <div className="admin-page__optional-add">
+            <input
+              type="search"
+              className="admin-page__search admin-page__search--inline"
+              placeholder="Поиск по артикулу, названию…"
+              value={optionalAddQuery}
+              disabled={addingOptional || !siCatalog.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setOptionalAddQuery(e.target.value);
+                setOptionalAddArticle("");
+              }}
+              aria-label="Поиск доп. материала usage=si"
+            />
+            <select
+              className="admin-page__select"
+              value={optionalAddArticle}
+              disabled={addingOptional || !optionalCandidates.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setOptionalAddArticle(e.target.value);
+              }}
+              aria-label="Добавить доп. материал usage=si"
+            >
+              <option value="">
+                {!siCatalog.length
+                  ? "Нет материалов с usage=si"
+                  : optionalCandidates.length
+                    ? `Добавить из каталога… (${optionalCandidates.length})`
+                    : optionalAddQuery.trim()
+                      ? "Ничего не найдено по запросу"
+                      : "Все подходящие уже в списке допов"}
+              </option>
+              {optionalCandidates.map((mat) => {
+                const article = String(mat.code || "").trim();
+                return (
+                  <option key={article} value={article}>
+                    {materialOptionLabel(mat)}
+                  </option>
+                );
+              })}
+            </select>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={addingOptional || !optionalAddArticle}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddOptionalMaterial();
+              }}
+            >
+              {addingOptional ? "Добавление…" : "Добавить"}
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -762,6 +1116,7 @@ function ConstructionsListPanel() {
                         <ConstructionDetail
                           constructionId={id}
                           label={selectedLabel}
+                          categoryCode={category}
                         />
                       ) : null
                     }
