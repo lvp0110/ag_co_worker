@@ -25,6 +25,7 @@ import {
   updateAdminConstructionMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
+import { usePriceData } from "../services/priceApi.js";
 import "./AdminPage.css";
 
 const MATERIAL_COLUMNS = [
@@ -116,6 +117,148 @@ const MATERIAL_USAGE_FILTERS = [
   { code: "vi", label: "Виброизоляция" },
 ];
 
+const MATERIALS_COMPARE_MODE = "compare";
+
+const COMPARE_MATCH_FILTERS = [
+  { code: "all", label: "Все" },
+  { code: "match", label: "Совпадающие" },
+  { code: "mismatch", label: "Не совпадающие" },
+];
+
+const COMPARE_STATUS = {
+  match: "совпадает",
+  adminOnly: "только админка",
+  priceOnly: "только прайс",
+};
+
+const COMPARE_COLUMNS = [
+  { key: "code", label: "Код" },
+  {
+    key: "inAdmin",
+    label: "Админка",
+    render: (row) => (row.inAdmin ? "да" : "нет"),
+  },
+  {
+    key: "inPrice",
+    label: "Прайс",
+    render: (row) => (row.inPrice ? "да" : "нет"),
+  },
+  { key: "adminName", label: "Название (админка)" },
+  { key: "priceName", label: "Название (прайс)" },
+  { key: "adminUnits", label: "Ед. адм." },
+  { key: "priceUnits", label: "Ед. прайс" },
+  {
+    key: "status",
+    label: "Статус",
+    render: (row) => (
+      <span
+        className={`admin-page__compare-status admin-page__compare-status--${
+          row.nameDiff ? "nameDiff" : row.statusKey
+        }`}
+      >
+        {row.status}
+      </span>
+    ),
+  },
+];
+
+function normalizeCompareName(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+/** Ключ сверки по code: trim + lower case. */
+function normalizeCompareCode(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/**
+ * Сводка админ-материалов и строк прайса по code
+ * (admin.code ↔ price.article / price.code).
+ * @param {object[]} adminMaterials
+ * @param {object[]} priceList
+ */
+function buildMaterialPriceCompareRows(adminMaterials, priceList) {
+  const byCode = new Map();
+
+  for (const mat of adminMaterials || []) {
+    const codeRaw = String(mat?.code ?? "").trim();
+    const key = normalizeCompareCode(codeRaw);
+    if (!key) continue;
+    byCode.set(key, {
+      article: codeRaw,
+      code: codeRaw,
+      inAdmin: true,
+      inPrice: false,
+      adminName: mat.name == null ? "" : String(mat.name).trim(),
+      adminUnits: mat.units == null ? "" : String(mat.units).trim(),
+      adminUsage: mat.usage == null ? "" : String(mat.usage).trim(),
+      priceName: "",
+      priceUnits: "",
+      nameDiff: false,
+    });
+  }
+
+  for (const row of priceList || []) {
+    const codeRaw = String(row?.article ?? row?.code ?? "").trim();
+    const key = normalizeCompareCode(codeRaw);
+    if (!key) continue;
+    const existing = byCode.get(key);
+    const priceName = row.name == null ? "" : String(row.name).trim();
+    const priceUnits = row.units == null ? "" : String(row.units).trim();
+    if (existing) {
+      existing.inPrice = true;
+      existing.priceName = priceName;
+      existing.priceUnits = priceUnits;
+    } else {
+      byCode.set(key, {
+        article: codeRaw,
+        code: codeRaw,
+        inAdmin: false,
+        inPrice: true,
+        adminName: "",
+        adminUnits: "",
+        adminUsage: "",
+        priceName,
+        priceUnits,
+        nameDiff: false,
+      });
+    }
+  }
+
+  return Array.from(byCode.values())
+    .map((row) => {
+      let statusKey = "match";
+      if (!row.inAdmin) statusKey = "priceOnly";
+      else if (!row.inPrice) statusKey = "adminOnly";
+
+      const nameDiff =
+        statusKey === "match" &&
+        normalizeCompareName(row.adminName) !==
+          normalizeCompareName(row.priceName);
+
+      let status = COMPARE_STATUS[statusKey];
+      if (statusKey === "match" && nameDiff) {
+        status = "совпадает (названия разные)";
+      }
+
+      return {
+        ...row,
+        nameDiff,
+        statusKey,
+        status,
+      };
+    })
+    .sort((a, b) =>
+      normalizeCompareCode(a.code).localeCompare(
+        normalizeCompareCode(b.code),
+        "ru"
+      )
+    );
+}
+
 const COMPOSITION_COLUMNS = [
   { key: "sort_order", label: "№" },
   { key: "material_id", label: "ID мат." },
@@ -202,7 +345,7 @@ function SimpleTable({ columns, rows, emptyText }) {
         </thead>
         <tbody>
           {rows.map((row, idx) => (
-            <tr key={row.id ?? row.code ?? row.material_id ?? idx}>
+            <tr key={row.id ?? row.code ?? row.article ?? row.material_id ?? idx}>
               {columns.map((col) => (
                 <td key={col.key}>
                   {col.render ? col.render(row) : cell(row[col.key])}
@@ -264,6 +407,11 @@ function MaterialsListPanel() {
   const [query, setQuery] = useState("");
   const [selectedCode, setSelectedCode] = useState(null);
   const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
+  const [compareMatchFilter, setCompareMatchFilter] = useState(
+    COMPARE_MATCH_FILTERS[0].code
+  );
+  const priceState = usePriceData();
+  const isCompare = usage === MATERIALS_COMPARE_MODE;
 
   useEffect(() => {
     let cancelled = false;
@@ -290,25 +438,54 @@ function MaterialsListPanel() {
   useEffect(() => {
     setSelectedCode(null);
     setQuery("");
+    setCompareMatchFilter(COMPARE_MATCH_FILTERS[0].code);
   }, [usage]);
 
   const usageRows = useMemo(
-    () => filterMaterialsByUsage(rows, usage),
-    [rows, usage]
+    () => (isCompare ? rows : filterMaterialsByUsage(rows, usage)),
+    [rows, usage, isCompare]
   );
 
-  const filtered = useMemo(
+  const compareRows = useMemo(
     () =>
-      usageRows.filter((row) =>
-        matchesQuery(row, query.trim(), ["code", "name", "type", "units"])
-      ),
-    [usageRows, query]
+      isCompare
+        ? buildMaterialPriceCompareRows(rows, priceState.list)
+        : [],
+    [isCompare, rows, priceState.list]
   );
+
+  const filtered = useMemo(() => {
+    if (isCompare) {
+      return compareRows.filter((row) => {
+        if (compareMatchFilter === "match" && row.statusKey !== "match") {
+          return false;
+        }
+        if (compareMatchFilter === "mismatch" && row.statusKey === "match") {
+          return false;
+        }
+        return matchesQuery(row, query.trim(), [
+          "code",
+          "article",
+          "adminName",
+          "priceName",
+          "status",
+          "adminUnits",
+          "priceUnits",
+        ]);
+      });
+    }
+    return usageRows.filter((row) =>
+      matchesQuery(row, query.trim(), ["code", "name", "type", "units"])
+    );
+  }, [isCompare, compareRows, usageRows, query, compareMatchFilter]);
 
   const selectedRow = useMemo(
     () =>
-      filtered.find((row) => getMaterialCode(row) === selectedCode) ?? null,
-    [filtered, selectedCode]
+      isCompare
+        ? null
+        : filtered.find((row) => getMaterialCode(row) === selectedCode) ??
+          null,
+    [filtered, selectedCode, isCompare]
   );
 
   const handleSelect = (row) => {
@@ -325,23 +502,52 @@ function MaterialsListPanel() {
       selectedCode
     : selectedCode;
 
+  const compareStats = useMemo(() => {
+    if (!isCompare) return null;
+    let match = 0;
+    let nameDiff = 0;
+    let adminOnly = 0;
+    let priceOnly = 0;
+    for (const row of compareRows) {
+      if (row.statusKey === "match") {
+        match += 1;
+        if (row.nameDiff) nameDiff += 1;
+      } else if (row.statusKey === "adminOnly") adminOnly += 1;
+      else if (row.statusKey === "priceOnly") priceOnly += 1;
+    }
+    return { match, nameDiff, adminOnly, priceOnly, total: compareRows.length };
+  }, [isCompare, compareRows]);
+
+  const listLoading =
+    loading || (isCompare && (priceState.loading || !priceState.loaded));
+
   return (
     <section className="admin-page__card">
       <div className="admin-page__card-head">
         <h2 className="admin-page__card-title">
-          Материалы
+          {isCompare ? "Сравнение с прайсом" : "Материалы"}
           <span className="admin-page__count">
-            {loading ? "…" : `${filtered.length} / ${usageRows.length}`}
+            {listLoading
+              ? "…"
+              : isCompare
+                ? `${filtered.length} / ${compareRows.length}`
+                : `${filtered.length} / ${usageRows.length}`}
           </span>
         </h2>
         <input
           type="search"
           className="admin-page__search"
-          placeholder="Поиск по коду, названию, типу…"
+          placeholder={
+            isCompare
+              ? "Поиск по коду, названию, статусу…"
+              : "Поиск по коду, названию, типу…"
+          }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          disabled={loading}
-          aria-label="Поиск материалов"
+          disabled={listLoading}
+          aria-label={
+            isCompare ? "Поиск в сравнении" : "Поиск материалов"
+          }
         />
       </div>
 
@@ -368,11 +574,73 @@ function MaterialsListPanel() {
             </button>
           );
         })}
+        <button
+          type="button"
+          className={
+            isCompare
+              ? "admin-page__category-btn admin-page__category-btn--active"
+              : "admin-page__category-btn"
+          }
+          aria-pressed={isCompare}
+          onClick={() => setUsage(MATERIALS_COMPARE_MODE)}
+        >
+          Сравнение
+        </button>
       </div>
 
-      <p className="admin-page__hint">
-        Нажмите на строку, чтобы раскрыть карточку материала.
-      </p>
+      {isCompare ? (
+        <>
+          <p className="admin-page__hint">
+            Сверка по <code className="admin-page__code">code</code>:{" "}
+            <code className="admin-page__code">/admin/materials</code> и прайс{" "}
+            <code className="admin-page__code">/api/v2/data</code>
+            {compareStats
+              ? ` — по code совпадает ${compareStats.match}${
+                  compareStats.nameDiff
+                    ? ` (из них названия разные: ${compareStats.nameDiff})`
+                    : ""
+                }, только админка ${compareStats.adminOnly}, только прайс ${compareStats.priceOnly}.`
+              : "."}
+          </p>
+          <div
+            className="admin-page__category-toggle"
+            role="group"
+            aria-label="Фильтр совпадений"
+          >
+            {COMPARE_MATCH_FILTERS.map((item) => {
+              const active = compareMatchFilter === item.code;
+              const count =
+                item.code === "all"
+                  ? compareStats?.total
+                  : item.code === "match"
+                    ? compareStats?.match
+                    : compareStats
+                      ? compareStats.total - compareStats.match
+                      : undefined;
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  className={
+                    active
+                      ? "admin-page__category-btn admin-page__category-btn--active"
+                      : "admin-page__category-btn"
+                  }
+                  aria-pressed={active}
+                  onClick={() => setCompareMatchFilter(item.code)}
+                >
+                  {item.label}
+                  {count != null ? ` (${count})` : ""}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <p className="admin-page__hint">
+          Нажмите на строку, чтобы раскрыть карточку материала.
+        </p>
+      )}
 
       {error && (
         <div className="admin-page__error" role="alert">
@@ -381,10 +649,31 @@ function MaterialsListPanel() {
         </div>
       )}
 
-      {loading ? (
+      {isCompare && priceState.error && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Не удалось загрузить прайс</p>
+          <pre className="admin-page__error-body">{priceState.error}</pre>
+        </div>
+      )}
+
+      {listLoading ? (
         <p className="admin-page__empty admin-page__empty--inline">
           Загрузка…
         </p>
+      ) : isCompare ? (
+        !filtered.length ? (
+          <p className="admin-page__empty admin-page__empty--inline">
+            {compareRows.length
+              ? "Ничего не найдено по запросу."
+              : "Нет данных для сравнения."}
+          </p>
+        ) : (
+          <SimpleTable
+            columns={COMPARE_COLUMNS}
+            rows={filtered}
+            emptyText="Нет данных для сравнения."
+          />
+        )
       ) : !filtered.length ? (
         <p className="admin-page__empty admin-page__empty--inline">
           {usageRows.length

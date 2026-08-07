@@ -271,6 +271,43 @@
   margin: 0 0 12px;
 }
 
+.admin-page__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--admin-accent);
+}
+
+.admin-page__compare-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.admin-page__compare-status--match {
+  background: rgba(74, 222, 128, 0.18);
+  color: #86efac;
+}
+
+.admin-page__compare-status--nameDiff {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+}
+
+.admin-page__compare-status--adminOnly {
+  background: rgba(96, 165, 250, 0.18);
+  color: #93c5fd;
+}
+
+.admin-page__compare-status--priceOnly {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fca5a5;
+}
+
 .admin-page__category-btn {
   /* Override global Calculator.css button { width:100%; height:120px } */
   display: inline-flex;
