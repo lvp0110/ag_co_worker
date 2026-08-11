@@ -14,6 +14,8 @@
  *     → body: AdminMaterialUpsert
  *   PUT /admin/materials/{code}
  *     → body: AdminMaterialUpsert
+ *   DELETE /admin/materials/{code}?replacement_code=
+ *     → если материал в конструкциях — обязателен replacement_code того же type
  *   POST /admin/commerce/materials/{materialID}/prices
  *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
@@ -434,6 +436,27 @@ export const updateAdminMaterial = async (code, payload) => {
     method: "PUT",
     headers,
     body: buildAdminMaterialUpsertBody(payload),
+  });
+};
+
+/**
+ * DELETE /admin/materials/{code} — удалить материал.
+ * @param {string} code
+ * @param {{ replacementCode?: string }} [options] код замены того же type (нужен, если материал в конструкциях)
+ */
+export const deleteAdminMaterial = async (code, options = {}) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const replacementCode = String(options.replacementCode || "").trim();
+  const qs = replacementCode
+    ? `?replacement_code=${encodeURIComponent(replacementCode)}`
+    : "";
+
+  return request(`/admin/materials/${encodeURIComponent(code)}${qs}`, {
+    method: "DELETE",
+    headers,
   });
 };
 

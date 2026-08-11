@@ -674,9 +674,40 @@
   max-width: 420px;
 }
 
-.admin-page__meta-form--wide {
-  max-width: 920px;
+.admin-page__delete-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
 }
+
+.admin-page__delete-candidate {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+  background: var(--admin-surface);
+}
+
+.admin-page__delete-candidate .admin-page__field {
+  margin: 0;
+}
+
+.admin-page__delete-candidate .admin-page__field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  pointer-events: auto;
+  justify-content: flex-start;
+  color: var(--admin-text);
+  font-weight: 400;
+}
+
 
 .admin-page__meta-form--wide .admin-page__create-fields {
   max-width: none;

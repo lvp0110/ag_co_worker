@@ -18,6 +18,7 @@ import {
   deleteAdminConstruction,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
+  deleteAdminMaterial,
   enrichCompositionFromMaterialsCatalog,
   filterMaterialsByUsage,
   filterMaterialsByUsageSi,
@@ -45,35 +46,14 @@ const MATERIAL_USAGE_FILTERS = [
 
 const MATERIALS_COMPARE_MODE = "compare";
 
-/** Типы материалов, сгруппированные по usage (si/ac/vi). */
-const collectTypesByUsage = (materials) => {
-  const map = Object.fromEntries(
-    MATERIAL_USAGE_FILTERS.map((item) => [item.code, new Map()])
-  );
+/** Уникальные type из каталога материалов (для селекта). */
+const collectMaterialTypeOptions = (materials) => {
+  const set = new Set();
   for (const row of materials || []) {
-    const usage = String(row?.usage || "")
-      .trim()
-      .toLowerCase();
     const type = String(row?.type || "").trim();
-    if (!type || !map[usage]) continue;
-    map[usage].set(type, (map[usage].get(type) || 0) + 1);
+    if (type) set.add(type);
   }
-  const result = {};
-  for (const [usage, counts] of Object.entries(map)) {
-    result[usage] = [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"))
-      .map(([type]) => type);
-  }
-  return result;
-};
-
-/** Если текущий type не встречается при этом usage — берём самый частый (часто unitMaterial). */
-const pickTypeForUsage = (currentType, usage, typesByUsage) => {
-  const options = typesByUsage?.[usage] || [];
-  const current = String(currentType || "").trim();
-  if (current && options.includes(current)) return current;
-  if (options.includes("unitMaterial")) return "unitMaterial";
-  return options[0] || current;
+  return [...set].sort((a, b) => a.localeCompare(b, "ru"));
 };
 
 const MATERIAL_COLUMNS = [
@@ -250,7 +230,6 @@ const UNMATCHED_BASE_COLUMNS = [
 function UnmatchedAddForm({
   row,
   typeOptions,
-  typesByUsage = {},
   onCancel,
   onCreated,
 }) {
@@ -259,14 +238,8 @@ function UnmatchedAddForm({
     String(row.name || "").trim()
   );
   const [units, setUnits] = useState(() => String(row.units || "").trim());
+  const [type, setType] = useState(() => typeOptions[0] || "");
   const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
-  const [type, setType] = useState(() =>
-    pickTypeForUsage(
-      typeOptions[0] || "",
-      MATERIAL_USAGE_FILTERS[0].code,
-      typesByUsage
-    )
-  );
   const [unitPack, setUnitPack] = useState("1");
   const [ratioSquare, setRatioSquare] = useState("1");
   const [visible, setVisible] = useState(true);
@@ -374,36 +347,30 @@ function UnmatchedAddForm({
         </label>
         <label className="admin-page__field">
           <span className="admin-page__field-label">Тип</span>
-          <input
-            className="admin-page__input"
-            list="admin-unmatched-type-options"
+          <select
+            className="admin-page__select admin-page__select--full"
             value={type}
             onChange={(e) => setType(e.target.value)}
-            disabled={saving}
+            disabled={saving || !typeOptions.length}
             required
-            placeholder="Тип материала"
-          />
-          <datalist id="admin-unmatched-type-options">
-            {(typesByUsage[usage]?.length
-              ? typesByUsage[usage]
-              : typeOptions
-            ).map((opt) => (
-              <option key={opt} value={opt} />
-            ))}
-          </datalist>
+          >
+            {!typeOptions.length ? (
+              <option value="">Нет типов в каталоге</option>
+            ) : (
+              typeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))
+            )}
+          </select>
         </label>
         <label className="admin-page__field">
           <span className="admin-page__field-label">Применение</span>
           <select
             className="admin-page__select admin-page__select--full"
             value={usage}
-            onChange={(e) => {
-              const nextUsage = e.target.value;
-              setUsage(nextUsage);
-              setType((prev) =>
-                pickTypeForUsage(prev, nextUsage, typesByUsage)
-              );
-            }}
+            onChange={(e) => setUsage(e.target.value)}
             disabled={saving}
           >
             {MATERIAL_USAGE_FILTERS.map((item) => (
@@ -506,6 +473,154 @@ function DeleteIconButton({ deleting, disabled, label, onClick }) {
     >
       {deleting ? "…" : "×"}
     </button>
+  );
+}
+
+/** Кандидаты на замену: тот же type, другой code (сначала тот же usage). */
+const sameTypeCandidates = (catalog, material) => {
+  const code = getMaterialCode(material);
+  const type = String(material?.type || "")
+    .trim()
+    .toLowerCase();
+  const usage = String(material?.usage || "")
+    .trim()
+    .toLowerCase();
+  if (!code || !type) return [];
+
+  return (catalog || [])
+    .filter((row) => {
+      const rowCode = getMaterialCode(row);
+      if (!rowCode || rowCode === code) return false;
+      return String(row.type || "").trim().toLowerCase() === type;
+    })
+    .sort((a, b) => {
+      const au = String(a.usage || "").trim().toLowerCase() === usage ? 0 : 1;
+      const bu = String(b.usage || "").trim().toLowerCase() === usage ? 0 : 1;
+      if (au !== bu) return au - bu;
+      return materialOptionLabel(a).localeCompare(materialOptionLabel(b), "ru");
+    });
+};
+
+function MaterialDeleteForm({
+  material,
+  candidates,
+  saving,
+  error,
+  onConfirm,
+  onCancel,
+}) {
+  const firstCode = getMaterialCode(candidates[0]) || "";
+  const [replacementCode, setReplacementCode] = useState(firstCode);
+  const code = getMaterialCode(material);
+  const type = String(material?.type || "").trim();
+  const label = materialOptionLabel(material);
+  const selectedReplacement =
+    replacementCode &&
+    candidates.some((row) => getMaterialCode(row) === replacementCode)
+      ? replacementCode
+      : firstCode;
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!code) return;
+    if (candidates.length && !selectedReplacement) return;
+    onConfirm?.({
+      code,
+      replacementCode: candidates.length ? selectedReplacement : "",
+    });
+  };
+
+  return (
+    <form
+      className="admin-page__meta-form admin-page__meta-form--wide"
+      onSubmit={handleSubmit}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h3 className="admin-page__composition-title">Удаление материала</h3>
+      <p className="admin-page__hint">
+        Удаляется: <strong>{label}</strong>
+        {type ? (
+          <>
+            {" "}
+            (тип <code className="admin-page__code">{type}</code>)
+          </>
+        ) : null}
+        .
+      </p>
+
+      {candidates.length ? (
+        <>
+          <p className="admin-page__hint">
+            Выберите материал того же типа для замены в конструкциях:
+          </p>
+          <ul className="admin-page__delete-candidates">
+            {candidates.map((row) => {
+              const rowCode = getMaterialCode(row);
+              const usageLabel =
+                MATERIAL_USAGE_FILTERS.find(
+                  (item) => item.code === String(row.usage || "").trim()
+                )?.label || row.usage;
+              return (
+                <li key={rowCode} className="admin-page__delete-candidate">
+                  <label className="admin-page__field admin-page__field--checkbox">
+                    <span className="admin-page__field-label">
+                      <input
+                        type="radio"
+                        name={`material-delete-replacement-${code}`}
+                        value={rowCode}
+                        checked={selectedReplacement === rowCode}
+                        onChange={() => setReplacementCode(rowCode)}
+                        disabled={saving}
+                      />{" "}
+                      {materialOptionLabel(row)}
+                      {usageLabel ? (
+                        <span className="admin-page__count">{usageLabel}</span>
+                      ) : null}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : (
+        <p className="admin-page__hint">
+          Нет других материалов с типом «{type || "—"}». Удаление пройдёт только
+          если материал нигде не используется в конструкциях.
+        </p>
+      )}
+
+      {error && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Не удалось удалить</p>
+          <pre className="admin-page__error-body">{error}</pre>
+        </div>
+      )}
+
+      <div className="admin-page__meta-actions">
+        <button
+          type="submit"
+          className="admin-page__btn admin-page__btn--inline admin-page__btn--danger"
+          disabled={
+            saving || (candidates.length > 0 && !selectedReplacement)
+          }
+        >
+          {saving ? "Удаление…" : "Удалить"}
+        </button>
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--inline"
+          disabled={saving}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCancel?.();
+          }}
+        >
+          Отмена
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -636,6 +751,9 @@ function MaterialsListPanel() {
   const [unmatchedError, setUnmatchedError] = useState(null);
   const [unmatchedReloadToken, setUnmatchedReloadToken] = useState(0);
   const [addingUnmatchedCode, setAddingUnmatchedCode] = useState(null);
+  const [deletingCode, setDeletingCode] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
+  const [pendingDeleteCode, setPendingDeleteCode] = useState(null);
   const isCompare = usage === MATERIALS_COMPARE_MODE;
 
   useEffect(() => {
@@ -687,18 +805,14 @@ function MaterialsListPanel() {
     setSelectedCode(null);
     setQuery("");
     setAddingUnmatchedCode(null);
+    setDeleteError(null);
+    setPendingDeleteCode(null);
   }, [usage]);
 
-  const catalogTypeOptions = useMemo(() => {
-    const set = new Set();
-    for (const row of rows) {
-      const t = String(row.type || "").trim();
-      if (t) set.add(t);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "ru"));
-  }, [rows]);
-
-  const typesByUsage = useMemo(() => collectTypesByUsage(rows), [rows]);
+  const catalogTypeOptions = useMemo(
+    () => collectMaterialTypeOptions(rows),
+    [rows]
+  );
 
   const unmatchedColumns = useMemo(
     () => [
@@ -767,8 +881,67 @@ function MaterialsListPanel() {
       console.warn("[admin] material row without code", row);
       return;
     }
+    setPendingDeleteCode(null);
+    setDeleteError(null);
     setSelectedCode((prev) => (prev === code ? null : code));
   };
+
+  const pendingDeleteRow = useMemo(
+    () =>
+      pendingDeleteCode
+        ? rows.find((row) => getMaterialCode(row) === pendingDeleteCode) ??
+          null
+        : null,
+    [rows, pendingDeleteCode]
+  );
+
+  const pendingDeleteCandidates = useMemo(
+    () => sameTypeCandidates(rows, pendingDeleteRow),
+    [rows, pendingDeleteRow]
+  );
+
+  const handleDeleteMaterial = async ({ code, replacementCode }) => {
+    if (!code) return;
+    setDeletingCode(code);
+    setDeleteError(null);
+    try {
+      await deleteAdminMaterial(code, { replacementCode });
+      if (selectedCode === code) setSelectedCode(null);
+      setPendingDeleteCode(null);
+      setUnmatchedReloadToken((t) => t + 1);
+    } catch (err) {
+      setDeleteError(formatRequestError(err));
+    } finally {
+      setDeletingCode(null);
+    }
+  };
+
+  const materialColumns = useMemo(
+    () => [
+      ...MATERIAL_COLUMNS,
+      {
+        key: "actions",
+        label: "",
+        render: (row) => {
+          const code = getMaterialCode(row);
+          return (
+            <DeleteIconButton
+              deleting={deletingCode != null && deletingCode === code}
+              disabled={!code || deletingCode != null}
+              label={code || "материал"}
+              onClick={() => {
+                setDeleteError(null);
+                setSelectedCode(null);
+                setPendingDeleteCode(code);
+              }}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletingCode]
+  );
 
   const selectedLabel = selectedRow
     ? [selectedRow.code, selectedRow.name].filter(Boolean).join(" — ") ||
@@ -854,9 +1027,25 @@ function MaterialsListPanel() {
         </p>
       ) : (
         <p className="admin-page__hint">
-          Нажмите на строку, чтобы раскрыть карточку материала.
+          Нажмите на строку, чтобы раскрыть карточку. Удаление (×) просит выбрать
+          материал того же типа для замены в конструкциях.
         </p>
       )}
+
+      {pendingDeleteRow && !isCompare ? (
+        <MaterialDeleteForm
+          key={pendingDeleteCode}
+          material={pendingDeleteRow}
+          candidates={pendingDeleteCandidates}
+          saving={deletingCode === pendingDeleteCode}
+          error={deleteError}
+          onConfirm={handleDeleteMaterial}
+          onCancel={() => {
+            setPendingDeleteCode(null);
+            setDeleteError(null);
+          }}
+        />
+      ) : null}
 
       {!isCompare && error && (
         <div className="admin-page__error" role="alert">
@@ -914,7 +1103,6 @@ function MaterialsListPanel() {
                             <UnmatchedAddForm
                               row={row}
                               typeOptions={catalogTypeOptions}
-                              typesByUsage={typesByUsage}
                               onCancel={() => setAddingUnmatchedCode(null)}
                               onCreated={() => {
                                 setAddingUnmatchedCode(null);
@@ -942,7 +1130,7 @@ function MaterialsListPanel() {
           <table className="admin-page__table admin-page__table--selectable">
             <thead>
               <tr>
-                {MATERIAL_COLUMNS.map((col) => (
+                {materialColumns.map((col) => (
                   <th key={col.key}>{col.label}</th>
                 ))}
               </tr>
@@ -955,16 +1143,17 @@ function MaterialsListPanel() {
                   <FragmentRow
                     key={code ?? idx}
                     row={row}
-                    columns={MATERIAL_COLUMNS}
+                    columns={materialColumns}
                     selected={selected}
                     onSelect={handleSelect}
-                    colSpan={MATERIAL_COLUMNS.length}
+                    colSpan={materialColumns.length}
                     detail={
                       selected ? (
                         <MaterialDetail
                           code={code}
                           label={selectedLabel}
-                          typesByUsage={typesByUsage}
+                          typeOptions={catalogTypeOptions}
+                          catalogMaterials={rows}
                           onCodeChanged={(nextCode) => {
                             setSelectedCode(nextCode);
                           }}
@@ -979,6 +1168,10 @@ function MaterialsListPanel() {
                             ) {
                               setUsage(nextUsage);
                             }
+                            setUnmatchedReloadToken((t) => t + 1);
+                          }}
+                          onDeleted={() => {
+                            setSelectedCode(null);
                             setUnmatchedReloadToken((t) => t + 1);
                           }}
                         />
@@ -1024,51 +1217,72 @@ function MaterialDetail({
   showBackLink = false,
   onCodeChanged,
   onSaved,
-  typesByUsage: typesByUsageProp,
+  onDeleted,
+  typeOptions: typeOptionsProp,
+  catalogMaterials: catalogMaterialsProp,
 }) {
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(emptyMaterialForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(null);
-  const [typesByUsageLocal, setTypesByUsageLocal] = useState({});
+  const [typeOptionsLocal, setTypeOptionsLocal] = useState([]);
+  const [catalogLocal, setCatalogLocal] = useState([]);
   const panelRef = useRef(null);
 
-  const typesByUsage = typesByUsageProp || typesByUsageLocal;
-  const typeOptions = typesByUsage[form.usage] || [];
-  const typeListId = `admin-material-type-options-${code || "new"}`;
+  const catalogMaterials = catalogMaterialsProp || catalogLocal;
+  const catalogTypes = typeOptionsProp || typeOptionsLocal;
+  const currentType = String(form.type || "").trim();
+  const typeOptions = useMemo(() => {
+    if (!currentType || catalogTypes.includes(currentType)) return catalogTypes;
+    return [currentType, ...catalogTypes];
+  }, [catalogTypes, currentType]);
+
+  const deleteCandidates = useMemo(
+    () =>
+      sameTypeCandidates(catalogMaterials, {
+        code,
+        type: form.type || detail?.type,
+        usage: form.usage || detail?.usage,
+        name: form.name || detail?.name,
+      }),
+    [catalogMaterials, code, form.type, form.usage, form.name, detail]
+  );
 
   const setField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSaveSuccess(null);
   };
 
-  const handleUsageChange = (nextUsage) => {
-    setForm((prev) => ({
-      ...prev,
-      usage: nextUsage,
-      type: pickTypeForUsage(prev.type, nextUsage, typesByUsage),
-    }));
-    setSaveSuccess(null);
-  };
-
   useEffect(() => {
-    if (typesByUsageProp) return undefined;
+    if (typeOptionsProp && catalogMaterialsProp) return undefined;
     let cancelled = false;
     (async () => {
       try {
         const data = await listAdminMaterials();
-        if (!cancelled) setTypesByUsageLocal(collectTypesByUsage(data));
+        if (!cancelled) {
+          if (!typeOptionsProp) {
+            setTypeOptionsLocal(collectMaterialTypeOptions(data));
+          }
+          if (!catalogMaterialsProp) {
+            setCatalogLocal(data);
+          }
+        }
       } catch {
-        if (!cancelled) setTypesByUsageLocal({});
+        if (!cancelled) {
+          if (!typeOptionsProp) setTypeOptionsLocal([]);
+          if (!catalogMaterialsProp) setCatalogLocal([]);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [typesByUsageProp]);
+  }, [typeOptionsProp, catalogMaterialsProp]);
 
   useEffect(() => {
     if (!code) return undefined;
@@ -1078,6 +1292,7 @@ function MaterialDetail({
       setError(null);
       setSaveError(null);
       setSaveSuccess(null);
+      setConfirmDelete(false);
       try {
         const data = await getAdminMaterialByCode(code);
         if (!cancelled) {
@@ -1164,6 +1379,23 @@ function MaterialDetail({
       setSaveError(formatRequestError(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async ({ code: deleteCode, replacementCode }) => {
+    if (!deleteCode) return;
+
+    setDeleting(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      await deleteAdminMaterial(deleteCode, { replacementCode });
+      setConfirmDelete(false);
+      onDeleted?.(deleteCode);
+    } catch (err) {
+      setSaveError(formatRequestError(err));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1254,20 +1486,23 @@ function MaterialDetail({
             </label>
             <label className="admin-page__field">
               <span className="admin-page__field-label">Тип</span>
-              <input
-                className="admin-page__input"
-                list={typeListId}
+              <select
+                className="admin-page__select admin-page__select--full"
                 value={form.type}
                 onChange={(e) => setField("type", e.target.value)}
-                disabled={saving}
+                disabled={saving || !typeOptions.length}
                 required
-                placeholder="Тип материала"
-              />
-              <datalist id={typeListId}>
-                {typeOptions.map((opt) => (
-                  <option key={opt} value={opt} />
-                ))}
-              </datalist>
+              >
+                {!typeOptions.length ? (
+                  <option value="">Нет типов в каталоге</option>
+                ) : (
+                  typeOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))
+                )}
+              </select>
             </label>
             <label className="admin-page__field">
               <span className="admin-page__field-label">Ед. изм.</span>
@@ -1284,7 +1519,7 @@ function MaterialDetail({
               <select
                 className="admin-page__select admin-page__select--full"
                 value={form.usage}
-                onChange={(e) => handleUsageChange(e.target.value)}
+                onChange={(e) => setField("usage", e.target.value)}
                 disabled={saving}
               >
                 {MATERIAL_USAGE_FILTERS.map((item) => (
@@ -1455,19 +1690,51 @@ function MaterialDetail({
             <button
               type="submit"
               className="admin-page__btn admin-page__btn--inline"
-              disabled={saving}
+              disabled={saving || deleting || confirmDelete}
             >
               {saving ? "Сохранение…" : "Сохранить"}
             </button>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline admin-page__btn--danger"
+              disabled={saving || deleting || confirmDelete}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSaveError(null);
+                setConfirmDelete(true);
+              }}
+            >
+              Удалить
+            </button>
           </div>
 
-          {saveError && (
+          {confirmDelete ? (
+            <MaterialDeleteForm
+              key={`delete-${code}`}
+              material={{
+                code,
+                name: form.name || detail?.name,
+                type: form.type || detail?.type,
+                usage: form.usage || detail?.usage,
+              }}
+              candidates={deleteCandidates}
+              saving={deleting}
+              error={saveError}
+              onConfirm={handleDelete}
+              onCancel={() => {
+                setConfirmDelete(false);
+                setSaveError(null);
+              }}
+            />
+          ) : null}
+
+          {saveError && !confirmDelete && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">Ошибка сохранения</p>
               <pre className="admin-page__error-body">{saveError}</pre>
             </div>
           )}
-          {saveSuccess && (
+          {saveSuccess && !confirmDelete && (
             <p className="admin-page__success" role="status">
               {saveSuccess}
             </p>
@@ -2989,6 +3256,9 @@ export function AdminMaterialPage() {
             navigate(`/admin/materials/${encodeURIComponent(nextCode)}`, {
               replace: true,
             });
+          }}
+          onDeleted={() => {
+            navigate("/admin?list=materials", { replace: true });
           }}
         />
       </div>
