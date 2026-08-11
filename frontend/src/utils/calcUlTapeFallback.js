@@ -282,7 +282,7 @@ export const WOOL_ECO_S_SUFFIX = `_${WOOL_ECO_S}`;
 /** Артикул минваты «Шуманет-ЭКО» в расчёте базового шифра (default wool). */
 const DEFAULT_ECO_WOOL_ARTICLE_CODES = new Set(["1222.2202"]);
 
-/** Минвата «Шуманет-Eco S» в прайсе 1С (/api/v2/data). */
+/** Минвата «Шуманет-Eco S» в прайсе (/commerce/price-list). */
 export const WOOL_ECO_S_ARTICLE = {
   Code: "961747",
   Name: "Плита звукопоглощающая Шуманет-Eco S, 1200х600х50 мм (в упак. 10шт/7,2м2/0,360м3)",

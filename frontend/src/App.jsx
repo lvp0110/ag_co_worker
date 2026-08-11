@@ -17,6 +17,11 @@ const KpPage = lazy(() => import('./components/KpPage'));
 const PricePage = lazy(() => import('./components/PricePage'));
 const ProfilePage = lazy(() => import('./components/ProfilePage'));
 const AdminPage = lazy(() => import('./components/AdminPage'));
+const AdminMaterialPage = lazy(() =>
+  import('./components/AdminPage').then((mod) => ({
+    default: mod.AdminMaterialPage,
+  }))
+);
 
 /**
  * HashRouter на GitHub Pages (VITE_ROUTER_HASH=true): нет серверного SPA-fallback,
@@ -64,6 +69,10 @@ function App() {
               <Route path="/info/:id" element={<ItemInfo />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/admin" element={<AdminPage />} />
+              <Route
+                path="/admin/materials/:code"
+                element={<AdminMaterialPage />}
+              />
             </Route>
           </Routes>
         </Suspense>

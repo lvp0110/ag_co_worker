@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Navigate, useSearchParams } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Link,
+  NavLink,
+  Navigate,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
   addAdminConstructionMaterial,
@@ -7,6 +14,7 @@ import {
   collectConstructionTypes,
   collectReplacementMaterialTypes,
   createAdminConstruction,
+  createAdminMaterialFromUnmatched,
   deleteAdminConstruction,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
@@ -20,18 +28,68 @@ import {
   getReplacementMaterialTypeId,
   listAdminConstructions,
   listAdminMaterials,
+  listUnmatchedMaterials,
   pickCategoryIdFromRows,
   updateAdminConstruction,
   updateAdminConstructionMaterial,
+  updateAdminMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
-import { usePriceData } from "../services/priceApi.js";
 import "./AdminPage.css";
+
+const MATERIAL_USAGE_FILTERS = [
+  { code: "si", label: "Звукоизоляция" },
+  { code: "ac", label: "Акустика" },
+  { code: "vi", label: "Виброизоляция" },
+];
+
+const MATERIALS_COMPARE_MODE = "compare";
+
+/** Типы материалов, сгруппированные по usage (si/ac/vi). */
+const collectTypesByUsage = (materials) => {
+  const map = Object.fromEntries(
+    MATERIAL_USAGE_FILTERS.map((item) => [item.code, new Map()])
+  );
+  for (const row of materials || []) {
+    const usage = String(row?.usage || "")
+      .trim()
+      .toLowerCase();
+    const type = String(row?.type || "").trim();
+    if (!type || !map[usage]) continue;
+    map[usage].set(type, (map[usage].get(type) || 0) + 1);
+  }
+  const result = {};
+  for (const [usage, counts] of Object.entries(map)) {
+    result[usage] = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"))
+      .map(([type]) => type);
+  }
+  return result;
+};
+
+/** Если текущий type не встречается при этом usage — берём самый частый (часто unitMaterial). */
+const pickTypeForUsage = (currentType, usage, typesByUsage) => {
+  const options = typesByUsage?.[usage] || [];
+  const current = String(currentType || "").trim();
+  if (current && options.includes(current)) return current;
+  if (options.includes("unitMaterial")) return "unitMaterial";
+  return options[0] || current;
+};
 
 const MATERIAL_COLUMNS = [
   { key: "code", label: "Код" },
   { key: "name", label: "Название" },
+  { key: "product_name", label: "Продукт" },
   { key: "type", label: "Тип" },
+  {
+    key: "usage",
+    label: "Применение",
+    render: (row) => {
+      const code = String(row.usage || "").trim().toLowerCase();
+      const item = MATERIAL_USAGE_FILTERS.find((f) => f.code === code);
+      return item ? `${item.label} (${item.code})` : cell(row.usage);
+    },
+  },
   { key: "units", label: "Ед." },
   {
     key: "visible",
@@ -40,28 +98,24 @@ const MATERIAL_COLUMNS = [
   },
 ];
 
-const MATERIAL_DETAIL_FIELDS = [
-  { key: "id", label: "ID" },
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
-  { key: "type", label: "Тип" },
-  { key: "units", label: "Ед. изм." },
-  { key: "length", label: "Длина" },
-  { key: "width", label: "Ширина" },
-  { key: "height", label: "Высота" },
-  { key: "unit_pack", label: "В упаковке" },
-  { key: "info_pack", label: "Инфо упак." },
-  { key: "ratio_square", label: "Ratio м²" },
-  { key: "weight", label: "Вес" },
-  { key: "volume", label: "Объём" },
-  { key: "load_index", label: "Нагрузка" },
-  { key: "order_list", label: "Порядок" },
-  { key: "visible", label: "Видим" },
-  { key: "usage", label: "Применение" },
-  { key: "description", label: "Описание" },
-  { key: "specification", label: "Спецификация" },
-  { key: "img", label: "Изображение" },
-  { key: "scheme", label: "Схема" },
+const MATERIAL_PRICE_COLUMNS = [
+  {
+    key: "region",
+    label: "Регион",
+    render: (row) =>
+      cell(row.region?.name || row.region?.code || row.region?.id),
+  },
+  {
+    key: "price",
+    label: "Цена",
+    render: (row) => cell(row.price),
+  },
+  {
+    key: "m2",
+    label: "₽/м²",
+    render: (row) => cell(row.m2),
+  },
+  { key: "currency_code", label: "Валюта" },
 ];
 
 const CONSTRUCTION_COLUMNS = [
@@ -111,152 +165,322 @@ const CONSTRUCTION_CATEGORY_FILTERS = [
   { code: "acoustic", label: "Акустика" },
 ];
 
-const MATERIAL_USAGE_FILTERS = [
-  { code: "si", label: "Звукоизоляция" },
-  { code: "ac", label: "Акустика" },
-  { code: "vi", label: "Виброизоляция" },
-];
+const emptyMaterialForm = () => ({
+  code: "",
+  name: "",
+  product_name: "",
+  length: "0",
+  width: "0",
+  height: "0",
+  units: "",
+  type: "",
+  unit_pack: "1",
+  info_pack: "",
+  ratio_square: "1",
+  description: "",
+  specification: "",
+  img: "",
+  scheme: "",
+  weight: "",
+  volume: "",
+  load_index: "",
+  order_list: "0",
+  visible: true,
+  usage: MATERIAL_USAGE_FILTERS[0].code,
+});
 
-const MATERIALS_COMPARE_MODE = "compare";
+const materialFormFromDetail = (detail) => ({
+  code: String(detail?.code ?? ""),
+  name: String(detail?.name ?? ""),
+  product_name: String(detail?.product_name ?? ""),
+  length: String(detail?.length ?? 0),
+  width: String(detail?.width ?? 0),
+  height: String(detail?.height ?? 0),
+  units: String(detail?.units ?? ""),
+  type: String(detail?.type ?? ""),
+  unit_pack: String(detail?.unit_pack ?? 1),
+  info_pack: String(detail?.info_pack ?? ""),
+  ratio_square: String(detail?.ratio_square ?? 1),
+  description: String(detail?.description ?? ""),
+  specification: String(detail?.specification ?? ""),
+  img: String(detail?.img ?? ""),
+  scheme: String(detail?.scheme ?? ""),
+  weight: String(detail?.weight ?? ""),
+  volume: String(detail?.volume ?? ""),
+  load_index: String(detail?.load_index ?? ""),
+  order_list: String(detail?.order_list ?? 0),
+  visible: Boolean(detail?.visible),
+  usage: String(detail?.usage || MATERIAL_USAGE_FILTERS[0].code),
+});
 
-const COMPARE_MATCH_FILTERS = [
-  { code: "all", label: "Все" },
-  { code: "match", label: "Совпадающие" },
-  { code: "mismatch", label: "Не совпадающие" },
-];
-
-const COMPARE_STATUS = {
-  match: "совпадает",
-  adminOnly: "только админка",
-  priceOnly: "только прайс",
+const formatUnmatchedPrices = (prices) => {
+  if (!Array.isArray(prices) || !prices.length) return "—";
+  return prices
+    .map((price) => {
+      const region = price?.region?.code || price?.region?.name || "?";
+      const unit = price?.price != null ? String(price.price) : "—";
+      const m2 = price?.m2 != null ? String(price.m2) : "—";
+      return `${region}: ${unit} / м² ${m2}`;
+    })
+    .join("; ");
 };
 
-const COMPARE_COLUMNS = [
+const UNMATCHED_BASE_COLUMNS = [
   { key: "code", label: "Код" },
+  { key: "name", label: "Название" },
+  { key: "units", label: "Ед." },
   {
-    key: "inAdmin",
-    label: "Админка",
-    render: (row) => (row.inAdmin ? "да" : "нет"),
+    key: "prices",
+    label: "Цены",
+    render: (row) => formatUnmatchedPrices(row.prices),
   },
   {
-    key: "inPrice",
-    label: "Прайс",
-    render: (row) => (row.inPrice ? "да" : "нет"),
-  },
-  { key: "adminName", label: "Название (админка)" },
-  { key: "priceName", label: "Название (прайс)" },
-  { key: "adminUnits", label: "Ед. адм." },
-  { key: "priceUnits", label: "Ед. прайс" },
-  {
-    key: "status",
-    label: "Статус",
-    render: (row) => (
-      <span
-        className={`admin-page__compare-status admin-page__compare-status--${
-          row.nameDiff ? "nameDiff" : row.statusKey
-        }`}
-      >
-        {row.status}
-      </span>
-    ),
+    key: "created_at",
+    label: "Добавлен",
+    render: (row) => {
+      if (!row.created_at) return "—";
+      const d = new Date(row.created_at);
+      return Number.isNaN(d.getTime())
+        ? String(row.created_at)
+        : d.toLocaleString("ru-RU");
+    },
   },
 ];
 
-function normalizeCompareName(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
+function UnmatchedAddForm({
+  row,
+  typeOptions,
+  typesByUsage = {},
+  onCancel,
+  onCreated,
+}) {
+  const [name, setName] = useState(() => String(row.name || "").trim());
+  const [productName, setProductName] = useState(() =>
+    String(row.name || "").trim()
+  );
+  const [units, setUnits] = useState(() => String(row.units || "").trim());
+  const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
+  const [type, setType] = useState(() =>
+    pickTypeForUsage(
+      typeOptions[0] || "",
+      MATERIAL_USAGE_FILTERS[0].code,
+      typesByUsage
+    )
+  );
+  const [unitPack, setUnitPack] = useState("1");
+  const [ratioSquare, setRatioSquare] = useState("1");
+  const [visible, setVisible] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState(null);
 
-/** Ключ сверки по code: trim + lower case. */
-function normalizeCompareCode(value) {
-  return String(value ?? "").trim().toLowerCase();
-}
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-/**
- * Сводка админ-материалов и строк прайса по code
- * (admin.code ↔ price.article / price.code).
- * @param {object[]} adminMaterials
- * @param {object[]} priceList
- */
-function buildMaterialPriceCompareRows(adminMaterials, priceList) {
-  const byCode = new Map();
-
-  for (const mat of adminMaterials || []) {
-    const codeRaw = String(mat?.code ?? "").trim();
-    const key = normalizeCompareCode(codeRaw);
-    if (!key) continue;
-    byCode.set(key, {
-      article: codeRaw,
-      code: codeRaw,
-      inAdmin: true,
-      inPrice: false,
-      adminName: mat.name == null ? "" : String(mat.name).trim(),
-      adminUnits: mat.units == null ? "" : String(mat.units).trim(),
-      adminUsage: mat.usage == null ? "" : String(mat.usage).trim(),
-      priceName: "",
-      priceUnits: "",
-      nameDiff: false,
-    });
-  }
-
-  for (const row of priceList || []) {
-    const codeRaw = String(row?.article ?? row?.code ?? "").trim();
-    const key = normalizeCompareCode(codeRaw);
-    if (!key) continue;
-    const existing = byCode.get(key);
-    const priceName = row.name == null ? "" : String(row.name).trim();
-    const priceUnits = row.units == null ? "" : String(row.units).trim();
-    if (existing) {
-      existing.inPrice = true;
-      existing.priceName = priceName;
-      existing.priceUnits = priceUnits;
-    } else {
-      byCode.set(key, {
-        article: codeRaw,
-        code: codeRaw,
-        inAdmin: false,
-        inPrice: true,
-        adminName: "",
-        adminUnits: "",
-        adminUsage: "",
-        priceName,
-        priceUnits,
-        nameDiff: false,
-      });
+    const code = String(row.code || "").trim();
+    const pack = Number(unitPack);
+    const ratio = Number(ratioSquare);
+    if (!code) {
+      setFormError("Нет кода материала.");
+      return;
     }
-  }
+    if (!name.trim() || !units.trim() || !type.trim()) {
+      setFormError("Заполните название, ед. изм. и тип.");
+      return;
+    }
+    if (!Number.isFinite(pack) || pack <= 0) {
+      setFormError("unit_pack должен быть > 0.");
+      return;
+    }
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      setFormError("ratio_square должен быть > 0.");
+      return;
+    }
 
-  return Array.from(byCode.values())
-    .map((row) => {
-      let statusKey = "match";
-      if (!row.inAdmin) statusKey = "priceOnly";
-      else if (!row.inPrice) statusKey = "adminOnly";
+    setSaving(true);
+    setFormError(null);
+    try {
+      await createAdminMaterialFromUnmatched({
+        code,
+        name: name.trim(),
+        product_name: productName.trim() || name.trim(),
+        units: units.trim(),
+        type: type.trim(),
+        usage,
+        unit_pack: pack,
+        ratio_square: ratio,
+        order_list: 0,
+        visible,
+        length: 0,
+        width: 0,
+        height: 0,
+        info_pack: "",
+        description: "",
+        specification: "",
+        img: "",
+        scheme: "",
+        weight: "",
+        volume: "",
+        load_index: "",
+        prices: row.prices,
+      });
+      onCreated?.(code);
+    } catch (err) {
+      setFormError(formatRequestError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      const nameDiff =
-        statusKey === "match" &&
-        normalizeCompareName(row.adminName) !==
-          normalizeCompareName(row.priceName);
+  return (
+    <form className="admin-page__unmatched-form" onSubmit={handleSubmit}>
+      <h3 className="admin-page__composition-title">
+        Добавить в /admin/materials: {row.code}
+      </h3>
+      <p className="admin-page__hint">
+        Обязательные поля API: code, name, units, type, unit_pack, ratio_square.
+        Цены из unmatched будут перенесены, запись исчезнет из сравнения.
+      </p>
 
-      let status = COMPARE_STATUS[statusKey];
-      if (statusKey === "match" && nameDiff) {
-        status = "совпадает (названия разные)";
-      }
+      <div className="admin-page__create-fields">
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Название</span>
+          <input
+            className="admin-page__input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={saving}
+            required
+          />
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Продукт</span>
+          <input
+            className="admin-page__input"
+            value={productName}
+            onChange={(e) => setProductName(e.target.value)}
+            disabled={saving}
+          />
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Ед. изм.</span>
+          <input
+            className="admin-page__input"
+            value={units}
+            onChange={(e) => setUnits(e.target.value)}
+            disabled={saving}
+            required
+          />
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Тип</span>
+          <input
+            className="admin-page__input"
+            list="admin-unmatched-type-options"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            disabled={saving}
+            required
+            placeholder="Тип материала"
+          />
+          <datalist id="admin-unmatched-type-options">
+            {(typesByUsage[usage]?.length
+              ? typesByUsage[usage]
+              : typeOptions
+            ).map((opt) => (
+              <option key={opt} value={opt} />
+            ))}
+          </datalist>
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Применение</span>
+          <select
+            className="admin-page__select admin-page__select--full"
+            value={usage}
+            onChange={(e) => {
+              const nextUsage = e.target.value;
+              setUsage(nextUsage);
+              setType((prev) =>
+                pickTypeForUsage(prev, nextUsage, typesByUsage)
+              );
+            }}
+            disabled={saving}
+          >
+            {MATERIAL_USAGE_FILTERS.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.label} ({item.code})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">В упаковке (unit_pack)</span>
+          <input
+            className="admin-page__input"
+            type="number"
+            min="1"
+            step="1"
+            value={unitPack}
+            onChange={(e) => setUnitPack(e.target.value)}
+            disabled={saving}
+            required
+          />
+        </label>
+        <label className="admin-page__field">
+          <span className="admin-page__field-label">Ratio м²</span>
+          <input
+            className="admin-page__input"
+            type="number"
+            min="1"
+            step="1"
+            value={ratioSquare}
+            onChange={(e) => setRatioSquare(e.target.value)}
+            disabled={saving}
+            required
+          />
+        </label>
+        <label className="admin-page__field admin-page__field--checkbox">
+          <span className="admin-page__field-label">
+            <input
+              type="checkbox"
+              checked={visible}
+              onChange={(e) => setVisible(e.target.checked)}
+              disabled={saving}
+            />{" "}
+            Видим в каталоге
+          </span>
+        </label>
+      </div>
 
-      return {
-        ...row,
-        nameDiff,
-        statusKey,
-        status,
-      };
-    })
-    .sort((a, b) =>
-      normalizeCompareCode(a.code).localeCompare(
-        normalizeCompareCode(b.code),
-        "ru"
-      )
-    );
+      {formError && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Не удалось добавить</p>
+          <pre className="admin-page__error-body">{formError}</pre>
+        </div>
+      )}
+
+      <div className="admin-page__meta-actions">
+        <button
+          type="submit"
+          className="admin-page__btn admin-page__btn--inline"
+          disabled={saving}
+        >
+          {saving ? "Сохранение…" : "Создать материал"}
+        </button>
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--inline"
+          disabled={saving}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCancel?.();
+          }}
+        >
+          Отмена
+        </button>
+      </div>
+    </form>
+  );
 }
 
 const COMPOSITION_COLUMNS = [
@@ -407,10 +631,11 @@ function MaterialsListPanel() {
   const [query, setQuery] = useState("");
   const [selectedCode, setSelectedCode] = useState(null);
   const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
-  const [compareMatchFilter, setCompareMatchFilter] = useState(
-    COMPARE_MATCH_FILTERS[0].code
-  );
-  const priceState = usePriceData();
+  const [unmatchedRows, setUnmatchedRows] = useState([]);
+  const [unmatchedLoading, setUnmatchedLoading] = useState(false);
+  const [unmatchedError, setUnmatchedError] = useState(null);
+  const [unmatchedReloadToken, setUnmatchedReloadToken] = useState(0);
+  const [addingUnmatchedCode, setAddingUnmatchedCode] = useState(null);
   const isCompare = usage === MATERIALS_COMPARE_MODE;
 
   useEffect(() => {
@@ -433,51 +658,99 @@ function MaterialsListPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [unmatchedReloadToken]);
+
+  useEffect(() => {
+    if (!isCompare) return undefined;
+    let cancelled = false;
+    (async () => {
+      setUnmatchedLoading(true);
+      setUnmatchedError(null);
+      try {
+        const data = await listUnmatchedMaterials();
+        if (!cancelled) setUnmatchedRows(data);
+      } catch (err) {
+        if (!cancelled) {
+          setUnmatchedRows([]);
+          setUnmatchedError(formatRequestError(err));
+        }
+      } finally {
+        if (!cancelled) setUnmatchedLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isCompare, unmatchedReloadToken]);
 
   useEffect(() => {
     setSelectedCode(null);
     setQuery("");
-    setCompareMatchFilter(COMPARE_MATCH_FILTERS[0].code);
+    setAddingUnmatchedCode(null);
   }, [usage]);
 
-  const usageRows = useMemo(
-    () => (isCompare ? rows : filterMaterialsByUsage(rows, usage)),
-    [rows, usage, isCompare]
+  const catalogTypeOptions = useMemo(() => {
+    const set = new Set();
+    for (const row of rows) {
+      const t = String(row.type || "").trim();
+      if (t) set.add(t);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [rows]);
+
+  const typesByUsage = useMemo(() => collectTypesByUsage(rows), [rows]);
+
+  const unmatchedColumns = useMemo(
+    () => [
+      ...UNMATCHED_BASE_COLUMNS,
+      {
+        key: "actions",
+        label: "",
+        render: (row) => {
+          const code = String(row.code || "").trim();
+          const open = addingUnmatchedCode === code;
+          return (
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={!code}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAddingUnmatchedCode((prev) =>
+                  prev === code ? null : code
+                );
+              }}
+            >
+              {open ? "Скрыть" : "Добавить"}
+            </button>
+          );
+        },
+      },
+    ],
+    [addingUnmatchedCode]
   );
 
-  const compareRows = useMemo(
-    () =>
-      isCompare
-        ? buildMaterialPriceCompareRows(rows, priceState.list)
-        : [],
-    [isCompare, rows, priceState.list]
+  const usageRows = useMemo(
+    () => (isCompare ? [] : filterMaterialsByUsage(rows, usage)),
+    [rows, usage, isCompare]
   );
 
   const filtered = useMemo(() => {
     if (isCompare) {
-      return compareRows.filter((row) => {
-        if (compareMatchFilter === "match" && row.statusKey !== "match") {
-          return false;
-        }
-        if (compareMatchFilter === "mismatch" && row.statusKey === "match") {
-          return false;
-        }
-        return matchesQuery(row, query.trim(), [
-          "code",
-          "article",
-          "adminName",
-          "priceName",
-          "status",
-          "adminUnits",
-          "priceUnits",
-        ]);
-      });
+      return unmatchedRows.filter((row) =>
+        matchesQuery(row, query.trim(), ["code", "name", "units"])
+      );
     }
     return usageRows.filter((row) =>
-      matchesQuery(row, query.trim(), ["code", "name", "type", "units"])
+      matchesQuery(row, query.trim(), [
+        "code",
+        "name",
+        "product_name",
+        "type",
+        "units",
+      ])
     );
-  }, [isCompare, compareRows, usageRows, query, compareMatchFilter]);
+  }, [isCompare, unmatchedRows, usageRows, query]);
 
   const selectedRow = useMemo(
     () =>
@@ -502,35 +775,18 @@ function MaterialsListPanel() {
       selectedCode
     : selectedCode;
 
-  const compareStats = useMemo(() => {
-    if (!isCompare) return null;
-    let match = 0;
-    let nameDiff = 0;
-    let adminOnly = 0;
-    let priceOnly = 0;
-    for (const row of compareRows) {
-      if (row.statusKey === "match") {
-        match += 1;
-        if (row.nameDiff) nameDiff += 1;
-      } else if (row.statusKey === "adminOnly") adminOnly += 1;
-      else if (row.statusKey === "priceOnly") priceOnly += 1;
-    }
-    return { match, nameDiff, adminOnly, priceOnly, total: compareRows.length };
-  }, [isCompare, compareRows]);
-
-  const listLoading =
-    loading || (isCompare && (priceState.loading || !priceState.loaded));
+  const listLoading = isCompare ? unmatchedLoading : loading;
 
   return (
     <section className="admin-page__card">
       <div className="admin-page__card-head">
         <h2 className="admin-page__card-title">
-          {isCompare ? "Сравнение с прайсом" : "Материалы"}
+          {isCompare ? "Несовпадения импорта" : "Материалы"}
           <span className="admin-page__count">
             {listLoading
               ? "…"
               : isCompare
-                ? `${filtered.length} / ${compareRows.length}`
+                ? `${filtered.length} / ${unmatchedRows.length}`
                 : `${filtered.length} / ${usageRows.length}`}
           </span>
         </h2>
@@ -539,14 +795,14 @@ function MaterialsListPanel() {
           className="admin-page__search"
           placeholder={
             isCompare
-              ? "Поиск по коду, названию, статусу…"
+              ? "Поиск по коду, названию…"
               : "Поиск по коду, названию, типу…"
           }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={listLoading}
           aria-label={
-            isCompare ? "Поиск в сравнении" : "Поиск материалов"
+            isCompare ? "Поиск несовпадений" : "Поиск материалов"
           }
         />
       </div>
@@ -589,70 +845,32 @@ function MaterialsListPanel() {
       </div>
 
       {isCompare ? (
-        <>
-          <p className="admin-page__hint">
-            Сверка по <code className="admin-page__code">code</code>:{" "}
-            <code className="admin-page__code">/admin/materials</code> и прайс{" "}
-            <code className="admin-page__code">/api/v2/data</code>
-            {compareStats
-              ? ` — по code совпадает ${compareStats.match}${
-                  compareStats.nameDiff
-                    ? ` (из них названия разные: ${compareStats.nameDiff})`
-                    : ""
-                }, только админка ${compareStats.adminOnly}, только прайс ${compareStats.priceOnly}.`
-              : "."}
-          </p>
-          <div
-            className="admin-page__category-toggle"
-            role="group"
-            aria-label="Фильтр совпадений"
-          >
-            {COMPARE_MATCH_FILTERS.map((item) => {
-              const active = compareMatchFilter === item.code;
-              const count =
-                item.code === "all"
-                  ? compareStats?.total
-                  : item.code === "match"
-                    ? compareStats?.match
-                    : compareStats
-                      ? compareStats.total - compareStats.match
-                      : undefined;
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  className={
-                    active
-                      ? "admin-page__category-btn admin-page__category-btn--active"
-                      : "admin-page__category-btn"
-                  }
-                  aria-pressed={active}
-                  onClick={() => setCompareMatchFilter(item.code)}
-                >
-                  {item.label}
-                  {count != null ? ` (${count})` : ""}
-                </button>
-              );
-            })}
-          </div>
-        </>
+        <p className="admin-page__hint">
+          Материалы без синхронизации из{" "}
+          <code className="admin-page__code">/api/v2/data/unmatched</code>.
+          Кнопка «Добавить» создаёт запись в{" "}
+          <code className="admin-page__code">/admin/materials</code> и переносит
+          цены.
+        </p>
       ) : (
         <p className="admin-page__hint">
           Нажмите на строку, чтобы раскрыть карточку материала.
         </p>
       )}
 
-      {error && (
+      {!isCompare && error && (
         <div className="admin-page__error" role="alert">
           <p className="admin-page__error-title">Не удалось загрузить список</p>
           <pre className="admin-page__error-body">{error}</pre>
         </div>
       )}
 
-      {isCompare && priceState.error && (
+      {isCompare && unmatchedError && (
         <div className="admin-page__error" role="alert">
-          <p className="admin-page__error-title">Не удалось загрузить прайс</p>
-          <pre className="admin-page__error-body">{priceState.error}</pre>
+          <p className="admin-page__error-title">
+            Не удалось загрузить несовпадения
+          </p>
+          <pre className="admin-page__error-body">{unmatchedError}</pre>
         </div>
       )}
 
@@ -663,16 +881,55 @@ function MaterialsListPanel() {
       ) : isCompare ? (
         !filtered.length ? (
           <p className="admin-page__empty admin-page__empty--inline">
-            {compareRows.length
+            {unmatchedRows.length
               ? "Ничего не найдено по запросу."
-              : "Нет данных для сравнения."}
+              : "Нет несовпавших материалов."}
           </p>
         ) : (
-          <SimpleTable
-            columns={COMPARE_COLUMNS}
-            rows={filtered}
-            emptyText="Нет данных для сравнения."
-          />
+          <div className="admin-page__table-wrap">
+            <table className="admin-page__table">
+              <thead>
+                <tr>
+                  {unmatchedColumns.map((col) => (
+                    <th key={col.key}>{col.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row, idx) => {
+                  const code = String(row.code || "").trim();
+                  const open = Boolean(code) && addingUnmatchedCode === code;
+                  return (
+                    <Fragment key={code || idx}>
+                      <tr>
+                        {unmatchedColumns.map((col) => (
+                          <td key={col.key}>
+                            {col.render ? col.render(row) : cell(row[col.key])}
+                          </td>
+                        ))}
+                      </tr>
+                      {open ? (
+                        <tr className="admin-page__detail-row">
+                          <td colSpan={unmatchedColumns.length}>
+                            <UnmatchedAddForm
+                              row={row}
+                              typeOptions={catalogTypeOptions}
+                              typesByUsage={typesByUsage}
+                              onCancel={() => setAddingUnmatchedCode(null)}
+                              onCreated={() => {
+                                setAddingUnmatchedCode(null);
+                                setUnmatchedReloadToken((n) => n + 1);
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )
       ) : !filtered.length ? (
         <p className="admin-page__empty admin-page__empty--inline">
@@ -707,6 +964,23 @@ function MaterialsListPanel() {
                         <MaterialDetail
                           code={code}
                           label={selectedLabel}
+                          typesByUsage={typesByUsage}
+                          onCodeChanged={(nextCode) => {
+                            setSelectedCode(nextCode);
+                          }}
+                          onSaved={(nextCode, meta) => {
+                            const nextUsage = String(meta?.usage || "").trim();
+                            if (
+                              nextUsage &&
+                              MATERIAL_USAGE_FILTERS.some(
+                                (item) => item.code === nextUsage
+                              ) &&
+                              nextUsage !== usage
+                            ) {
+                              setUsage(nextUsage);
+                            }
+                            setUnmatchedReloadToken((t) => t + 1);
+                          }}
                         />
                       ) : null
                     }
@@ -744,11 +1018,57 @@ function KeyValueTable({ fields, data }) {
   );
 }
 
-function MaterialDetail({ code, label }) {
+function MaterialDetail({
+  code,
+  label,
+  showBackLink = false,
+  onCodeChanged,
+  onSaved,
+  typesByUsage: typesByUsageProp,
+}) {
   const [detail, setDetail] = useState(null);
+  const [form, setForm] = useState(emptyMaterialForm);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [typesByUsageLocal, setTypesByUsageLocal] = useState({});
   const panelRef = useRef(null);
+
+  const typesByUsage = typesByUsageProp || typesByUsageLocal;
+  const typeOptions = typesByUsage[form.usage] || [];
+  const typeListId = `admin-material-type-options-${code || "new"}`;
+
+  const setField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setSaveSuccess(null);
+  };
+
+  const handleUsageChange = (nextUsage) => {
+    setForm((prev) => ({
+      ...prev,
+      usage: nextUsage,
+      type: pickTypeForUsage(prev.type, nextUsage, typesByUsage),
+    }));
+    setSaveSuccess(null);
+  };
+
+  useEffect(() => {
+    if (typesByUsageProp) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listAdminMaterials();
+        if (!cancelled) setTypesByUsageLocal(collectTypesByUsage(data));
+      } catch {
+        if (!cancelled) setTypesByUsageLocal({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [typesByUsageProp]);
 
   useEffect(() => {
     if (!code) return undefined;
@@ -756,12 +1076,18 @@ function MaterialDetail({ code, label }) {
     (async () => {
       setLoading(true);
       setError(null);
+      setSaveError(null);
+      setSaveSuccess(null);
       try {
         const data = await getAdminMaterialByCode(code);
-        if (!cancelled) setDetail(data);
+        if (!cancelled) {
+          setDetail(data);
+          setForm(data ? materialFormFromDetail(data) : emptyMaterialForm());
+        }
       } catch (err) {
         if (!cancelled) {
           setDetail(null);
+          setForm(emptyMaterialForm());
           setError(formatRequestError(err));
         }
       } finally {
@@ -774,13 +1100,96 @@ function MaterialDetail({ code, label }) {
   }, [code]);
 
   useEffect(() => {
-    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [code]);
+    if (!showBackLink) {
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [code, showBackLink]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!code) return;
+
+    const nextCode = String(form.code || "").trim();
+    const name = String(form.name || "").trim();
+    const units = String(form.units || "").trim();
+    const type = String(form.type || "").trim();
+    const pack = Number(form.unit_pack);
+    const ratio = Number(form.ratio_square);
+
+    if (!nextCode || !name || !units || !type) {
+      setSaveError("Заполните код, название, ед. изм. и тип.");
+      return;
+    }
+    if (!Number.isFinite(pack) || pack <= 0) {
+      setSaveError("unit_pack должен быть > 0.");
+      return;
+    }
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      setSaveError("ratio_square должен быть > 0.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      await updateAdminMaterial(code, {
+        ...form,
+        code: nextCode,
+        name,
+        product_name: String(form.product_name || "").trim() || name,
+        units,
+        type,
+        unit_pack: pack,
+        ratio_square: ratio,
+        length: Number(form.length) || 0,
+        width: Number(form.width) || 0,
+        height: Number(form.height) || 0,
+        order_list: Number(form.order_list) || 0,
+        visible: Boolean(form.visible),
+        usage: String(form.usage || "").trim(),
+      });
+      const refreshed = await getAdminMaterialByCode(nextCode);
+      setDetail(refreshed);
+      setForm(refreshed ? materialFormFromDetail(refreshed) : form);
+      setSaveSuccess("Сохранено.");
+      onSaved?.(nextCode, {
+        usage: String(form.usage || "").trim(),
+      });
+      if (nextCode !== String(code)) {
+        onCodeChanged?.(nextCode);
+      }
+    } catch (err) {
+      setSaveError(formatRequestError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const titleLabel = label || code || "—";
 
   return (
     <div className="admin-page__composition" ref={panelRef}>
       <div className="admin-page__composition-head">
-        <h3 className="admin-page__composition-title">Материал: {label}</h3>
+        <h3 className="admin-page__composition-title">
+          Материал: {titleLabel}
+          {detail?.id != null ? (
+            <span className="admin-page__count">id {detail.id}</span>
+          ) : null}
+        </h3>
+        {showBackLink ? (
+          <Link to="/admin?list=materials" className="admin-page__back-link">
+            ← К списку материалов
+          </Link>
+        ) : code ? (
+          <Link
+            to={`/admin/materials/${encodeURIComponent(code)}`}
+            className="admin-page__back-link"
+          >
+            Открыть карточку
+          </Link>
+        ) : null}
       </div>
 
       {error && (
@@ -801,8 +1210,288 @@ function MaterialDetail({ code, label }) {
           Материал не найден.
         </p>
       ) : (
-        <KeyValueTable fields={MATERIAL_DETAIL_FIELDS} data={detail} />
+        <form
+          className="admin-page__meta-form admin-page__meta-form--wide"
+          onSubmit={handleSave}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 className="admin-page__composition-title">Редактирование</h3>
+          <p className="admin-page__hint">
+            Обязательные поля API: code, name, units, type, unit_pack &gt; 0,
+            ratio_square &gt; 0.
+          </p>
+
+          <div className="admin-page__create-fields">
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Код</span>
+              <input
+                className="admin-page__input"
+                value={form.code}
+                onChange={(e) => setField("code", e.target.value)}
+                disabled={saving}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Название</span>
+              <input
+                className="admin-page__input"
+                value={form.name}
+                onChange={(e) => setField("name", e.target.value)}
+                disabled={saving}
+                required
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Продукт</span>
+              <input
+                className="admin-page__input"
+                value={form.product_name}
+                onChange={(e) => setField("product_name", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Тип</span>
+              <input
+                className="admin-page__input"
+                list={typeListId}
+                value={form.type}
+                onChange={(e) => setField("type", e.target.value)}
+                disabled={saving}
+                required
+                placeholder="Тип материала"
+              />
+              <datalist id={typeListId}>
+                {typeOptions.map((opt) => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Ед. изм.</span>
+              <input
+                className="admin-page__input"
+                value={form.units}
+                onChange={(e) => setField("units", e.target.value)}
+                disabled={saving}
+                required
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Применение</span>
+              <select
+                className="admin-page__select admin-page__select--full"
+                value={form.usage}
+                onChange={(e) => handleUsageChange(e.target.value)}
+                disabled={saving}
+              >
+                {MATERIAL_USAGE_FILTERS.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label} ({item.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Длина</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                step="any"
+                value={form.length}
+                onChange={(e) => setField("length", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Ширина</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                step="any"
+                value={form.width}
+                onChange={(e) => setField("width", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Высота</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                step="any"
+                value={form.height}
+                onChange={(e) => setField("height", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">В упаковке</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                min="1"
+                step="any"
+                value={form.unit_pack}
+                onChange={(e) => setField("unit_pack", e.target.value)}
+                disabled={saving}
+                required
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Ratio м²</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                min="0"
+                step="any"
+                value={form.ratio_square}
+                onChange={(e) => setField("ratio_square", e.target.value)}
+                disabled={saving}
+                required
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Порядок</span>
+              <input
+                className="admin-page__input"
+                type="number"
+                step="1"
+                value={form.order_list}
+                onChange={(e) => setField("order_list", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Инфо упак.</span>
+              <input
+                className="admin-page__input"
+                value={form.info_pack}
+                onChange={(e) => setField("info_pack", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Вес</span>
+              <input
+                className="admin-page__input"
+                value={form.weight}
+                onChange={(e) => setField("weight", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Объём</span>
+              <input
+                className="admin-page__input"
+                value={form.volume}
+                onChange={(e) => setField("volume", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Нагрузка</span>
+              <input
+                className="admin-page__input"
+                value={form.load_index}
+                onChange={(e) => setField("load_index", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Изображение</span>
+              <input
+                className="admin-page__input"
+                value={form.img}
+                onChange={(e) => setField("img", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Схема</span>
+              <input
+                className="admin-page__input"
+                value={form.scheme}
+                onChange={(e) => setField("scheme", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field admin-page__field--wide">
+              <span className="admin-page__field-label">Описание</span>
+              <textarea
+                className="admin-page__textarea"
+                rows={3}
+                value={form.description}
+                onChange={(e) => setField("description", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field admin-page__field--wide">
+              <span className="admin-page__field-label">Спецификация</span>
+              <textarea
+                className="admin-page__textarea"
+                rows={3}
+                value={form.specification}
+                onChange={(e) => setField("specification", e.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <label className="admin-page__field admin-page__field--checkbox">
+              <span className="admin-page__field-label">
+                <input
+                  type="checkbox"
+                  checked={form.visible}
+                  onChange={(e) => setField("visible", e.target.checked)}
+                  disabled={saving}
+                />{" "}
+                Видим в каталоге
+              </span>
+            </label>
+          </div>
+
+          <div className="admin-page__meta-actions">
+            <button
+              type="submit"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={saving}
+            >
+              {saving ? "Сохранение…" : "Сохранить"}
+            </button>
+          </div>
+
+          {saveError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">Ошибка сохранения</p>
+              <pre className="admin-page__error-body">{saveError}</pre>
+            </div>
+          )}
+          {saveSuccess && (
+            <p className="admin-page__success" role="status">
+              {saveSuccess}
+            </p>
+          )}
+        </form>
       )}
+
+      {!loading && !error && detail ? (
+        <>
+          <div className="admin-page__composition-head admin-page__composition-head--spaced">
+            <h3 className="admin-page__composition-title">
+              Цены
+              <span className="admin-page__count">
+                {Array.isArray(detail.prices) ? detail.prices.length : 0} рег.
+              </span>
+            </h3>
+          </div>
+          <SimpleTable
+            columns={MATERIAL_PRICE_COLUMNS}
+            rows={Array.isArray(detail.prices) ? detail.prices : []}
+            emptyText="Нет цен для этого материала."
+          />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -2274,6 +2963,36 @@ function FragmentRow({ row, columns, selected, onSelect, colSpan, detail }) {
         </tr>
       ) : null}
     </>
+  );
+}
+
+export function AdminMaterialPage() {
+  const { code: routeCode } = useParams();
+  const navigate = useNavigate();
+  const code = decodeURIComponent(String(routeCode || "").trim());
+
+  if (!code) {
+    return <Navigate to="/admin?list=materials" replace />;
+  }
+
+  return (
+    <AdminGate>
+      <div className="admin-page">
+        <div className="admin-page__header">
+          <h1 className="admin-page__title">Материал</h1>
+        </div>
+        <MaterialDetail
+          code={code}
+          label={code}
+          showBackLink
+          onCodeChanged={(nextCode) => {
+            navigate(`/admin/materials/${encodeURIComponent(nextCode)}`, {
+              replace: true,
+            });
+          }}
+        />
+      </div>
+    </AdminGate>
   );
 }
 

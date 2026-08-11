@@ -2,7 +2,20 @@
  * Admin constructions/materials API (внешний сервис :3005).
  *
  *   GET /admin/materials
+ *     → AdminMaterial[] (без prices; prices только в карточке)
  *   GET /admin/materials/{code}
+ *     → AdminMaterialDetails { ...AdminMaterial, prices: MaterialPrice[] }
+ *   GET /commerce/price-list/{regionCode}
+ *     → MaterialPriceListItem[] { code, product_name, units, price, m2, currency_code }
+ *   GET /api/v2/data/unmatched
+ *     → UnmatchedMaterial[] { id, code, name, units, prices, created_at }
+ *   DELETE /api/v2/data/unmatched/{code}
+ *   POST /admin/materials
+ *     → body: AdminMaterialUpsert
+ *   PUT /admin/materials/{code}
+ *     → body: AdminMaterialUpsert
+ *   POST /admin/commerce/materials/{materialID}/prices
+ *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
  *   POST /admin/constructions
  *     → body: { code, name, type_id, category_id }
@@ -252,14 +265,86 @@ export const getMaterialCode = (row) => {
   return code || null;
 };
 
-/** GET /admin/materials → массив материалов. */
-export const listAdminMaterials = async () => {
-  const body = await request("/admin/materials");
-  return unwrapList(body);
+/** Нормализует материал из GET /admin/materials. */
+export const normalizeAdminMaterial = (row) => {
+  if (!row || typeof row !== "object") return row;
+  const code = row.code == null ? "" : String(row.code).trim();
+  return {
+    ...row,
+    id: row.id ?? null,
+    code,
+    name: row.name == null ? "" : String(row.name).trim(),
+    product_name:
+      row.product_name == null ? "" : String(row.product_name).trim(),
+    units: row.units == null ? "" : String(row.units).trim(),
+    type: row.type == null ? "" : String(row.type).trim(),
+    usage: row.usage == null ? "" : String(row.usage).trim(),
+    visible: Boolean(row.visible),
+  };
 };
 
 /**
- * GET /admin/materials/{code} — карточка материала.
+ * Нормализует карточку GET /admin/materials/{code}
+ * (AdminMaterialDetails: поля материала + prices[]).
+ */
+export const normalizeAdminMaterialDetails = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const material = normalizeAdminMaterial(row);
+  const prices = Array.isArray(row.prices)
+    ? row.prices.map((price) => ({
+        id: price?.id ?? null,
+        price: Number(price?.price) || 0,
+        m2: Number(price?.m2) || 0,
+        currency_code:
+          price?.currency_code == null
+            ? ""
+            : String(price.currency_code).trim(),
+        region: {
+          id: price?.region?.id ?? null,
+          code:
+            price?.region?.code == null
+              ? ""
+              : String(price.region.code).trim(),
+          name:
+            price?.region?.name == null
+              ? ""
+              : String(price.region.name).trim(),
+        },
+      }))
+    : [];
+  return { ...material, prices };
+};
+
+/** Нормализует строку GET /commerce/price-list/{regionCode}. */
+export const normalizeCommercePriceListItem = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const code = String(row.code ?? row.article ?? "").trim();
+  if (!code) return null;
+  return {
+    code,
+    article: code,
+    name:
+      row.product_name == null && row.name == null
+        ? ""
+        : String(row.product_name ?? row.name).trim(),
+    product_name:
+      row.product_name == null ? "" : String(row.product_name).trim(),
+    units: row.units == null ? "" : String(row.units).trim(),
+    price: Number(row.price) || 0,
+    m2: Number(row.m2) || 0,
+    currency_code:
+      row.currency_code == null ? "" : String(row.currency_code).trim(),
+  };
+};
+
+/** GET /admin/materials → массив материалов. */
+export const listAdminMaterials = async () => {
+  const body = await request("/admin/materials");
+  return unwrapList(body).map(normalizeAdminMaterial);
+};
+
+/**
+ * GET /admin/materials/{code} — карточка материала (+ prices).
  * @param {string} code
  */
 export const getAdminMaterialByCode = async (code) => {
@@ -268,7 +353,165 @@ export const getAdminMaterialByCode = async (code) => {
   );
   const data = body?.data ?? body;
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  return data;
+  return normalizeAdminMaterialDetails(data);
+};
+
+/**
+ * GET /commerce/price-list/{regionCode} — прайс, синхронизированный с materials.
+ * @param {string} [regionCode="msk"]
+ */
+export const listCommercePriceList = async (regionCode = "msk") => {
+  const region = String(regionCode || "msk").trim() || "msk";
+  const body = await request(
+    `/commerce/price-list/${encodeURIComponent(region)}`
+  );
+  return unwrapList(body)
+    .map(normalizeCommercePriceListItem)
+    .filter(Boolean);
+};
+
+/**
+ * GET /api/v2/data/unmatched — материалы, по которым не прошла синхронизация.
+ */
+export const listUnmatchedMaterials = async () => {
+  const body = await request("/api/v2/data/unmatched");
+  return unwrapList(body).map((row) => {
+    if (!row || typeof row !== "object") return row;
+    return {
+      ...row,
+      id: row.id ?? null,
+      code: row.code == null ? "" : String(row.code).trim(),
+      name: row.name == null ? "" : String(row.name).trim(),
+      units: row.units == null ? "" : String(row.units).trim(),
+      prices: Array.isArray(row.prices) ? row.prices : [],
+      created_at: row.created_at ?? null,
+    };
+  });
+};
+
+/**
+ * DELETE /api/v2/data/unmatched/{code} — убрать из списка несовпавших.
+ * @param {string} code
+ */
+export const deleteUnmatchedMaterial = async (code) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/api/v2/data/unmatched/${encodeURIComponent(code)}`, {
+    method: "DELETE",
+    headers,
+  });
+};
+
+/**
+ * POST /admin/materials — создать материал.
+ * @param {object} payload AdminMaterialUpsert
+ */
+export const createAdminMaterial = async (payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request("/admin/materials", {
+    method: "POST",
+    headers,
+    body: buildAdminMaterialUpsertBody(payload),
+  });
+};
+
+/**
+ * PUT /admin/materials/{code} — обновить материал.
+ * @param {string} code текущий код в path
+ * @param {object} payload AdminMaterialUpsert (может содержать новый code)
+ */
+export const updateAdminMaterial = async (code, payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/admin/materials/${encodeURIComponent(code)}`, {
+    method: "PUT",
+    headers,
+    body: buildAdminMaterialUpsertBody(payload),
+  });
+};
+
+const buildAdminMaterialUpsertBody = (payload) => ({
+  code: String(payload.code || "").trim(),
+  name: String(payload.name || "").trim(),
+  product_name: String(payload.product_name || "").trim(),
+  length: Number(payload.length) || 0,
+  width: Number(payload.width) || 0,
+  height: Number(payload.height) || 0,
+  units: String(payload.units || "").trim(),
+  type: String(payload.type || "").trim(),
+  unit_pack: Number(payload.unit_pack) || 0,
+  info_pack: String(payload.info_pack || "").trim(),
+  ratio_square: Number(payload.ratio_square) || 0,
+  description: String(payload.description || "").trim(),
+  specification: String(payload.specification || "").trim(),
+  img: String(payload.img || "").trim(),
+  scheme: String(payload.scheme || "").trim(),
+  weight: String(payload.weight || "").trim(),
+  volume: String(payload.volume || "").trim(),
+  load_index: String(payload.load_index || "").trim(),
+  order_list: Number(payload.order_list) || 0,
+  visible: Boolean(payload.visible),
+  usage: String(payload.usage || "").trim(),
+});
+
+/**
+ * POST /admin/commerce/materials/{materialID}/prices.
+ * @param {string|number} materialId
+ * @param {{ price_region_id: number, price: number, m2: number, currency_code?: string }} payload
+ */
+export const createAdminMaterialPrice = async (materialId, payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/commerce/materials/${encodeURIComponent(materialId)}/prices`,
+    {
+      method: "POST",
+      headers,
+      body: {
+        price_region_id: Number(payload.price_region_id),
+        price: Number(payload.price) || 0,
+        m2: Number(payload.m2) || 0,
+        currency_code: String(payload.currency_code || "RUB").trim() || "RUB",
+      },
+    }
+  );
+};
+
+/**
+ * Создать материал из unmatched: POST material → цены → DELETE unmatched.
+ * @param {object} payload AdminMaterialUpsert (+ optional prices from unmatched)
+ */
+export const createAdminMaterialFromUnmatched = async (payload) => {
+  const prices = Array.isArray(payload.prices) ? payload.prices : [];
+  const { prices: _omit, ...materialPayload } = payload;
+  await createAdminMaterial(materialPayload);
+
+  const created = await getAdminMaterialByCode(materialPayload.code);
+  const materialId = Number(created?.id);
+  if (Number.isFinite(materialId) && materialId > 0) {
+    for (const price of prices) {
+      const regionId = Number(price?.region?.id ?? price?.price_region_id);
+      if (!Number.isFinite(regionId) || regionId <= 0) continue;
+      await createAdminMaterialPrice(materialId, {
+        price_region_id: regionId,
+        price: price.price,
+        m2: price.m2,
+        currency_code: price.currency_code,
+      });
+    }
+  }
+
+  await deleteUnmatchedMaterial(materialPayload.code);
+  return created;
 };
 
 /**

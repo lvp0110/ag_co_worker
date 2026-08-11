@@ -32,6 +32,12 @@ export default defineConfig(({ mode }) => {
   const backendTarget =
     env.BACKEND_PROXY_TARGET || process.env.BACKEND_PROXY_TARGET || 'http://localhost:3007'
 
+  /** HTML-навигация на /admin/materials/:code → SPA; fetch с Accept: json → API. */
+  const bypassAdminSpaNavigation = (req) => {
+    const accept = String(req.headers.accept || '')
+    if (accept.includes('text/html')) return '/index.html'
+  }
+
   return {
   base: normalizeBase(process.env.BASE_PATH || env.BASE_PATH || '/'),
   plugins: [
@@ -72,13 +78,33 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
-      // Admin materials/constructions API (:3005). Точный /admin — SPA-роут, не проксируем.
+      // Admin materials/constructions/commerce API (:3005). Точный /admin — SPA-роут.
       '/admin/materials': {
         target: authTarget,
         changeOrigin: true,
         secure: false,
+        bypass: bypassAdminSpaNavigation,
       },
       '/admin/constructions': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+        bypass: bypassAdminSpaNavigation,
+      },
+      '/admin/commerce': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
+      // Commerce price-list + regions (same auth cookies as /admin).
+      '/commerce': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
+      // Unmatched import list живёт на том же сервисе, что и /admin/materials.
+      // Не через CALC_PROXY_TARGET: в .env часто staging, а materials — localhost.
+      '/api/v2/data/unmatched': {
         target: authTarget,
         changeOrigin: true,
         secure: false,

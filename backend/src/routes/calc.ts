@@ -227,4 +227,17 @@ router.get("/api/v2/data", (req, res) =>
   proxyGetCached(req, res, "/api/v2/data", "v2/data")
 );
 
+// Несовпадения импорта (admin «Сравнение»).
+router.get("/api/v2/data/unmatched", (req, res) =>
+  proxyRequest(req, res, "/api/v2/data/unmatched")
+);
+
+router.delete("/api/v2/data/unmatched/:code", (req, res) =>
+  proxyRequest(
+    req,
+    res,
+    `/api/v2/data/unmatched/${encodeURIComponent(req.params.code)}`
+  )
+);
+
 export default router;

@@ -277,6 +277,27 @@
   color: var(--admin-accent);
 }
 
+.admin-page__unmatched-form {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-page__field--checkbox .admin-page__field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--admin-text);
+}
+
+.admin-page__field--checkbox input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
 .admin-page__compare-status {
   display: inline-block;
   padding: 2px 8px;
@@ -387,6 +408,11 @@
 }
 
 .admin-page__composition-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
   margin-bottom: 10px;
 }
 
@@ -648,12 +674,67 @@
   max-width: 420px;
 }
 
+.admin-page__meta-form--wide {
+  max-width: 920px;
+}
+
+.admin-page__meta-form--wide .admin-page__create-fields {
+  max-width: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
 .admin-page__meta-form .admin-page__composition-title {
   margin: 0;
 }
 
 .admin-page__meta-form .admin-page__hint {
   margin: 0;
+}
+
+.admin-page__field--wide {
+  grid-column: 1 / -1;
+}
+
+.admin-page__textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: 6px;
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font: inherit;
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.admin-page__textarea:focus {
+  outline: 2px solid var(--admin-accent, #5b8def);
+  outline-offset: 1px;
+}
+
+.admin-page__back-link {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--admin-accent, #8eb6ff);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.admin-page__back-link:hover {
+  text-decoration: underline;
 }
 
 .admin-page__table {
