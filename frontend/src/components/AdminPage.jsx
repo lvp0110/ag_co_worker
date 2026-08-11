@@ -57,10 +57,14 @@ const collectMaterialTypeOptions = (materials) => {
 };
 
 const MATERIAL_COLUMNS = [
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
-  { key: "product_name", label: "Продукт" },
-  { key: "type", label: "Тип" },
+  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "name", label: "Название", className: "admin-page__col--grow" },
+  {
+    key: "product_name",
+    label: "Продукт",
+    className: "admin-page__col--grow",
+  },
+  { key: "type", label: "Тип", className: "admin-page__col--compact" },
   {
     key: "usage",
     label: "Применение",
@@ -70,10 +74,11 @@ const MATERIAL_COLUMNS = [
       return item ? `${item.label} (${item.code})` : cell(row.usage);
     },
   },
-  { key: "units", label: "Ед." },
+  { key: "units", label: "Ед.", className: "admin-page__col--compact" },
   {
     key: "visible",
     label: "Видим",
+    className: "admin-page__col--compact",
     render: (row) => cell(row.visible),
   },
 ];
@@ -99,12 +104,13 @@ const MATERIAL_PRICE_COLUMNS = [
 ];
 
 const CONSTRUCTION_COLUMNS = [
-  { key: "id", label: "ID" },
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
+  { key: "id", label: "ID", className: "admin-page__col--compact" },
+  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "name", label: "Название", className: "admin-page__col--grow" },
   {
     key: "type",
     label: "Тип",
+    className: "admin-page__col--compact",
     render: (row) =>
       cell(
         row.type_name ??
@@ -118,6 +124,7 @@ const CONSTRUCTION_COLUMNS = [
   {
     key: "category",
     label: "Категория",
+    className: "admin-page__col--compact",
     render: (row) =>
       cell(
         row.category_name ??
@@ -206,17 +213,19 @@ const formatUnmatchedPrices = (prices) => {
 };
 
 const UNMATCHED_BASE_COLUMNS = [
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
-  { key: "units", label: "Ед." },
+  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "name", label: "Название", className: "admin-page__col--grow" },
+  { key: "units", label: "Ед.", className: "admin-page__col--compact" },
   {
     key: "prices",
     label: "Цены",
+    className: "admin-page__col--grow",
     render: (row) => formatUnmatchedPrices(row.prices),
   },
   {
     key: "created_at",
     label: "Добавлен",
+    className: "admin-page__col--compact",
     render: (row) => {
       if (!row.created_at) return "—";
       const d = new Date(row.created_at);
@@ -678,7 +687,9 @@ function SimpleTable({ columns, rows, emptyText }) {
         <thead>
           <tr>
             {columns.map((col) => (
-              <th key={col.key}>{col.label}</th>
+              <th key={col.key} className={col.className}>
+                {col.label}
+              </th>
             ))}
           </tr>
         </thead>
@@ -686,7 +697,7 @@ function SimpleTable({ columns, rows, emptyText }) {
           {rows.map((row, idx) => (
             <tr key={row.id ?? row.code ?? row.article ?? row.material_id ?? idx}>
               {columns.map((col) => (
-                <td key={col.key}>
+                <td key={col.key} className={col.className}>
                   {col.render ? col.render(row) : cell(row[col.key])}
                 </td>
               ))}
@@ -1080,7 +1091,9 @@ function MaterialsListPanel() {
               <thead>
                 <tr>
                   {unmatchedColumns.map((col) => (
-                    <th key={col.key}>{col.label}</th>
+                    <th key={col.key} className={col.className}>
+                      {col.label}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -1092,7 +1105,7 @@ function MaterialsListPanel() {
                     <Fragment key={code || idx}>
                       <tr>
                         {unmatchedColumns.map((col) => (
-                          <td key={col.key}>
+                          <td key={col.key} className={col.className}>
                             {col.render ? col.render(row) : cell(row[col.key])}
                           </td>
                         ))}
@@ -1131,7 +1144,9 @@ function MaterialsListPanel() {
             <thead>
               <tr>
                 {materialColumns.map((col) => (
-                  <th key={col.key}>{col.label}</th>
+                  <th key={col.key} className={col.className}>
+                    {col.label}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -3160,7 +3175,9 @@ function ConstructionsListPanel() {
             <thead>
               <tr>
                 {CONSTRUCTION_COLUMNS.map((col) => (
-                  <th key={col.key}>{col.label}</th>
+                  <th key={col.key} className={col.className}>
+                    {col.label}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -3219,7 +3236,7 @@ function FragmentRow({ row, columns, selected, onSelect, colSpan, detail }) {
         aria-selected={selected}
       >
         {columns.map((col) => (
-          <td key={col.key}>
+          <td key={col.key} className={col.className}>
             {col.render ? col.render(row) : cell(row[col.key])}
           </td>
         ))}

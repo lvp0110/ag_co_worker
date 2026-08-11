@@ -20,7 +20,7 @@
   --admin-pill-bg: rgba(96, 165, 250, 0.18);
   --admin-pill-text: #93c5fd;
 
-  max-width: 1100px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 24px 16px 48px;
   font-family: "Montserrat", sans-serif;
@@ -275,6 +275,8 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   color: var(--admin-accent);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .admin-page__unmatched-form {
@@ -374,6 +376,18 @@
 
 .admin-page__table--selectable {
   pointer-events: auto;
+  width: 100%;
+}
+
+.admin-page__table--selectable th,
+.admin-page__table--selectable td {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.admin-page__table--selectable .admin-page__col--grow {
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .admin-page__row--clickable {
@@ -399,11 +413,15 @@
 
 .admin-page__detail-row td {
   padding: 0;
+  width: 100%;
+  white-space: normal;
   background: var(--admin-surface-2);
   border-bottom: 1px solid var(--admin-border-strong);
 }
 
 .admin-page__composition {
+  width: 100%;
+  box-sizing: border-box;
   padding: 14px 16px 16px;
 }
 
@@ -656,6 +674,8 @@
 
 .admin-page__table-wrap {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow-x: auto;
   border: 1px solid var(--admin-border-strong);
   border-radius: 6px;
@@ -672,6 +692,13 @@
   border-radius: 8px;
   background: var(--admin-surface-2);
   max-width: 420px;
+  box-sizing: border-box;
+}
+
+.admin-page__meta-form.admin-page__meta-form--wide {
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-page__delete-candidates {
@@ -711,8 +738,9 @@
 
 .admin-page__meta-form--wide .admin-page__create-fields {
   max-width: none;
+  width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 14px;
 }
 
@@ -770,6 +798,7 @@
 
 .admin-page__table {
   width: 100%;
+  table-layout: auto;
   border-collapse: collapse;
   font-size: 13px;
   color: var(--admin-text);
@@ -781,13 +810,39 @@
   text-align: left;
   border-bottom: 1px solid var(--admin-border);
   vertical-align: top;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .admin-page__table th {
   background: var(--admin-surface-2);
   color: var(--admin-text-muted);
   font-weight: 600;
+}
+
+.admin-page__table--selectable th:last-child,
+.admin-page__table--selectable td:last-child {
+  width: 1%;
   white-space: nowrap;
+  overflow-wrap: normal;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* Короткие поля: ширина ≈ текст, без переноса */
+.admin-page__col--compact {
+  width: 1%;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* Длинные поля: забирают оставшуюся ширину и переносятся */
+.admin-page__col--grow {
+  width: auto;
+  min-width: 8rem;
 }
 
 .admin-page__table tbody tr:last-child td {
