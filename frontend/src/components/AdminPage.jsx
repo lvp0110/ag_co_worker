@@ -9,16 +9,19 @@ import {
 } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
+  addAdminConstructionCalculationParam,
   addAdminConstructionMaterial,
   addAdminConstructionOptionalMaterial,
   collectConstructionCategories,
   collectConstructionTypes,
   collectReplacementMaterialTypes,
+  CONSTRUCTION_PARAM_TYPE_BOOL,
   createAdminCommerceRegion,
   createAdminConstruction,
   createAdminMaterialFromUnmatched,
   deleteAdminCommerceRegion,
   deleteAdminConstruction,
+  deleteAdminConstructionCalculationParam,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
   deleteAdminMaterial,
@@ -28,6 +31,7 @@ import {
   filterMaterialsByUsageSi,
   getAdminConstructionById,
   getAdminMaterialByCode,
+  getCalculationTypeId,
   getConstructionId,
   getMaterialCode,
   getMaterialTypeId,
@@ -35,6 +39,9 @@ import {
   getReplacementMaterialTypeId,
   isDirectPriceRegion,
   listAdminCommerceRegions,
+  listAdminConstructionCalculationParams,
+  listAdminConstructionCalculationTypes,
+  listAdminConstructionParams,
   listAdminConstructions,
   listAdminMaterials,
   listAdminMaterialTypes,
@@ -45,7 +52,9 @@ import {
   pickCategoryIdFromRows,
   updateAdminCommerceRegion,
   updateAdminConstruction,
+  updateAdminConstructionCalculationParam,
   updateAdminConstructionMaterial,
+  updateAdminConstructionOptionalMaterial,
   updateAdminMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
@@ -94,7 +103,7 @@ const withCurrentMaterialType = (catalogTypes, currentId, fallback) => {
 };
 
 const MATERIAL_COLUMNS = [
-  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "code", label: "Код", className: "admin-page__col--code" },
   { key: "name", label: "Название", className: "admin-page__col--grow" },
   {
     key: "product_name",
@@ -110,6 +119,7 @@ const MATERIAL_COLUMNS = [
   {
     key: "usage",
     label: "Применение",
+    className: "admin-page__col--compact",
     render: (row) => {
       const code = String(row.usage || "").trim().toLowerCase();
       const item = MATERIAL_USAGE_FILTERS.find((f) => f.code === code);
@@ -129,12 +139,14 @@ const MATERIAL_PRICE_COLUMNS = [
   {
     key: "region",
     label: "Регион",
+    className: "admin-page__col--grow",
     render: (row) =>
       cell(row.region?.name || row.region?.code || row.region?.id),
   },
   {
     key: "source",
     label: "Источник",
+    className: "admin-page__col--compact",
     render: (row) => {
       if (row.derived) {
         const coef = Number(row.price_coefficient);
@@ -148,24 +160,30 @@ const MATERIAL_PRICE_COLUMNS = [
   {
     key: "price",
     label: "Цена",
+    className: "admin-page__col--compact",
     render: (row) => cell(row.price),
   },
   {
     key: "m2",
     label: "₽/м²",
+    className: "admin-page__col--compact",
     render: (row) => cell(row.m2),
   },
-  { key: "currency_code", label: "Валюта" },
+  {
+    key: "currency_code",
+    label: "Валюта",
+    className: "admin-page__col--compact",
+  },
 ];
 
 const CONSTRUCTION_COLUMNS = [
-  { key: "id", label: "ID", className: "admin-page__col--compact" },
-  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "id", label: "ID", className: "admin-page__col--num" },
+  { key: "code", label: "Код", className: "admin-page__col--code" },
   { key: "name", label: "Название", className: "admin-page__col--grow" },
   {
     key: "type",
     label: "Тип",
-    className: "admin-page__col--compact",
+    className: "admin-page__col--code",
     render: (row) =>
       cell(
         row.type_name ??
@@ -177,7 +195,7 @@ const CONSTRUCTION_COLUMNS = [
   {
     key: "category",
     label: "Категория",
-    className: "admin-page__col--compact",
+    className: "admin-page__col--code",
     render: (row) =>
       cell(
         row.category_name ??
@@ -254,7 +272,7 @@ const formatUnmatchedPrices = (prices) => {
 };
 
 const UNMATCHED_BASE_COLUMNS = [
-  { key: "code", label: "Код", className: "admin-page__col--compact" },
+  { key: "code", label: "Код", className: "admin-page__col--code" },
   { key: "name", label: "Название", className: "admin-page__col--grow" },
   { key: "units", label: "Ед.", className: "admin-page__col--compact" },
   {
@@ -368,10 +386,6 @@ function UnmatchedAddForm({
       <h3 className="admin-page__composition-title">
         Добавить в /admin/materials: {row.code}
       </h3>
-      <p className="admin-page__hint">
-        Обязательные поля API: code, name, units, type_id, unit_pack, ratio_square.
-        Цены из unmatched будут перенесены, запись исчезнет из сравнения.
-      </p>
 
       <div className="admin-page__create-fields">
         <label className="admin-page__field">
@@ -509,12 +523,46 @@ function UnmatchedAddForm({
 }
 
 const COMPOSITION_COLUMNS = [
-  { key: "sort_order", label: "№" },
-  { key: "material_id", label: "ID мат." },
-  { key: "code", label: "Код" },
-  { key: "name", label: "Название" },
-  { key: "weight", label: "Вес" },
+  { key: "sort_order", label: "№", className: "admin-page__col--num" },
+  { key: "material_id", label: "ID мат.", className: "admin-page__col--compact" },
+  { key: "code", label: "Код", className: "admin-page__col--code" },
+  { key: "name", label: "Название", className: "admin-page__col--grow" },
+  { key: "weight", label: "Вес", className: "admin-page__col--compact" },
 ];
+
+function CalculationTypeSelect({
+  value,
+  options,
+  disabled,
+  onChange,
+  ariaLabel,
+}) {
+  return (
+    <select
+      className="admin-page__select admin-page__select--calc"
+      value={value || ""}
+      disabled={disabled}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        e.stopPropagation();
+        onChange?.(e.target.value);
+      }}
+      aria-label={ariaLabel || "Тип расчёта"}
+    >
+      <option value="">Тип расчёта…</option>
+      {options.map((opt) => (
+        <option key={opt.id} value={String(opt.id)}>
+          {materialTypeOptionLabel(opt)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const calcTypeIdPayload = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
 
 function DeleteIconButton({ deleting, disabled, label, onClick }) {
   return (
@@ -584,7 +632,6 @@ function MaterialDeleteForm({
   const firstCode = getMaterialCode(candidates[0]) || "";
   const [replacementCode, setReplacementCode] = useState(firstCode);
   const code = getMaterialCode(material);
-  const type = materialTypeDisplay(material);
   const label = materialOptionLabel(material);
   const selectedReplacement =
     replacementCode &&
@@ -609,23 +656,12 @@ function MaterialDeleteForm({
       onSubmit={handleSubmit}
       onClick={(e) => e.stopPropagation()}
     >
-      <h3 className="admin-page__composition-title">Удаление материала</h3>
-      <p className="admin-page__hint">
-        Удаляется: <strong>{label}</strong>
-        {type ? (
-          <>
-            {" "}
-            (тип <code className="admin-page__code">{type}</code>)
-          </>
-        ) : null}
-        .
-      </p>
+      <h3 className="admin-page__composition-title">
+        Удаление материала: {label}
+      </h3>
 
       {candidates.length ? (
         <>
-          <p className="admin-page__hint">
-            Выберите материал того же типа для замены в конструкциях:
-          </p>
           <ul className="admin-page__delete-candidates">
             {candidates.map((row) => {
               const rowCode = getMaterialCode(row);
@@ -656,12 +692,7 @@ function MaterialDeleteForm({
             })}
           </ul>
         </>
-      ) : (
-        <p className="admin-page__hint">
-          Нет других материалов с типом «{type || "—"}». Удаление пройдёт только
-          если материал нигде не используется в конструкциях.
-        </p>
-      )}
+      ) : null}
 
       {error && (
         <div className="admin-page__error" role="alert">
@@ -1106,22 +1137,7 @@ function MaterialsListPanel() {
         </button>
       </div>
 
-      {isCompare ? (
-        <p className="admin-page__hint">
-          Материалы без синхронизации из{" "}
-          <code className="admin-page__code">/api/v2/data/unmatched</code>.
-          Кнопка «Добавить» создаёт запись в{" "}
-          <code className="admin-page__code">/admin/materials</code> и переносит
-          цены.
-        </p>
-      ) : (
-        <p className="admin-page__hint">
-          Нажмите на строку, чтобы раскрыть карточку. Удаление (×) просит выбрать
-          материал того же типа для замены в конструкциях.
-        </p>
-      )}
-
-      {pendingDeleteRow && !isCompare ? (
+      {isCompare ? null : pendingDeleteRow ? (
         <MaterialDeleteForm
           key={pendingDeleteCode}
           material={pendingDeleteRow}
@@ -1535,10 +1551,6 @@ function MaterialDetail({
           onClick={(e) => e.stopPropagation()}
         >
           <h3 className="admin-page__composition-title">Редактирование</h3>
-          <p className="admin-page__hint">
-            Обязательные поля API: code, name, units, type_id, unit_pack &gt; 0,
-            ratio_square &gt; 0.
-          </p>
 
           <div className="admin-page__create-fields">
             <label className="admin-page__field">
@@ -1858,6 +1870,593 @@ function MaterialDetail({
   );
 }
 
+function newCalcParamOption(valueType, index, extras = {}) {
+  return {
+    _key: extras._key || `opt-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+    label: extras.label ?? "",
+    value_int: extras.value_int ?? 0,
+    value_bool: extras.value_bool ?? false,
+    sort_order: extras.sort_order ?? index,
+    value_type: valueType,
+  };
+}
+
+const isBoolCalcParam = (param) =>
+  String(param?.value_type || "").trim() === CONSTRUCTION_PARAM_TYPE_BOOL ||
+  String(param?.code || "").trim() === "dframe";
+
+const boolCalcParamOptions = () => [
+  newCalcParamOption(CONSTRUCTION_PARAM_TYPE_BOOL, 0, {
+    label: "Да",
+    value_bool: true,
+  }),
+  newCalcParamOption(CONSTRUCTION_PARAM_TYPE_BOOL, 1, {
+    label: "Нет",
+    value_bool: false,
+  }),
+];
+
+const defaultCalcParamOptions = (param) => {
+  const type = String(param?.value_type || "").trim();
+  const code = String(param?.code || "").trim();
+  if (isBoolCalcParam(param)) {
+    return boolCalcParamOptions();
+  }
+  if (code === "step") {
+    return [600, 400, 300].map((value, i) =>
+      newCalcParamOption(type, i, { label: `${value} мм`, value_int: value })
+    );
+  }
+  return [newCalcParamOption(type, 0)];
+};
+
+const optionsFromAttached = (row) => {
+  const type = String(row?.value_type || "").trim();
+  const list = Array.isArray(row?.options) ? row.options : [];
+  if (!list.length) return defaultCalcParamOptions(row);
+  return list.map((opt, i) =>
+    newCalcParamOption(type, i, {
+      _key: opt.id != null ? `opt-${opt.id}` : undefined,
+      label: opt.label,
+      value_int: opt.value_int,
+      value_bool: opt.value_bool,
+      sort_order: opt.sort_order ?? i,
+    })
+  );
+};
+
+const constructionParamOptionLabel = (param) => {
+  const name = String(param?.name || "").trim();
+  const code = String(param?.code || "").trim();
+  if (name && code && name !== code) return `${name} (${code})`;
+  return name || code || `ID ${param?.id ?? "?"}`;
+};
+
+function CalcParamOptionRows({ valueType, options, disabled, onChange }) {
+  const isBool = valueType === CONSTRUCTION_PARAM_TYPE_BOOL;
+  const updateAt = (index, patch) => {
+    onChange(
+      options.map((opt, i) => (i === index ? { ...opt, ...patch } : opt))
+    );
+  };
+
+  return (
+    <div className="admin-page__param-options">
+      {options.map((opt, index) => (
+        <div key={opt._key || index} className="admin-page__param-option-row">
+          <input
+            className="admin-page__input"
+            value={opt.label}
+            disabled={disabled}
+            placeholder="Подпись варианта"
+            onChange={(e) => updateAt(index, { label: e.target.value })}
+            aria-label={`Подпись варианта ${index + 1}`}
+          />
+          {isBool ? (
+            <select
+              className="admin-page__select"
+              value={opt.value_bool ? "true" : "false"}
+              disabled={disabled}
+              onChange={(e) =>
+                updateAt(index, { value_bool: e.target.value === "true" })
+              }
+              aria-label={`Значение варианта ${index + 1}`}
+            >
+              <option value="true">Да</option>
+              <option value="false">Нет</option>
+            </select>
+          ) : (
+            <input
+              className="admin-page__input admin-page__input--compact"
+              type="number"
+              value={opt.value_int}
+              disabled={disabled}
+              onChange={(e) =>
+                updateAt(index, { value_int: Number(e.target.value) || 0 })
+              }
+              aria-label={`Значение варианта ${index + 1}`}
+            />
+          )}
+          <DeleteIconButton
+            disabled={disabled || options.length <= 1}
+            label={opt.label || `вариант ${index + 1}`}
+            onClick={() => onChange(options.filter((_, i) => i !== index))}
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        className="admin-page__btn admin-page__btn--inline"
+        disabled={disabled}
+        onClick={() =>
+          onChange([
+            ...options,
+            newCalcParamOption(valueType, options.length),
+          ])
+        }
+      >
+        Добавить вариант
+      </button>
+    </div>
+  );
+}
+
+function ConstructionCalcParamsPanel({ constructionId }) {
+  const [catalog, setCatalog] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [addParamId, setAddParamId] = useState("");
+  const [addRequired, setAddRequired] = useState(true);
+  const [addDefaultInt, setAddDefaultInt] = useState(0);
+  const [addDefaultBool, setAddDefaultBool] = useState(false);
+  const [addOptions, setAddOptions] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState(null);
+  const [savingId, setSavingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [drafts, setDrafts] = useState({});
+
+  useEffect(() => {
+    if (constructionId == null) return undefined;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setAddError(null);
+      setActionError(null);
+      try {
+        const [params, attached] = await Promise.all([
+          listAdminConstructionParams(),
+          listAdminConstructionCalculationParams(constructionId),
+        ]);
+        if (cancelled) return;
+        setCatalog(params);
+        setRows(attached);
+        setDrafts(
+          Object.fromEntries(
+            attached.map((row) => [
+              row.id,
+              {
+                is_required: row.is_required,
+                default_value_int: row.default_value_int,
+                default_value_bool: row.default_value_bool,
+                options: optionsFromAttached(row),
+              },
+            ])
+          )
+        );
+      } catch (err) {
+        if (!cancelled) {
+          setCatalog([]);
+          setRows([]);
+          setDrafts({});
+          setError(formatRequestError(err));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [constructionId, reloadToken]);
+
+  const attachedParamIds = useMemo(
+    () => new Set(rows.map((row) => Number(row.param_id)).filter(Boolean)),
+    [rows]
+  );
+
+  const availableCatalog = useMemo(
+    () => catalog.filter((param) => !attachedParamIds.has(Number(param.id))),
+    [catalog, attachedParamIds]
+  );
+
+  const selectedAddParam = useMemo(
+    () =>
+      availableCatalog.find((param) => String(param.id) === String(addParamId)) ||
+      null,
+    [availableCatalog, addParamId]
+  );
+
+  useEffect(() => {
+    if (
+      addParamId &&
+      availableCatalog.some((param) => String(param.id) === String(addParamId))
+    ) {
+      return;
+    }
+    setAddParamId(
+      availableCatalog.length ? String(availableCatalog[0].id) : ""
+    );
+  }, [availableCatalog, addParamId]);
+
+  useEffect(() => {
+    if (!selectedAddParam) {
+      setAddOptions([]);
+      return;
+    }
+    const next = defaultCalcParamOptions(selectedAddParam);
+    setAddOptions(next);
+    if (isBoolCalcParam(selectedAddParam)) {
+      setAddDefaultBool(false);
+    } else if (selectedAddParam.code === "step") {
+      setAddDefaultInt(600);
+    } else {
+      setAddDefaultInt(Number(next[0]?.value_int) || 0);
+    }
+  }, [selectedAddParam?.id]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectedAddParam) {
+      setAddError("Выберите параметр из справочника.");
+      return;
+    }
+    const labeled = isBoolCalcParam(selectedAddParam)
+      ? boolCalcParamOptions()
+      : addOptions.filter((opt) => String(opt.label || "").trim());
+    if (!labeled.length) {
+      setAddError("Добавьте хотя бы один вариант с подписью.");
+      return;
+    }
+
+    setAdding(true);
+    setAddError(null);
+    setActionError(null);
+    try {
+      await addAdminConstructionCalculationParam(constructionId, {
+        param_id: selectedAddParam.id,
+        value_type: isBoolCalcParam(selectedAddParam)
+          ? CONSTRUCTION_PARAM_TYPE_BOOL
+          : selectedAddParam.value_type,
+        is_required: addRequired,
+        sort_order: rows.length,
+        default_value_int: addDefaultInt,
+        default_value_bool: addDefaultBool,
+        options: labeled,
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setAddError(formatRequestError(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleSaveRow = async (row) => {
+    const configId = Number(row.id);
+    if (!Number.isFinite(configId) || configId <= 0) return;
+    const draft = drafts[configId] || {};
+    const labeled = isBoolCalcParam(row)
+      ? boolCalcParamOptions()
+      : (draft.options || []).filter((opt) =>
+          String(opt.label || "").trim()
+        );
+    if (!labeled.length) {
+      setActionError("У параметра должен быть хотя бы один вариант.");
+      return;
+    }
+
+    setSavingId(configId);
+    setActionError(null);
+    try {
+      await updateAdminConstructionCalculationParam(constructionId, configId, {
+        param_id: row.param_id,
+        value_type: isBoolCalcParam(row)
+          ? CONSTRUCTION_PARAM_TYPE_BOOL
+          : row.value_type,
+        is_required: draft.is_required !== false,
+        sort_order: row.sort_order,
+        default_value_int: draft.default_value_int,
+        default_value_bool: draft.default_value_bool,
+        options: labeled,
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(formatRequestError(err));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleDeleteRow = async (row) => {
+    const configId = Number(row.id);
+    if (!Number.isFinite(configId) || configId <= 0) return;
+    const label = constructionParamOptionLabel(row);
+    if (!window.confirm(`Удалить параметр «${label}» у конструкции?`)) return;
+
+    setDeletingId(configId);
+    setActionError(null);
+    try {
+      await deleteAdminConstructionCalculationParam(constructionId, configId);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(formatRequestError(err));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const patchDraft = (configId, patch) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [configId]: { ...(prev[configId] || {}), ...patch },
+    }));
+  };
+
+  return (
+    <>
+      <div className="admin-page__composition-head admin-page__composition-head--spaced">
+        <h3 className="admin-page__composition-title">
+          Опции расчета
+          <span className="admin-page__count">
+            {loading ? "…" : `${rows.length} / ${catalog.length}`}
+          </span>
+        </h3>
+      </div>
+
+      {error && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">
+            Не удалось загрузить параметры расчета
+          </p>
+          <pre className="admin-page__error-body">{error}</pre>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Ошибка параметра</p>
+          <pre className="admin-page__error-body">{actionError}</pre>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="admin-page__empty admin-page__empty--inline">
+          Загрузка параметров…
+        </p>
+      ) : (
+        <>
+          {rows.length ? (
+            <div className="admin-page__replacements">
+              {rows.map((row) => {
+                const draft = drafts[row.id] || {
+                  is_required: row.is_required,
+                  default_value_int: row.default_value_int,
+                  default_value_bool: row.default_value_bool,
+                  options: optionsFromAttached(row),
+                };
+                const isBool = isBoolCalcParam(row);
+                const busy =
+                  savingId === row.id || deletingId === row.id;
+                return (
+                  <div
+                    key={row.id || row.param_id}
+                    className="admin-page__replacement-block"
+                  >
+                    <div className="admin-page__composition-head">
+                      <h4 className="admin-page__composition-title">
+                        {constructionParamOptionLabel(row)}
+                        <span className="admin-page__count">
+                          {row.value_type}
+                        </span>
+                      </h4>
+                    </div>
+                    <label className="admin-page__field admin-page__field--checkbox">
+                      <span className="admin-page__field-label">
+                        <input
+                          type="checkbox"
+                          checked={draft.is_required !== false}
+                          disabled={busy}
+                          onChange={(e) =>
+                            patchDraft(row.id, {
+                              is_required: e.target.checked,
+                            })
+                          }
+                        />
+                        Обязательный
+                      </span>
+                    </label>
+                    <label className="admin-page__field">
+                      <span className="admin-page__field-label">
+                        Значение по умолчанию
+                      </span>
+                      {isBool ? (
+                        <select
+                          className="admin-page__select admin-page__select--full"
+                          value={draft.default_value_bool ? "true" : "false"}
+                          disabled={busy}
+                          onChange={(e) =>
+                            patchDraft(row.id, {
+                              default_value_bool: e.target.value === "true",
+                            })
+                          }
+                        >
+                          <option value="true">Да</option>
+                          <option value="false">Нет</option>
+                        </select>
+                      ) : (
+                        <input
+                          className="admin-page__input"
+                          type="number"
+                          value={draft.default_value_int}
+                          disabled={busy}
+                          onChange={(e) =>
+                            patchDraft(row.id, {
+                              default_value_int: Number(e.target.value) || 0,
+                            })
+                          }
+                        />
+                      )}
+                    </label>
+                    {isBool ? null : (
+                      <>
+                        <span className="admin-page__field-label">Варианты</span>
+                        <CalcParamOptionRows
+                          valueType={row.value_type}
+                          options={draft.options || []}
+                          disabled={busy}
+                          onChange={(next) =>
+                            patchDraft(row.id, { options: next })
+                          }
+                        />
+                      </>
+                    )}
+                    <div className="admin-page__meta-actions">
+                      <button
+                        type="button"
+                        className="admin-page__btn admin-page__btn--inline"
+                        disabled={busy}
+                        onClick={() => handleSaveRow(row)}
+                      >
+                        {savingId === row.id ? "Сохранение…" : "Сохранить"}
+                      </button>
+                      <DeleteIconButton
+                        deleting={deletingId === row.id}
+                        disabled={busy}
+                        label={constructionParamOptionLabel(row)}
+                        onClick={() => handleDeleteRow(row)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="admin-page__empty admin-page__empty--inline">
+              К конструкции ещё не привязан ни один параметр.
+            </p>
+          )}
+
+          <form
+            className="admin-page__create-form"
+            onSubmit={handleAdd}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="admin-page__create-title">Добавить параметр</h3>
+            <div className="admin-page__create-fields admin-page__create-fields--wide">
+              <label className="admin-page__field">
+                <span className="admin-page__field-label">Параметр</span>
+                <select
+                  className="admin-page__select admin-page__select--full"
+                  value={addParamId}
+                  disabled={adding || !availableCatalog.length}
+                  onChange={(e) => setAddParamId(e.target.value)}
+                >
+                  {!availableCatalog.length ? (
+                    <option value="">
+                      {catalog.length
+                        ? "Все параметры справочника уже добавлены"
+                        : "Справочник параметров пуст"}
+                    </option>
+                  ) : (
+                    availableCatalog.map((param) => (
+                      <option key={param.id} value={String(param.id)}>
+                        {constructionParamOptionLabel(param)}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+              <label className="admin-page__field admin-page__field--checkbox">
+                <span className="admin-page__field-label">
+                  <input
+                    type="checkbox"
+                    checked={addRequired}
+                    disabled={adding || !selectedAddParam}
+                    onChange={(e) => setAddRequired(e.target.checked)}
+                  />
+                  Обязательный
+                </span>
+              </label>
+              {selectedAddParam ? (
+                <label className="admin-page__field">
+                  <span className="admin-page__field-label">
+                    Значение по умолчанию
+                  </span>
+                  {isBoolCalcParam(selectedAddParam) ? (
+                    <select
+                      className="admin-page__select admin-page__select--full"
+                      value={addDefaultBool ? "true" : "false"}
+                      disabled={adding}
+                      onChange={(e) =>
+                        setAddDefaultBool(e.target.value === "true")
+                      }
+                    >
+                      <option value="true">Да</option>
+                      <option value="false">Нет</option>
+                    </select>
+                  ) : (
+                    <input
+                      className="admin-page__input"
+                      type="number"
+                      value={addDefaultInt}
+                      disabled={adding}
+                      onChange={(e) =>
+                        setAddDefaultInt(Number(e.target.value) || 0)
+                      }
+                    />
+                  )}
+                </label>
+              ) : null}
+              {selectedAddParam && !isBoolCalcParam(selectedAddParam) ? (
+                <>
+                  <span className="admin-page__field-label">Варианты</span>
+                  <CalcParamOptionRows
+                    valueType={selectedAddParam.value_type}
+                    options={addOptions}
+                    disabled={adding}
+                    onChange={setAddOptions}
+                  />
+                </>
+              ) : null}
+              <button
+                type="submit"
+                className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
+                disabled={adding || !selectedAddParam}
+              >
+                {adding ? "Добавление…" : "Добавить параметр"}
+              </button>
+            </div>
+            {addError && (
+              <div className="admin-page__error" role="alert">
+                <p className="admin-page__error-title">
+                  Не удалось добавить параметр
+                </p>
+                <pre className="admin-page__error-body">{addError}</pre>
+              </div>
+            )}
+          </form>
+        </>
+      )}
+    </>
+  );
+}
+
 function ConstructionDetail({
   constructionId,
   label,
@@ -1882,12 +2481,16 @@ function ConstructionDetail({
   const [optionalMaterials, setOptionalMaterials] = useState([]);
   const [catalogMaterials, setCatalogMaterials] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
+  const [calculationTypes, setCalculationTypes] = useState([]);
   const [addByGroup, setAddByGroup] = useState({});
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
+  const [addCalcTypeByGroup, setAddCalcTypeByGroup] = useState({});
   const [optionalAddArticle, setOptionalAddArticle] = useState("");
   const [optionalAddQuery, setOptionalAddQuery] = useState("");
+  const [optionalAddCalcTypeId, setOptionalAddCalcTypeId] = useState("");
   const [defaultAddArticle, setDefaultAddArticle] = useState("");
   const [defaultAddQuery, setDefaultAddQuery] = useState("");
+  const [defaultAddCalcTypeId, setDefaultAddCalcTypeId] = useState("");
   const [promoteItemId, setPromoteItemId] = useState("");
   const [promoteTypeId, setPromoteTypeId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1902,6 +2505,7 @@ function ConstructionDetail({
   const [addingOptional, setAddingOptional] = useState(false);
   const [addingDefault, setAddingDefault] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [savingCalcTypeKey, setSavingCalcTypeKey] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
   const panelRef = useRef(null);
 
@@ -1967,12 +2571,149 @@ function ConstructionDetail({
     [materialTypes, replacementGroups]
   );
 
+  const patchCompositionCalcType = (kind, itemId, typeId, typeObj) => {
+    const patchRow = (row) =>
+      Number(row.id) !== itemId
+        ? row
+        : {
+            ...row,
+            calculation_type_id: typeId,
+            calculation_type: typeObj,
+            calculation_type_code: typeObj?.code || "",
+            calculation_type_name: typeObj?.name || "",
+          };
+    if (kind === "optional") {
+      setOptionalMaterials((prev) => prev.map(patchRow));
+      return;
+    }
+    if (kind === "default") {
+      setDefaultMaterials((prev) => prev.map(patchRow));
+      return;
+    }
+    setReplacementGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        materials: (group.materials || []).map(patchRow),
+      }))
+    );
+  };
+
+  const constructionMaterialUpsert = (row, overrides = {}) => {
+    const replacementGroup =
+      row.replacement_group == null || row.replacement_group === ""
+        ? null
+        : Number(row.replacement_group);
+    const replacementTypeId = getReplacementMaterialTypeId(row);
+    return {
+      id: Number(row.material_id ?? row.material?.id),
+      weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
+      sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+      is_default: Boolean(row.is_default),
+      replacement_group: Number.isFinite(replacementGroup)
+        ? replacementGroup
+        : null,
+      replacement_material_type_id:
+        Number.isFinite(Number(replacementTypeId)) &&
+        Number(replacementTypeId) > 0
+          ? Number(replacementTypeId)
+          : null,
+      calculation_type_id: getCalculationTypeId(row),
+      calculation_note: String(row.calculation_note || ""),
+      ...overrides,
+    };
+  };
+
+  const handleChangeCalculationType = async (row, kind, nextValue) => {
+    const itemId = Number(row.id);
+    const materialId = Number(row.material_id ?? row.material?.id);
+    if (!Number.isFinite(itemId) || itemId <= 0) return;
+    if (!Number.isFinite(materialId) || materialId <= 0) return;
+
+    const typeId = calcTypeIdPayload(nextValue);
+    const typeObj =
+      calculationTypes.find((item) => Number(item.id) === typeId) || null;
+    const prevTypeId = getCalculationTypeId(row);
+    const key = `${kind}:${itemId}`;
+
+    patchCompositionCalcType(kind, itemId, typeId, typeObj);
+    setSavingCalcTypeKey(key);
+    const setErr =
+      kind === "optional"
+        ? setOptionalAddError
+        : kind === "replacement"
+          ? setAddError
+          : setDefaultAddError;
+    setErr(null);
+    try {
+      if (kind === "optional") {
+        await updateAdminConstructionOptionalMaterial(constructionId, itemId, {
+          id: materialId,
+          weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
+          sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+          calculation_type_id: typeId,
+          calculation_note: String(row.calculation_note || ""),
+        });
+      } else {
+        await updateAdminConstructionMaterial(
+          constructionId,
+          itemId,
+          constructionMaterialUpsert(row, { calculation_type_id: typeId })
+        );
+      }
+    } catch (err) {
+      const prevObj =
+        calculationTypes.find((item) => Number(item.id) === prevTypeId) ||
+        row.calculation_type ||
+        null;
+      patchCompositionCalcType(kind, itemId, prevTypeId, prevObj);
+      setErr(formatRequestError(err));
+    } finally {
+      setSavingCalcTypeKey(null);
+    }
+  };
+
+  const renderCalcTypeSelect = (row, kind) => {
+    const itemId = Number(row.id);
+    const options = withCurrentMaterialType(
+      calculationTypes,
+      getCalculationTypeId(row),
+      row.calculation_type || {
+        code: row.calculation_type_code,
+        name: row.calculation_type_name,
+      }
+    );
+    return (
+      <CalculationTypeSelect
+        value={
+          getCalculationTypeId(row) != null
+            ? String(getCalculationTypeId(row))
+            : ""
+        }
+        options={options}
+        disabled={
+          !Number.isFinite(itemId) ||
+          itemId <= 0 ||
+          savingCalcTypeKey === `${kind}:${itemId}`
+        }
+        ariaLabel={`Тип расчёта ${row.code || row.material_code || itemId}`}
+        onChange={(next) => handleChangeCalculationType(row, kind, next)}
+      />
+    );
+  };
+
   const defaultMaterialsColumns = useMemo(
     () => [
       ...COMPOSITION_COLUMNS,
       {
+        key: "calculation_type",
+        label: "Тип расчёта",
+        className: "admin-page__col--calc",
+        render: (row) => renderCalcTypeSelect(row, "default"),
+      },
+      {
         key: "actions",
         label: "",
+        className: "admin-page__col--actions",
         render: (row) => {
           const itemId = Number(row.id);
           const article = String(
@@ -1990,15 +2731,22 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId]
+    [deletingMaterialId, calculationTypes, savingCalcTypeKey]
   );
 
   const optionalMaterialsColumns = useMemo(
     () => [
       ...COMPOSITION_COLUMNS,
       {
+        key: "calculation_type",
+        label: "Тип расчёта",
+        className: "admin-page__col--calc",
+        render: (row) => renderCalcTypeSelect(row, "optional"),
+      },
+      {
         key: "actions",
         label: "",
+        className: "admin-page__col--actions",
         render: (row) => {
           const itemId = Number(row.id);
           const article = String(
@@ -2016,7 +2764,7 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingOptionalId]
+    [deletingOptionalId, calculationTypes, savingCalcTypeKey]
   );
 
   const optionalArticles = useMemo(() => {
@@ -2051,7 +2799,7 @@ function ConstructionDetail({
       setDefaultAddError(null);
       setPromoteError(null);
       try {
-        const [data, catalog, types, constrTypes, allConstructions] =
+        const [data, catalog, types, constrTypes, allConstructions, calcTypes] =
           await Promise.all([
             getAdminConstructionById(constructionId),
             listAdminMaterials().catch(() => []),
@@ -2060,10 +2808,12 @@ function ConstructionDetail({
               ? Promise.resolve(null)
               : listConstructionTypes().catch(() => []),
             listAdminConstructions().catch(() => []),
+            listAdminConstructionCalculationTypes().catch(() => []),
           ]);
         if (cancelled) return;
         setCatalogMaterials(catalog);
         setMaterialTypes(types);
+        setCalculationTypes(calcTypes || []);
         if (constructionTypesProp == null) {
           setTypeOptionsLocal(constrTypes || []);
         }
@@ -2102,10 +2852,13 @@ function ConstructionDetail({
         setOptionalMaterials(enriched.optionalMaterials);
         setAddByGroup({});
         setAddQueryByGroup({});
+        setAddCalcTypeByGroup({});
         setOptionalAddArticle("");
         setOptionalAddQuery("");
+        setOptionalAddCalcTypeId("");
         setDefaultAddArticle("");
         setDefaultAddQuery("");
+        setDefaultAddCalcTypeId("");
         setPromoteItemId("");
         setPromoteTypeId("");
       } catch (err) {
@@ -2123,12 +2876,16 @@ function ConstructionDetail({
           setReplacementGroups([]);
           setOptionalMaterials([]);
           setMaterialTypes([]);
+          setCalculationTypes([]);
           setAddByGroup({});
           setAddQueryByGroup({});
+          setAddCalcTypeByGroup({});
           setOptionalAddArticle("");
           setOptionalAddQuery("");
+          setOptionalAddCalcTypeId("");
           setDefaultAddArticle("");
           setDefaultAddQuery("");
+          setDefaultAddCalcTypeId("");
           setPromoteItemId("");
           setPromoteTypeId("");
           setError(formatRequestError(err));
@@ -2295,6 +3052,10 @@ function ConstructionDetail({
         is_default: false,
         replacement_group: Number(group.group),
         replacement_material_type_id: Number(typeId),
+        calculation_type_id:
+          calcTypeIdPayload(addCalcTypeByGroup[groupKey]) ||
+          getCalculationTypeId(sample),
+        calculation_note: String(sample?.calculation_note || ""),
       });
       setReloadToken((n) => n + 1);
     } catch (err) {
@@ -2334,6 +3095,8 @@ function ConstructionDetail({
         id: materialId,
         weight: 1,
         sort_order: maxSort + 1,
+        calculation_type_id: calcTypeIdPayload(optionalAddCalcTypeId),
+        calculation_note: "",
       });
       setReloadToken((n) => n + 1);
     } catch (err) {
@@ -2376,6 +3139,8 @@ function ConstructionDetail({
         is_default: true,
         replacement_group: null,
         replacement_material_type_id: null,
+        calculation_type_id: calcTypeIdPayload(defaultAddCalcTypeId),
+        calculation_note: "",
       });
       setReloadToken((n) => n + 1);
     } catch (err) {
@@ -2489,6 +3254,8 @@ function ConstructionDetail({
         is_default: true,
         replacement_group: nextGroup,
         replacement_material_type_id: typeId,
+        calculation_type_id: getCalculationTypeId(row),
+        calculation_note: String(row.calculation_note || ""),
       });
       setReloadToken((n) => n + 1);
     } catch (err) {
@@ -2533,10 +3300,6 @@ function ConstructionDetail({
             <h3 className="admin-page__composition-title">
               Редактирование конструкции
             </h3>
-            <p className="admin-page__hint">
-              Код, название, тип и категорию можно менять только в открытой
-              карточке. Удаление тоже только отсюда.
-            </p>
             <label className="admin-page__field">
               <span className="admin-page__field-label">Код</span>
               <input
@@ -2670,6 +3433,8 @@ function ConstructionDetail({
             )}
           </form>
 
+          <ConstructionCalcParamsPanel constructionId={constructionId} />
+
           <div className="admin-page__composition-head admin-page__composition-head--spaced">
             <h3 className="admin-page__composition-title">
               Материалы по умолчанию
@@ -2738,6 +3503,13 @@ function ConstructionDetail({
                 );
               })}
             </select>
+            <CalculationTypeSelect
+              value={defaultAddCalcTypeId}
+              options={calculationTypes}
+              disabled={addingDefault || !calculationTypes.length}
+              ariaLabel="Тип расчёта нового материала по умолчанию"
+              onChange={setDefaultAddCalcTypeId}
+            />
             <button
               type="button"
               className="admin-page__btn admin-page__btn--inline"
@@ -2759,10 +3531,6 @@ function ConstructionDetail({
               </span>
             </h3>
           </div>
-          <p className="admin-page__hint">
-            Выберите материал из списка по умолчанию и тип группы — он станет
-            заменяемой позицией (default в новой группе).
-          </p>
 
           {promoteError && (
             <div className="admin-page__error" role="alert">
@@ -2898,6 +3666,7 @@ function ConstructionDetail({
                                   </span>
                                 ) : null}
                               </span>
+                              {renderCalcTypeSelect(mat, "replacement")}
                               <DeleteIconButton
                                 deleting={deletingMaterialId === itemId}
                                 disabled={
@@ -2964,6 +3733,27 @@ function ConstructionDetail({
                           );
                         })}
                       </select>
+                      <CalculationTypeSelect
+                        value={
+                          addCalcTypeByGroup[groupKey] ??
+                          (getCalculationTypeId(group.materials?.[0]) != null
+                            ? String(getCalculationTypeId(group.materials[0]))
+                            : "")
+                        }
+                        options={withCurrentMaterialType(
+                          calculationTypes,
+                          getCalculationTypeId(group.materials?.[0]),
+                          group.materials?.[0]?.calculation_type
+                        )}
+                        disabled={adding || !calculationTypes.length}
+                        ariaLabel={`Тип расчёта для группы ${typeLabel}`}
+                        onChange={(next) =>
+                          setAddCalcTypeByGroup((prev) => ({
+                            ...prev,
+                            [groupKey]: next,
+                          }))
+                        }
+                      />
                       <button
                         type="button"
                         className="admin-page__btn admin-page__btn--inline"
@@ -2990,10 +3780,6 @@ function ConstructionDetail({
               </span>
             </h3>
           </div>
-          <p className="admin-page__hint">
-            Не входят в базовый состав и не являются заменой — могут быть
-            включены дополнительно.
-          </p>
 
           {optionalAddError && (
             <div className="admin-page__error" role="alert">
@@ -3054,6 +3840,13 @@ function ConstructionDetail({
                 );
               })}
             </select>
+            <CalculationTypeSelect
+              value={optionalAddCalcTypeId}
+              options={calculationTypes}
+              disabled={addingOptional || !calculationTypes.length}
+              ariaLabel="Тип расчёта дополнительного материала"
+              onChange={setOptionalAddCalcTypeId}
+            />
             <button
               type="button"
               className="admin-page__btn admin-page__btn--inline"
@@ -3334,10 +4127,6 @@ function ConstructionsListPanel() {
           <h3 className="admin-page__create-title">
             Новая конструкция звукоизоляции
           </h3>
-          <p className="admin-page__hint">
-            Создаёт запись через POST /admin/constructions. Материалы можно
-            добавить после открытия карточки.
-          </p>
           <div className="admin-page__create-fields">
             <label className="admin-page__field">
               <span className="admin-page__field-label">Код</span>
@@ -3417,11 +4206,6 @@ function ConstructionsListPanel() {
           )}
         </form>
       )}
-
-      <p className="admin-page__hint">
-        Нажмите на строку, чтобы раскрыть карточку конструкции. Код и название
-        редактируются внутри карточки.
-      </p>
 
       {error && (
         <div className="admin-page__error" role="alert">
@@ -3742,18 +4526,8 @@ function RegionsListPanel() {
         />
       </div>
 
-      <p className="admin-page__hint">
-        Дочерний регион берёт цены базового и умножает их на коэффициент.
-        Ручные цены для дочерних регионов API не принимает — меняйте
-        коэффициент.
-      </p>
-
       <form className="admin-page__create-form" onSubmit={handleCreate}>
         <h3 className="admin-page__create-title">Новый дочерний регион</h3>
-        <p className="admin-page__hint">
-          POST /admin/commerce/regions, pricing_mode=derived. Базовый регион —
-          из уже загруженного справочника (только direct).
-        </p>
         <div className="admin-page__create-fields">
           <label className="admin-page__field">
             <span className="admin-page__field-label">Базовый регион</span>
@@ -3872,13 +4646,13 @@ function RegionsListPanel() {
           <table className="admin-page__table">
             <thead>
               <tr>
-                <th className="admin-page__col--compact">Код</th>
+                <th className="admin-page__col--code">Код</th>
                 <th className="admin-page__col--grow">Название</th>
                 <th className="admin-page__col--compact">Режим</th>
                 <th className="admin-page__col--grow">Базовый регион</th>
                 <th className="admin-page__col--compact">Коэффициент</th>
                 <th className="admin-page__col--compact">Активен</th>
-                <th />
+                <th className="admin-page__col--controls" />
               </tr>
             </thead>
             <tbody>
@@ -3896,14 +4670,14 @@ function RegionsListPanel() {
                       derived ? "admin-page__region-row--child" : undefined
                     }
                   >
-                    <td className="admin-page__col--compact">
+                    <td className="admin-page__col--code">
                       {cell(row.code)}
                     </td>
-                    <td>{cell(row.name)}</td>
+                    <td className="admin-page__col--grow">{cell(row.name)}</td>
                     <td className="admin-page__col--compact">
                       {priceRegionModeLabel(row.pricing_mode)}
                     </td>
-                    <td>
+                    <td className="admin-page__col--grow">
                       {derived
                         ? cell(
                             row.base_region_name ||
@@ -3937,7 +4711,7 @@ function RegionsListPanel() {
                     <td className="admin-page__col--compact">
                       {cell(row.is_active)}
                     </td>
-                    <td className="admin-page__col--compact">
+                    <td className="admin-page__col--controls">
                       {derived ? (
                         <div className="admin-page__region-actions">
                           <button

@@ -38,13 +38,24 @@
  *   DELETE /admin/constructions/{id}
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
+ *   GET /admin/constructions/calculation-types
+ *     → { id, code, name, description }[]
+ *   GET /admin/constructions/params
+ *     → { id, code, name, description, value_type }[]
+ *   GET /admin/constructions/{id}/calculation-params
+ *   POST /admin/constructions/{id}/calculation-params
+ *     → body: AdminConstructionCalculationParamUpsert { param_id, options[], ... }
+ *   PUT /admin/constructions/{id}/calculation-params/{paramConfigID}
+ *   DELETE /admin/constructions/{id}/calculation-params/{paramConfigID}
  *   POST /admin/constructions/{id}/materials
- *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
+ *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id, calculation_type_id, calculation_note }
  *   PUT /admin/constructions/{id}/materials/{itemId}
- *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id }
+ *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id, calculation_type_id, calculation_note }
  *   DELETE /admin/constructions/{id}/materials/{itemId}
  *   POST /admin/constructions/{id}/optional-materials
- *     → body: { id, weight, sort_order }  // доп. материал (не база и не замена)
+ *     → body: { id, weight, sort_order, calculation_type_id, calculation_note }
+ *   PUT /admin/constructions/{id}/optional-materials/{itemId}
+ *     → body: { id, weight, sort_order, calculation_type_id, calculation_note }
  *   DELETE /admin/constructions/{id}/optional-materials/{itemId}
  *
  * Same-origin через Vite / frontend server.js proxy → AUTH_SERVICE_URL.
@@ -108,6 +119,17 @@ export const getReplacementMaterialTypeId = (obj) => {
   return Number.isFinite(n) ? n : raw;
 };
 
+/** ID типа расчёта материала из строки состава. */
+export const getCalculationTypeId = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const nested =
+    row.calculation_type && typeof row.calculation_type === "object"
+      ? row.calculation_type
+      : null;
+  const n = Number(row.calculation_type_id ?? nested?.id);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
 /** Нормализует строку состава к полям для таблицы / селекта. */
 const normalizeCompositionRow = (row, groupMeta = null) => {
   if (!row || typeof row !== "object") return row;
@@ -137,6 +159,12 @@ const normalizeCompositionRow = (row, groupMeta = null) => {
       (typeof typeFromRow === "string" ? typeFromRow : null),
   });
 
+  const calcType =
+    row.calculation_type && typeof row.calculation_type === "object"
+      ? row.calculation_type
+      : null;
+  const calcFlat = flattenRef("calculation_type", calcType, row);
+
   return {
     ...row,
     material_id: materialId,
@@ -151,6 +179,10 @@ const normalizeCompositionRow = (row, groupMeta = null) => {
     replacement_group: row.replacement_group ?? groupMeta?.group ?? null,
     replacement_material_type: typeObj ?? typeFromRow ?? typeFromGroup ?? null,
     ...typeFlat,
+    calculation_type: calcType,
+    calculation_note:
+      row.calculation_note == null ? "" : String(row.calculation_note),
+    ...calcFlat,
   };
 };
 
@@ -917,6 +949,217 @@ export const listConstructionTypes = async () => {
   return unwrapList(body).map(normalizeConstructionType).filter(Boolean);
 };
 
+/** GET /admin/constructions/calculation-types — справочник формул расхода. */
+export const listAdminConstructionCalculationTypes = async () => {
+  const body = await request("/admin/constructions/calculation-types");
+  return unwrapList(body).map(normalizeConstructionParam).filter(Boolean);
+};
+
+export const CONSTRUCTION_PARAM_TYPE_INT = "int";
+export const CONSTRUCTION_PARAM_TYPE_BOOL = "bool";
+
+const unwrapNestedList = (body, nestedKeys = []) => {
+  const direct = unwrapList(body);
+  if (direct.length) return direct;
+  const data = body?.data ?? body;
+  if (!data || typeof data !== "object") return [];
+  for (const key of nestedKeys) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+  return [];
+};
+
+/** Нормализует запись справочника GET /admin/constructions/params. */
+export const normalizeConstructionParam = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+    description:
+      row.description == null ? "" : String(row.description).trim(),
+    value_type:
+      String(row.value_type || CONSTRUCTION_PARAM_TYPE_INT).trim() ||
+      CONSTRUCTION_PARAM_TYPE_INT,
+  };
+};
+
+const normalizeCalcParamOption = (row, index = 0, valueType = "") => {
+  if (!row || typeof row !== "object") return null;
+  const type =
+    String(valueType || "").trim() || CONSTRUCTION_PARAM_TYPE_INT;
+  return {
+    id: Number(row.id) || null,
+    label: row.label == null ? "" : String(row.label).trim(),
+    value_int: Number(row.value_int) || 0,
+    value_bool: Boolean(row.value_bool),
+    sort_order: Number(row.sort_order) || index,
+    value_type: type,
+  };
+};
+
+/** Нормализует параметр, уже привязанный к конструкции. */
+export const normalizeConstructionCalculationParam = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const paramObj =
+    row.param && typeof row.param === "object" && !Array.isArray(row.param)
+      ? normalizeConstructionParam(row.param)
+      : null;
+  const paramId = Number(row.param_id ?? paramObj?.id ?? row.id);
+  if (!Number.isFinite(paramId) || paramId <= 0) return null;
+  const configId = Number(row.id);
+  const valueType =
+    String(
+      row.value_type || paramObj?.value_type || CONSTRUCTION_PARAM_TYPE_INT
+    ).trim() || CONSTRUCTION_PARAM_TYPE_INT;
+  const options = Array.isArray(row.options)
+    ? row.options
+        .map((opt, i) => normalizeCalcParamOption(opt, i, valueType))
+        .filter(Boolean)
+    : [];
+  return {
+    id: Number.isFinite(configId) && configId > 0 ? configId : null,
+    param_id: paramId,
+    param: paramObj,
+    code: String(row.code || paramObj?.code || "").trim(),
+    name: String(row.name || paramObj?.name || "").trim(),
+    description: String(row.description || paramObj?.description || "").trim(),
+    value_type: valueType,
+    is_required: row.is_required !== false,
+    sort_order: Number(row.sort_order) || 0,
+    default_value_int: Number(row.default_value_int) || 0,
+    default_value_bool: Boolean(row.default_value_bool),
+    options,
+  };
+};
+
+const buildCalcParamUpsertBody = (payload) => {
+  const valueType =
+    String(payload.value_type || CONSTRUCTION_PARAM_TYPE_INT).trim() ||
+    CONSTRUCTION_PARAM_TYPE_INT;
+  const isBool = valueType === CONSTRUCTION_PARAM_TYPE_BOOL;
+  const options = (Array.isArray(payload.options) ? payload.options : [])
+    .map((opt, i) => {
+      const label = String(opt?.label || "").trim();
+      if (!label) return null;
+      const row = {
+        label,
+        sort_order: Number(opt.sort_order) || i,
+      };
+      if (isBool) {
+        row.value_bool = Boolean(opt.value_bool);
+      } else {
+        row.value_int = Number(opt.value_int) || 0;
+      }
+      return row;
+    })
+    .filter(Boolean);
+
+  const body = {
+    param_id: Number(payload.param_id),
+    is_required: payload.is_required !== false,
+    sort_order: Number(payload.sort_order) || 0,
+    options,
+  };
+  if (isBool) {
+    body.default_value_bool = Boolean(payload.default_value_bool);
+  } else {
+    body.default_value_int = Number(payload.default_value_int) || 0;
+  }
+  return body;
+};
+
+/** GET /admin/constructions/params — справочник параметров расчета. */
+export const listAdminConstructionParams = async () => {
+  const body = await request("/admin/constructions/params");
+  return unwrapList(body).map(normalizeConstructionParam).filter(Boolean);
+};
+
+/** GET /admin/constructions/{id}/calculation-params */
+export const listAdminConstructionCalculationParams = async (id) => {
+  const body = await request(
+    `/admin/constructions/${encodeURIComponent(id)}/calculation-params`
+  );
+  return unwrapNestedList(body, [
+    "params",
+    "calculation_params",
+    "items",
+  ])
+    .map(normalizeConstructionCalculationParam)
+    .filter(Boolean)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+};
+
+/**
+ * POST /admin/constructions/{id}/calculation-params
+ * @param {string|number} constructionId
+ * @param {object} payload AdminConstructionCalculationParamUpsert + value_type
+ */
+export const addAdminConstructionCalculationParam = async (
+  constructionId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/calculation-params`,
+    {
+      method: "POST",
+      headers,
+      body: buildCalcParamUpsertBody(payload),
+    }
+  );
+};
+
+/**
+ * PUT /admin/constructions/{id}/calculation-params/{paramConfigID}
+ * @param {string|number} constructionId
+ * @param {string|number} paramConfigId
+ * @param {object} payload AdminConstructionCalculationParamUpsert + value_type
+ */
+export const updateAdminConstructionCalculationParam = async (
+  constructionId,
+  paramConfigId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/calculation-params/${encodeURIComponent(paramConfigId)}`,
+    {
+      method: "PUT",
+      headers,
+      body: buildCalcParamUpsertBody(payload),
+    }
+  );
+};
+
+/**
+ * DELETE /admin/constructions/{id}/calculation-params/{paramConfigID}
+ */
+export const deleteAdminConstructionCalculationParam = async (
+  constructionId,
+  paramConfigId
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/calculation-params/${encodeURIComponent(paramConfigId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  );
+};
+
 /**
  * Список типов для UI создания: GET /api/v2/constructions/types
  * плюс типы, уже встречающиеся в загруженном списке конструкций.
@@ -1169,6 +1412,35 @@ export const addAdminConstructionOptionalMaterial = async (
     `/admin/constructions/${encodeURIComponent(constructionId)}/optional-materials`,
     {
       method: "POST",
+      headers,
+      body,
+    }
+  );
+};
+
+/**
+ * PUT /admin/constructions/{id}/optional-materials/{itemId}.
+ * itemId = id записи construction_optional_materials.
+ */
+export const updateAdminConstructionOptionalMaterial = async (
+  constructionId,
+  itemId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const body = { ...payload };
+  if (body.id == null && body.material_id != null) {
+    body.id = body.material_id;
+  }
+  delete body.material_id;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/optional-materials/${encodeURIComponent(itemId)}`,
+    {
+      method: "PUT",
       headers,
       body,
     }

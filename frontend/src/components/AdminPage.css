@@ -179,13 +179,6 @@
   align-items: center;
 }
 
-.admin-page__hint {
-  margin: 0 0 12px;
-  color: var(--admin-text-muted);
-  font-size: 13px;
-  line-height: 1.4;
-}
-
 .admin-page__create-form {
   margin: 0 0 16px;
   padding: 14px 16px;
@@ -208,6 +201,43 @@
   gap: 10px;
   margin-bottom: 8px;
   max-width: 420px;
+}
+
+.admin-page__create-fields--wide {
+  max-width: none;
+}
+
+.admin-page__param-options {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.admin-page__param-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-page__param-option-row .admin-page__input,
+.admin-page__param-option-row .admin-page__select {
+  flex: 1 1 140px;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+}
+
+.admin-page__param-option-row .admin-page__input--compact {
+  flex: 0 0 96px;
+  width: 96px;
+  min-width: 96px;
+}
+
+.admin-page__param-options .admin-page__btn {
+  align-self: flex-start;
 }
 
 .admin-page__field {
@@ -505,6 +535,7 @@
 
 .admin-page__replacement-list-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -608,6 +639,29 @@
   box-shadow: none;
   cursor: pointer;
   box-sizing: border-box;
+}
+
+.admin-page__select--calc {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.admin-page__table .admin-page__select--calc {
+  display: block;
+  flex: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 32px;
+  line-height: 30px;
+}
+
+.admin-page__replacement-list-item .admin-page__select--calc {
+  flex: 1 1 180px;
+  max-width: 240px;
+  height: 32px;
+  line-height: 30px;
 }
 
 .admin-page__select:focus {
@@ -779,10 +833,6 @@
   margin: 0;
 }
 
-.admin-page__meta-form .admin-page__hint {
-  margin: 0;
-}
-
 .admin-page__field--wide {
   grid-column: 1 / -1;
 }
@@ -829,7 +879,7 @@
 
 .admin-page__table {
   width: 100%;
-  table-layout: auto;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
   color: var(--admin-text);
@@ -837,13 +887,14 @@
 
 .admin-page__table th,
 .admin-page__table td {
-  padding: 10px 12px;
+  padding: 8px 10px;
   text-align: left;
   border-bottom: 1px solid var(--admin-border);
-  vertical-align: top;
+  vertical-align: middle;
   white-space: normal;
   overflow-wrap: break-word;
   word-break: normal;
+  box-sizing: border-box;
 }
 
 .admin-page__table th {
@@ -854,23 +905,49 @@
 
 .admin-page__table--selectable th:last-child,
 .admin-page__table--selectable td:last-child {
-  width: 1%;
   white-space: nowrap;
   overflow-wrap: normal;
-  padding-left: 8px;
-  padding-right: 8px;
 }
 
-/* Короткие поля: ширина ≈ текст, без переноса */
+.admin-page__col--num {
+  width: 3.25rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .admin-page__col--compact {
-  width: 1%;
+  width: 6.5rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   overflow-wrap: normal;
-  padding-left: 8px;
-  padding-right: 8px;
 }
 
-/* Длинные поля: забирают оставшуюся ширину и переносятся */
+.admin-page__col--code {
+  width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-page__col--calc {
+  width: 15rem;
+}
+
+.admin-page__col--actions {
+  width: 3.25rem;
+  padding-left: 8px;
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  text-align: right;
+}
+
+.admin-page__col--controls {
+  width: 9.75rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .admin-page__col--grow {
   width: auto;
   min-width: 8rem;
