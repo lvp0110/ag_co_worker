@@ -227,6 +227,10 @@ router.get("/api/v2/data", (req, res) =>
   proxyGetCached(req, res, "/api/v2/data", "v2/data")
 );
 
+router.get("/api/v2/constructions/types", (req, res) =>
+  proxyRequest(req, res, "/api/v2/constructions/types")
+);
+
 // Несовпадения импорта (admin «Сравнение»).
 router.get("/api/v2/data/unmatched", (req, res) =>
   proxyRequest(req, res, "/api/v2/data/unmatched")

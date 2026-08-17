@@ -11,26 +11,39 @@ import { useAuth } from "../context/AuthContext.jsx";
 import {
   addAdminConstructionMaterial,
   addAdminConstructionOptionalMaterial,
+  collectConstructionCategories,
   collectConstructionTypes,
   collectReplacementMaterialTypes,
+  createAdminCommerceRegion,
   createAdminConstruction,
   createAdminMaterialFromUnmatched,
+  deleteAdminCommerceRegion,
   deleteAdminConstruction,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
   deleteAdminMaterial,
   enrichCompositionFromMaterialsCatalog,
+  expandMaterialPricesWithDerivedRegions,
   filterMaterialsByUsage,
   filterMaterialsByUsageSi,
   getAdminConstructionById,
   getAdminMaterialByCode,
   getConstructionId,
   getMaterialCode,
+  getMaterialTypeId,
+  getPriceRegionBaseId,
   getReplacementMaterialTypeId,
+  isDirectPriceRegion,
+  listAdminCommerceRegions,
   listAdminConstructions,
   listAdminMaterials,
+  listAdminMaterialTypes,
+  listConstructionTypes,
   listUnmatchedMaterials,
+  orderPriceRegions,
+  PRICE_REGION_MODE_DERIVED,
   pickCategoryIdFromRows,
+  updateAdminCommerceRegion,
   updateAdminConstruction,
   updateAdminConstructionMaterial,
   updateAdminMaterial,
@@ -46,14 +59,38 @@ const MATERIAL_USAGE_FILTERS = [
 
 const MATERIALS_COMPARE_MODE = "compare";
 
-/** Уникальные type из каталога материалов (для селекта). */
-const collectMaterialTypeOptions = (materials) => {
-  const set = new Set();
-  for (const row of materials || []) {
-    const type = String(row?.type || "").trim();
-    if (type) set.add(type);
+const materialTypeOptionLabel = (type) => {
+  if (!type) return "";
+  const name = String(type.name || "").trim();
+  const code = String(type.code || "").trim();
+  if (name && code && name !== code) return `${name} (${code})`;
+  return name || code || String(type.id || "");
+};
+
+const materialTypeDisplay = (obj) => {
+  if (!obj) return "";
+  if (obj.type && typeof obj.type === "object") {
+    return String(obj.type.name || obj.type.code || "").trim();
   }
-  return [...set].sort((a, b) => a.localeCompare(b, "ru"));
+  return String(
+    obj.type_name || obj.type_code || (typeof obj.type === "string" ? obj.type : "")
+  ).trim();
+};
+
+const withCurrentMaterialType = (catalogTypes, currentId, fallback) => {
+  const id = Number(currentId);
+  if (!Number.isFinite(id) || id <= 0) return catalogTypes;
+  if (catalogTypes.some((item) => Number(item.id) === id)) return catalogTypes;
+  return [
+    {
+      id,
+      code: String(fallback?.code || fallback?.type_code || "").trim(),
+      name: String(
+        fallback?.name || fallback?.type_name || fallback?.code || id
+      ).trim(),
+    },
+    ...catalogTypes,
+  ];
 };
 
 const MATERIAL_COLUMNS = [
@@ -64,7 +101,12 @@ const MATERIAL_COLUMNS = [
     label: "Продукт",
     className: "admin-page__col--grow",
   },
-  { key: "type", label: "Тип", className: "admin-page__col--compact" },
+  {
+    key: "type",
+    label: "Тип",
+    className: "admin-page__col--compact",
+    render: (row) => cell(materialTypeDisplay(row)),
+  },
   {
     key: "usage",
     label: "Применение",
@@ -89,6 +131,19 @@ const MATERIAL_PRICE_COLUMNS = [
     label: "Регион",
     render: (row) =>
       cell(row.region?.name || row.region?.code || row.region?.id),
+  },
+  {
+    key: "source",
+    label: "Источник",
+    render: (row) => {
+      if (row.derived) {
+        const coef = Number(row.price_coefficient);
+        return Number.isFinite(coef)
+          ? `дочерний × ${coef}`
+          : "дочерний";
+      }
+      return "базовый";
+    },
   },
   {
     key: "price",
@@ -116,9 +171,7 @@ const CONSTRUCTION_COLUMNS = [
         row.type_name ??
           row.type_code ??
           row.type?.name ??
-          row.type?.code ??
-          row.type_id ??
-          row.type?.id
+          row.type?.code
       ),
   },
   {
@@ -130,21 +183,9 @@ const CONSTRUCTION_COLUMNS = [
         row.category_name ??
           row.category_code ??
           row.category?.name ??
-          row.category?.code ??
-          row.category_id ??
-          row.category?.id
+          row.category?.code
       ),
   },
-];
-
-const CONSTRUCTION_DETAIL_FIELDS = [
-  { key: "id", label: "ID" },
-  { key: "type_id", label: "ID типа" },
-  { key: "type_code", label: "Код типа" },
-  { key: "type_name", label: "Тип" },
-  { key: "category_id", label: "ID категории" },
-  { key: "category_code", label: "Код категории" },
-  { key: "category_name", label: "Категория" },
 ];
 
 const CONSTRUCTION_CATEGORY_FILTERS = [
@@ -160,7 +201,7 @@ const emptyMaterialForm = () => ({
   width: "0",
   height: "0",
   units: "",
-  type: "",
+  type_id: "",
   unit_pack: "1",
   info_pack: "",
   ratio_square: "1",
@@ -184,7 +225,7 @@ const materialFormFromDetail = (detail) => ({
   width: String(detail?.width ?? 0),
   height: String(detail?.height ?? 0),
   units: String(detail?.units ?? ""),
-  type: String(detail?.type ?? ""),
+  type_id: String(getMaterialTypeId(detail) ?? ""),
   unit_pack: String(detail?.unit_pack ?? 1),
   info_pack: String(detail?.info_pack ?? ""),
   ratio_square: String(detail?.ratio_square ?? 1),
@@ -247,13 +288,20 @@ function UnmatchedAddForm({
     String(row.name || "").trim()
   );
   const [units, setUnits] = useState(() => String(row.units || "").trim());
-  const [type, setType] = useState(() => typeOptions[0] || "");
+  const [typeId, setTypeId] = useState(() =>
+    typeOptions[0]?.id != null ? String(typeOptions[0].id) : ""
+  );
   const [usage, setUsage] = useState(MATERIAL_USAGE_FILTERS[0].code);
   const [unitPack, setUnitPack] = useState("1");
   const [ratioSquare, setRatioSquare] = useState("1");
   const [visible, setVisible] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
+
+  useEffect(() => {
+    if (typeId) return;
+    if (typeOptions[0]?.id != null) setTypeId(String(typeOptions[0].id));
+  }, [typeOptions, typeId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -262,11 +310,12 @@ function UnmatchedAddForm({
     const code = String(row.code || "").trim();
     const pack = Number(unitPack);
     const ratio = Number(ratioSquare);
+    const parsedTypeId = Number(typeId);
     if (!code) {
       setFormError("Нет кода материала.");
       return;
     }
-    if (!name.trim() || !units.trim() || !type.trim()) {
+    if (!name.trim() || !units.trim() || !Number.isFinite(parsedTypeId) || parsedTypeId <= 0) {
       setFormError("Заполните название, ед. изм. и тип.");
       return;
     }
@@ -287,7 +336,7 @@ function UnmatchedAddForm({
         name: name.trim(),
         product_name: productName.trim() || name.trim(),
         units: units.trim(),
-        type: type.trim(),
+        type_id: parsedTypeId,
         usage,
         unit_pack: pack,
         ratio_square: ratio,
@@ -320,7 +369,7 @@ function UnmatchedAddForm({
         Добавить в /admin/materials: {row.code}
       </h3>
       <p className="admin-page__hint">
-        Обязательные поля API: code, name, units, type, unit_pack, ratio_square.
+        Обязательные поля API: code, name, units, type_id, unit_pack, ratio_square.
         Цены из unmatched будут перенесены, запись исчезнет из сравнения.
       </p>
 
@@ -358,17 +407,17 @@ function UnmatchedAddForm({
           <span className="admin-page__field-label">Тип</span>
           <select
             className="admin-page__select admin-page__select--full"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
+            value={typeId}
+            onChange={(e) => setTypeId(e.target.value)}
             disabled={saving || !typeOptions.length}
             required
           >
             {!typeOptions.length ? (
-              <option value="">Нет типов в каталоге</option>
+              <option value="">Нет типов в справочнике</option>
             ) : (
               typeOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
+                <option key={opt.id} value={String(opt.id)}>
+                  {materialTypeOptionLabel(opt)}
                 </option>
               ))
             )}
@@ -485,22 +534,36 @@ function DeleteIconButton({ deleting, disabled, label, onClick }) {
   );
 }
 
-/** Кандидаты на замену: тот же type, другой code (сначала тот же usage). */
+/** Кандидаты на замену: тот же type_id, другой code (сначала тот же usage). */
 const sameTypeCandidates = (catalog, material) => {
   const code = getMaterialCode(material);
-  const type = String(material?.type || "")
+  const typeId = getMaterialTypeId(material);
+  const typeCode = String(
+    material?.type_code ||
+      material?.type?.code ||
+      (typeof material?.type === "string" ? material.type : "")
+  )
     .trim()
     .toLowerCase();
   const usage = String(material?.usage || "")
     .trim()
     .toLowerCase();
-  if (!code || !type) return [];
+  if (!code || (!typeId && !typeCode)) return [];
 
   return (catalog || [])
     .filter((row) => {
       const rowCode = getMaterialCode(row);
       if (!rowCode || rowCode === code) return false;
-      return String(row.type || "").trim().toLowerCase() === type;
+      const rowTypeId = getMaterialTypeId(row);
+      if (typeId && rowTypeId) return rowTypeId === typeId;
+      const rowTypeCode = String(
+        row.type_code ||
+          row.type?.code ||
+          (typeof row.type === "string" ? row.type : "")
+      )
+        .trim()
+        .toLowerCase();
+      return Boolean(typeCode) && rowTypeCode === typeCode;
     })
     .sort((a, b) => {
       const au = String(a.usage || "").trim().toLowerCase() === usage ? 0 : 1;
@@ -521,7 +584,7 @@ function MaterialDeleteForm({
   const firstCode = getMaterialCode(candidates[0]) || "";
   const [replacementCode, setReplacementCode] = useState(firstCode);
   const code = getMaterialCode(material);
-  const type = String(material?.type || "").trim();
+  const type = materialTypeDisplay(material);
   const label = materialOptionLabel(material);
   const selectedReplacement =
     replacementCode &&
@@ -670,7 +733,15 @@ function matchesQuery(row, query, fields) {
   const q = query.toLowerCase();
   return fields.some((key) => {
     const v = row?.[key];
-    return v != null && String(v).toLowerCase().includes(q);
+    if (v == null) return false;
+    if (typeof v === "object") {
+      const s = [v.name, v.code, v.id]
+        .filter((part) => part != null && part !== "")
+        .join(" ")
+        .toLowerCase();
+      return s.includes(q);
+    }
+    return String(v).toLowerCase().includes(q);
   });
 }
 
@@ -752,6 +823,7 @@ function AdminGate({ children }) {
 
 function MaterialsListPanel() {
   const [rows, setRows] = useState([]);
+  const [materialTypes, setMaterialTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState("");
@@ -773,11 +845,18 @@ function MaterialsListPanel() {
       setLoading(true);
       setError(null);
       try {
-        const data = await listAdminMaterials();
-        if (!cancelled) setRows(data);
+        const [data, types] = await Promise.all([
+          listAdminMaterials(),
+          listAdminMaterialTypes().catch(() => []),
+        ]);
+        if (!cancelled) {
+          setRows(data);
+          setMaterialTypes(types);
+        }
       } catch (err) {
         if (!cancelled) {
           setRows([]);
+          setMaterialTypes([]);
           setError(formatRequestError(err));
         }
       } finally {
@@ -820,10 +899,7 @@ function MaterialsListPanel() {
     setPendingDeleteCode(null);
   }, [usage]);
 
-  const catalogTypeOptions = useMemo(
-    () => collectMaterialTypeOptions(rows),
-    [rows]
-  );
+  const catalogTypeOptions = materialTypes;
 
   const unmatchedColumns = useMemo(
     () => [
@@ -872,6 +948,8 @@ function MaterialsListPanel() {
         "name",
         "product_name",
         "type",
+        "type_name",
+        "type_code",
         "units",
       ])
     );
@@ -1203,29 +1281,6 @@ function MaterialsListPanel() {
   );
 }
 
-function KeyValueTable({ fields, data }) {
-  return (
-    <div className="admin-page__table-wrap">
-      <table className="admin-page__table">
-        <thead>
-          <tr>
-            <th>Поле</th>
-            <th>Значение</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fields.map((field) => (
-            <tr key={field.key}>
-              <td>{field.label}</td>
-              <td>{cell(data?.[field.key])}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function MaterialDetail({
   code,
   label,
@@ -1247,25 +1302,38 @@ function MaterialDetail({
   const [saveSuccess, setSaveSuccess] = useState(null);
   const [typeOptionsLocal, setTypeOptionsLocal] = useState([]);
   const [catalogLocal, setCatalogLocal] = useState([]);
+  const [priceRegions, setPriceRegions] = useState([]);
   const panelRef = useRef(null);
 
   const catalogMaterials = catalogMaterialsProp || catalogLocal;
   const catalogTypes = typeOptionsProp || typeOptionsLocal;
-  const currentType = String(form.type || "").trim();
-  const typeOptions = useMemo(() => {
-    if (!currentType || catalogTypes.includes(currentType)) return catalogTypes;
-    return [currentType, ...catalogTypes];
-  }, [catalogTypes, currentType]);
+  const typeOptions = useMemo(
+    () =>
+      withCurrentMaterialType(catalogTypes, form.type_id, {
+        code: detail?.type_code || detail?.type?.code,
+        name: detail?.type_name || detail?.type?.name,
+        type_code: detail?.type_code,
+        type_name: detail?.type_name,
+      }),
+    [catalogTypes, form.type_id, detail]
+  );
 
   const deleteCandidates = useMemo(
     () =>
       sameTypeCandidates(catalogMaterials, {
         code,
-        type: form.type || detail?.type,
+        type_id: form.type_id || getMaterialTypeId(detail),
+        type: detail?.type,
+        type_code: detail?.type_code,
         usage: form.usage || detail?.usage,
         name: form.name || detail?.name,
       }),
-    [catalogMaterials, code, form.type, form.usage, form.name, detail]
+    [catalogMaterials, code, form.type_id, form.usage, form.name, detail]
+  );
+
+  const priceRows = useMemo(
+    () => expandMaterialPricesWithDerivedRegions(detail?.prices, priceRegions),
+    [detail?.prices, priceRegions]
   );
 
   const setField = (key, value) => {
@@ -1278,14 +1346,13 @@ function MaterialDetail({
     let cancelled = false;
     (async () => {
       try {
-        const data = await listAdminMaterials();
+        const [data, types] = await Promise.all([
+          catalogMaterialsProp ? Promise.resolve(null) : listAdminMaterials(),
+          typeOptionsProp ? Promise.resolve(null) : listAdminMaterialTypes(),
+        ]);
         if (!cancelled) {
-          if (!typeOptionsProp) {
-            setTypeOptionsLocal(collectMaterialTypeOptions(data));
-          }
-          if (!catalogMaterialsProp) {
-            setCatalogLocal(data);
-          }
+          if (!typeOptionsProp) setTypeOptionsLocal(types || []);
+          if (!catalogMaterialsProp) setCatalogLocal(data || []);
         }
       } catch {
         if (!cancelled) {
@@ -1309,15 +1376,20 @@ function MaterialDetail({
       setSaveSuccess(null);
       setConfirmDelete(false);
       try {
-        const data = await getAdminMaterialByCode(code);
+        const [data, regions] = await Promise.all([
+          getAdminMaterialByCode(code),
+          listAdminCommerceRegions().catch(() => []),
+        ]);
         if (!cancelled) {
           setDetail(data);
           setForm(data ? materialFormFromDetail(data) : emptyMaterialForm());
+          setPriceRegions(Array.isArray(regions) ? regions : []);
         }
       } catch (err) {
         if (!cancelled) {
           setDetail(null);
           setForm(emptyMaterialForm());
+          setPriceRegions([]);
           setError(formatRequestError(err));
         }
       } finally {
@@ -1343,11 +1415,11 @@ function MaterialDetail({
     const nextCode = String(form.code || "").trim();
     const name = String(form.name || "").trim();
     const units = String(form.units || "").trim();
-    const type = String(form.type || "").trim();
+    const typeId = Number(form.type_id);
     const pack = Number(form.unit_pack);
     const ratio = Number(form.ratio_square);
 
-    if (!nextCode || !name || !units || !type) {
+    if (!nextCode || !name || !units || !Number.isFinite(typeId) || typeId <= 0) {
       setSaveError("Заполните код, название, ед. изм. и тип.");
       return;
     }
@@ -1370,7 +1442,7 @@ function MaterialDetail({
         name,
         product_name: String(form.product_name || "").trim() || name,
         units,
-        type,
+        type_id: typeId,
         unit_pack: pack,
         ratio_square: ratio,
         length: Number(form.length) || 0,
@@ -1464,7 +1536,7 @@ function MaterialDetail({
         >
           <h3 className="admin-page__composition-title">Редактирование</h3>
           <p className="admin-page__hint">
-            Обязательные поля API: code, name, units, type, unit_pack &gt; 0,
+            Обязательные поля API: code, name, units, type_id, unit_pack &gt; 0,
             ratio_square &gt; 0.
           </p>
 
@@ -1503,19 +1575,24 @@ function MaterialDetail({
               <span className="admin-page__field-label">Тип</span>
               <select
                 className="admin-page__select admin-page__select--full"
-                value={form.type}
-                onChange={(e) => setField("type", e.target.value)}
+                value={form.type_id}
+                onChange={(e) => setField("type_id", e.target.value)}
                 disabled={saving || !typeOptions.length}
                 required
               >
                 {!typeOptions.length ? (
-                  <option value="">Нет типов в каталоге</option>
+                  <option value="">Нет типов в справочнике</option>
                 ) : (
-                  typeOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))
+                  <>
+                    {!form.type_id ? (
+                      <option value="">Выберите тип…</option>
+                    ) : null}
+                    {typeOptions.map((opt) => (
+                      <option key={opt.id} value={String(opt.id)}>
+                        {materialTypeOptionLabel(opt)}
+                      </option>
+                    ))}
+                  </>
                 )}
               </select>
             </label>
@@ -1729,7 +1806,10 @@ function MaterialDetail({
               material={{
                 code,
                 name: form.name || detail?.name,
-                type: form.type || detail?.type,
+                type: detail?.type,
+                type_id: form.type_id || getMaterialTypeId(detail),
+                type_code: detail?.type_code,
+                type_name: detail?.type_name,
                 usage: form.usage || detail?.usage,
               }}
               candidates={deleteCandidates}
@@ -1763,13 +1843,13 @@ function MaterialDetail({
             <h3 className="admin-page__composition-title">
               Цены
               <span className="admin-page__count">
-                {Array.isArray(detail.prices) ? detail.prices.length : 0} рег.
+                {priceRows.length} рег.
               </span>
             </h3>
           </div>
           <SimpleTable
             columns={MATERIAL_PRICE_COLUMNS}
-            rows={Array.isArray(detail.prices) ? detail.prices : []}
+            rows={priceRows}
             emptyText="Нет цен для этого материала."
           />
         </>
@@ -1782,12 +1862,17 @@ function ConstructionDetail({
   constructionId,
   label,
   categoryCode,
+  constructionTypes: constructionTypesProp,
   onUpdated,
   onDeleted,
 }) {
   const [detail, setDetail] = useState(null);
   const [editCode, setEditCode] = useState("");
   const [editName, setEditName] = useState("");
+  const [editTypeId, setEditTypeId] = useState("");
+  const [editCategoryId, setEditCategoryId] = useState("");
+  const [typeOptionsLocal, setTypeOptionsLocal] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
   const [savingMeta, setSavingMeta] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [metaError, setMetaError] = useState(null);
@@ -1796,6 +1881,7 @@ function ConstructionDetail({
   const [replacementGroups, setReplacementGroups] = useState([]);
   const [optionalMaterials, setOptionalMaterials] = useState([]);
   const [catalogMaterials, setCatalogMaterials] = useState([]);
+  const [materialTypes, setMaterialTypes] = useState([]);
   const [addByGroup, setAddByGroup] = useState({});
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
   const [optionalAddArticle, setOptionalAddArticle] = useState("");
@@ -1818,6 +1904,28 @@ function ConstructionDetail({
   const [promoting, setPromoting] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const panelRef = useRef(null);
+
+  const typeOptions = useMemo(
+    () =>
+      withCurrentMaterialType(
+        constructionTypesProp || typeOptionsLocal,
+        editTypeId,
+        {
+          code: detail?.type_code || detail?.type?.code,
+          name: detail?.type_name || detail?.type?.name,
+        }
+      ),
+    [constructionTypesProp, typeOptionsLocal, editTypeId, detail]
+  );
+
+  const categorySelectOptions = useMemo(
+    () =>
+      withCurrentMaterialType(categoryOptions, editCategoryId, {
+        code: detail?.category_code || detail?.category?.code,
+        name: detail?.category_name || detail?.category?.name,
+      }),
+    [categoryOptions, editCategoryId, detail]
+  );
 
   const siCatalog = useMemo(
     () => filterMaterialsByUsageSi(catalogMaterials),
@@ -1855,8 +1963,8 @@ function ConstructionDetail({
   );
 
   const replacementMaterialTypes = useMemo(
-    () => collectReplacementMaterialTypes(replacementGroups),
-    [replacementGroups]
+    () => collectReplacementMaterialTypes(materialTypes, replacementGroups),
+    [materialTypes, replacementGroups]
   );
 
   const defaultMaterialsColumns = useMemo(
@@ -1943,15 +2051,40 @@ function ConstructionDetail({
       setDefaultAddError(null);
       setPromoteError(null);
       try {
-        const [data, catalog] = await Promise.all([
-          getAdminConstructionById(constructionId),
-          listAdminMaterials().catch(() => []),
-        ]);
+        const [data, catalog, types, constrTypes, allConstructions] =
+          await Promise.all([
+            getAdminConstructionById(constructionId),
+            listAdminMaterials().catch(() => []),
+            listAdminMaterialTypes().catch(() => []),
+            constructionTypesProp != null
+              ? Promise.resolve(null)
+              : listConstructionTypes().catch(() => []),
+            listAdminConstructions().catch(() => []),
+          ]);
         if (cancelled) return;
         setCatalogMaterials(catalog);
+        setMaterialTypes(types);
+        if (constructionTypesProp == null) {
+          setTypeOptionsLocal(constrTypes || []);
+        }
+        setCategoryOptions(
+          collectConstructionCategories(
+            [data?.detail, ...(allConstructions || [])].filter(Boolean)
+          )
+        );
         setDetail(data?.detail ?? null);
         setEditCode(String(data?.detail?.code ?? ""));
         setEditName(String(data?.detail?.name ?? ""));
+        setEditTypeId(
+          String(
+            data?.detail?.type_id ?? data?.detail?.type?.id ?? ""
+          )
+        );
+        setEditCategoryId(
+          String(
+            data?.detail?.category_id ?? data?.detail?.category?.id ?? ""
+          )
+        );
         setMetaError(null);
         setMetaSuccess(null);
         const enriched = enrichCompositionFromMaterialsCatalog(
@@ -1980,11 +2113,16 @@ function ConstructionDetail({
           setDetail(null);
           setEditCode("");
           setEditName("");
+          setEditTypeId("");
+          setEditCategoryId("");
+          setTypeOptionsLocal([]);
+          setCategoryOptions([]);
           setMetaError(null);
           setMetaSuccess(null);
           setDefaultMaterials([]);
           setReplacementGroups([]);
           setOptionalMaterials([]);
+          setMaterialTypes([]);
           setAddByGroup({});
           setAddQueryByGroup({});
           setOptionalAddArticle("");
@@ -2024,8 +2162,8 @@ function ConstructionDetail({
 
     const code = editCode.trim();
     const name = editName.trim();
-    const typeId = Number(detail.type_id ?? detail.type?.id);
-    const categoryId = Number(detail.category_id ?? detail.category?.id);
+    const typeId = Number(editTypeId);
+    const categoryId = Number(editCategoryId);
 
     if (!code || !name) {
       setMetaError("Код и название не должны быть пустыми.");
@@ -2033,12 +2171,12 @@ function ConstructionDetail({
       return;
     }
     if (!Number.isFinite(typeId) || typeId <= 0) {
-      setMetaError("У конструкции нет type_id — сохранить нельзя.");
+      setMetaError("Выберите тип конструкции.");
       setMetaSuccess(null);
       return;
     }
     if (!Number.isFinite(categoryId) || categoryId <= 0) {
-      setMetaError("У конструкции нет category_id — сохранить нельзя.");
+      setMetaError("Выберите категорию конструкции.");
       setMetaSuccess(null);
       return;
     }
@@ -2053,9 +2191,39 @@ function ConstructionDetail({
         type_id: typeId,
         category_id: categoryId,
       });
-      setDetail((prev) => (prev ? { ...prev, code, name } : prev));
-      setMetaSuccess("Код и название сохранены.");
-      onUpdated?.({ id: constructionId, code, name });
+      const selectedType =
+        typeOptions.find((item) => Number(item.id) === typeId) ?? null;
+      const selectedCategory =
+        categorySelectOptions.find((item) => Number(item.id) === categoryId) ??
+        null;
+      const nextDetail = {
+        ...(detail || {}),
+        code,
+        name,
+        type_id: typeId,
+        category_id: categoryId,
+        type: selectedType,
+        category: selectedCategory,
+        type_code: selectedType?.code ?? "",
+        type_name: selectedType?.name ?? "",
+        category_code: selectedCategory?.code ?? "",
+        category_name: selectedCategory?.name ?? "",
+      };
+      setDetail(nextDetail);
+      setMetaSuccess("Сохранено.");
+      onUpdated?.({
+        id: constructionId,
+        code,
+        name,
+        type_id: typeId,
+        category_id: categoryId,
+        type: selectedType,
+        category: selectedCategory,
+        type_code: selectedType?.code ?? "",
+        type_name: selectedType?.name ?? "",
+        category_code: selectedCategory?.code ?? "",
+        category_name: selectedCategory?.name ?? "",
+      });
     } catch (err) {
       setMetaError(formatRequestError(err));
     } finally {
@@ -2366,8 +2534,8 @@ function ConstructionDetail({
               Редактирование конструкции
             </h3>
             <p className="admin-page__hint">
-              Код и название можно менять только в открытой карточке. Удаление
-              тоже только отсюда.
+              Код, название, тип и категорию можно менять только в открытой
+              карточке. Удаление тоже только отсюда.
             </p>
             <label className="admin-page__field">
               <span className="admin-page__field-label">Код</span>
@@ -2399,6 +2567,66 @@ function ConstructionDetail({
                 autoComplete="off"
               />
             </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Тип</span>
+              <select
+                className="admin-page__select admin-page__select--full"
+                value={editTypeId}
+                disabled={savingMeta || deleting || !typeOptions.length}
+                onChange={(e) => {
+                  setEditTypeId(e.target.value);
+                  setMetaSuccess(null);
+                }}
+                required
+                aria-label="Тип конструкции"
+              >
+                {!typeOptions.length ? (
+                  <option value="">Нет типов в справочнике</option>
+                ) : (
+                  <>
+                    {!editTypeId ? (
+                      <option value="">Выберите тип…</option>
+                    ) : null}
+                    {typeOptions.map((type) => (
+                      <option key={type.id} value={String(type.id)}>
+                        {materialTypeOptionLabel(type)}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
+            <label className="admin-page__field">
+              <span className="admin-page__field-label">Категория</span>
+              <select
+                className="admin-page__select admin-page__select--full"
+                value={editCategoryId}
+                disabled={
+                  savingMeta || deleting || !categorySelectOptions.length
+                }
+                onChange={(e) => {
+                  setEditCategoryId(e.target.value);
+                  setMetaSuccess(null);
+                }}
+                required
+                aria-label="Категория конструкции"
+              >
+                {!categorySelectOptions.length ? (
+                  <option value="">Нет категорий в списке</option>
+                ) : (
+                  <>
+                    {!editCategoryId ? (
+                      <option value="">Выберите категорию…</option>
+                    ) : null}
+                    {categorySelectOptions.map((item) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {materialTypeOptionLabel(item)}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
             <div className="admin-page__meta-actions">
               <button
                 type="submit"
@@ -2408,8 +2636,14 @@ function ConstructionDetail({
                   deleting ||
                   !editCode.trim() ||
                   !editName.trim() ||
+                  !editTypeId ||
+                  !editCategoryId ||
                   (editCode.trim() === String(detail.code ?? "").trim() &&
-                    editName.trim() === String(detail.name ?? "").trim())
+                    editName.trim() === String(detail.name ?? "").trim() &&
+                    String(editTypeId) ===
+                      String(detail.type_id ?? detail.type?.id ?? "") &&
+                    String(editCategoryId) ===
+                      String(detail.category_id ?? detail.category?.id ?? ""))
                 }
               >
                 {savingMeta ? "Сохранение…" : "Сохранить"}
@@ -2435,8 +2669,6 @@ function ConstructionDetail({
               </p>
             )}
           </form>
-
-          <KeyValueTable fields={CONSTRUCTION_DETAIL_FIELDS} data={detail} />
 
           <div className="admin-page__composition-head admin-page__composition-head--spaced">
             <h3 className="admin-page__composition-title">
@@ -2842,6 +3074,7 @@ function ConstructionDetail({
 
 function ConstructionsListPanel() {
   const [rows, setRows] = useState([]);
+  const [apiConstructionTypes, setApiConstructionTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState("");
@@ -2883,6 +3116,21 @@ function ConstructionsListPanel() {
   }, [category, reloadToken]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const types = await listConstructionTypes();
+        if (!cancelled) setApiConstructionTypes(types);
+      } catch {
+        if (!cancelled) setApiConstructionTypes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  useEffect(() => {
     setCreateCode("");
     setCreateName("");
     setCreateError(null);
@@ -2890,8 +3138,8 @@ function ConstructionsListPanel() {
   }, [category]);
 
   const constructionTypes = useMemo(
-    () => collectConstructionTypes(rows),
-    [rows]
+    () => collectConstructionTypes(apiConstructionTypes, rows),
+    [apiConstructionTypes, rows]
   );
 
   const soundCategoryId = useMemo(
@@ -2919,10 +3167,8 @@ function ConstructionsListPanel() {
           "id",
           "code",
           "name",
-          "type_id",
           "type_code",
           "type_name",
-          "category_id",
           "category_code",
           "category_name",
         ])
@@ -2944,10 +3190,35 @@ function ConstructionsListPanel() {
     setSelectedId((prev) => (prev === id ? null : id));
   };
 
-  const handleConstructionUpdated = ({ id, code, name }) => {
+  const handleConstructionUpdated = (patch) => {
+    const id = patch?.id;
+    const nextCategoryCode = String(
+      patch.category_code ?? patch.category?.code ?? ""
+    ).trim();
+    if (nextCategoryCode && nextCategoryCode !== category) {
+      setRows((prev) =>
+        prev.filter((item) => getConstructionId(item) !== id)
+      );
+      setSelectedId((prev) => (prev === id ? null : prev));
+      return;
+    }
     setRows((prev) =>
       prev.map((item) =>
-        getConstructionId(item) === id ? { ...item, code, name } : item
+        getConstructionId(item) === id
+          ? {
+              ...item,
+              code: patch.code,
+              name: patch.name,
+              type_id: patch.type_id ?? item.type_id,
+              category_id: patch.category_id ?? item.category_id,
+              type: patch.type ?? item.type,
+              category: patch.category ?? item.category,
+              type_code: patch.type_code ?? item.type_code,
+              type_name: patch.type_name ?? item.type_name,
+              category_code: patch.category_code ?? item.category_code,
+              category_name: patch.category_name ?? item.category_name,
+            }
+          : item
       )
     );
   };
@@ -3105,7 +3376,7 @@ function ConstructionsListPanel() {
                 aria-label="Тип конструкции"
               >
                 {!constructionTypes.length ? (
-                  <option value="">Нет типов в списке</option>
+                  <option value="">Нет типов в справочнике</option>
                 ) : (
                   constructionTypes.map((type) => (
                     <option key={type.id} value={type.id}>
@@ -3199,6 +3470,7 @@ function ConstructionsListPanel() {
                           constructionId={id}
                           label={selectedLabel}
                           categoryCode={category}
+                          constructionTypes={constructionTypes}
                           onUpdated={handleConstructionUpdated}
                           onDeleted={handleConstructionDeleted}
                         />
@@ -3250,6 +3522,459 @@ function FragmentRow({ row, columns, selected, onSelect, colSpan, detail }) {
   );
 }
 
+const priceRegionModeLabel = (mode) =>
+  String(mode || "").trim() === PRICE_REGION_MODE_DERIVED
+    ? "дочерний"
+    : "базовый";
+
+const priceRegionOptionLabel = (row) => {
+  const name = String(row?.name || "").trim();
+  const code = String(row?.code || "").trim();
+  if (name && code && name !== code) return `${name} (${code})`;
+  return name || code || `ID ${row?.id ?? "?"}`;
+};
+
+function RegionsListPanel() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [query, setQuery] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const [createCode, setCreateCode] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createBaseId, setCreateBaseId] = useState("");
+  const [createCoef, setCreateCoef] = useState("1");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+  const [createSuccess, setCreateSuccess] = useState(null);
+  const [coefDrafts, setCoefDrafts] = useState({});
+  const [savingId, setSavingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await listAdminCommerceRegions();
+        if (!cancelled) {
+          setRows(data);
+          setCoefDrafts({});
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setRows([]);
+          setError(formatRequestError(err));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const directRegions = useMemo(
+    () => rows.filter((row) => isDirectPriceRegion(row)),
+    [rows]
+  );
+
+  useEffect(() => {
+    if (
+      createBaseId &&
+      directRegions.some((row) => String(row.id) === String(createBaseId))
+    ) {
+      return;
+    }
+    setCreateBaseId(
+      directRegions.length ? String(directRegions[0].id) : ""
+    );
+  }, [directRegions, createBaseId]);
+
+  const orderedRows = useMemo(() => orderPriceRegions(rows), [rows]);
+
+  const filtered = useMemo(
+    () =>
+      orderedRows.filter((row) =>
+        matchesQuery(row, query.trim(), [
+          "code",
+          "name",
+          "pricing_mode",
+          "base_region_code",
+          "base_region_name",
+        ])
+      ),
+    [orderedRows, query]
+  );
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    const code = createCode.trim();
+    const name = createName.trim();
+    const baseId = Number(createBaseId);
+    const coef = Number(createCoef);
+
+    if (!code || !name) {
+      setCreateError("Укажите код и название региона.");
+      setCreateSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(baseId) || baseId <= 0) {
+      setCreateError("Выберите базовый регион.");
+      setCreateSuccess(null);
+      return;
+    }
+    if (!Number.isFinite(coef) || coef <= 0) {
+      setCreateError("Коэффициент должен быть больше 0.");
+      setCreateSuccess(null);
+      return;
+    }
+
+    setCreating(true);
+    setCreateError(null);
+    setCreateSuccess(null);
+    try {
+      await createAdminCommerceRegion({
+        code,
+        name,
+        pricing_mode: PRICE_REGION_MODE_DERIVED,
+        base_region_id: baseId,
+        price_coefficient: coef,
+        sort_order: 0,
+        is_active: true,
+      });
+      setCreateCode("");
+      setCreateName("");
+      setCreateCoef("1");
+      setCreateSuccess(`Дочерний регион «${code}» создан.`);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setCreateError(formatRequestError(err));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSaveCoefficient = async (row) => {
+    const id = Number(row.id);
+    const coef = Number(coefDrafts[id] ?? row.price_coefficient);
+    const baseId = getPriceRegionBaseId(row);
+    if (!Number.isFinite(id) || id <= 0) return;
+    if (!Number.isFinite(coef) || coef <= 0) {
+      setSaveError("Коэффициент должен быть больше 0.");
+      return;
+    }
+    if (!baseId) {
+      setSaveError("У дочернего региона нет базового региона.");
+      return;
+    }
+
+    setSavingId(id);
+    setSaveError(null);
+    try {
+      await updateAdminCommerceRegion(id, {
+        code: row.code,
+        name: row.name,
+        pricing_mode: PRICE_REGION_MODE_DERIVED,
+        base_region_id: baseId,
+        price_coefficient: coef,
+        sort_order: row.sort_order,
+        is_active: row.is_active,
+      });
+      setRows((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, price_coefficient: coef } : item
+        )
+      );
+      setCoefDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setSaveError(formatRequestError(err));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleDeleteRegion = async (row) => {
+    const id = Number(row.id);
+    if (!Number.isFinite(id) || id <= 0 || isDirectPriceRegion(row)) return;
+    const label = priceRegionOptionLabel(row);
+    if (!window.confirm(`Удалить дочерний регион «${label}»?`)) return;
+
+    setDeletingId(id);
+    setSaveError(null);
+    try {
+      await deleteAdminCommerceRegion(id);
+      setRows((prev) => prev.filter((item) => item.id !== id));
+      setCoefDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setSaveError(formatRequestError(err));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <section className="admin-page__card">
+      <div className="admin-page__card-head">
+        <h2 className="admin-page__card-title">
+          Регионы цен
+          <span className="admin-page__count">
+            {loading ? "…" : `${filtered.length} / ${rows.length}`}
+          </span>
+        </h2>
+        <input
+          type="search"
+          className="admin-page__search"
+          placeholder="Поиск по коду, названию, базовому региону…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <p className="admin-page__hint">
+        Дочерний регион берёт цены базового и умножает их на коэффициент.
+        Ручные цены для дочерних регионов API не принимает — меняйте
+        коэффициент.
+      </p>
+
+      <form className="admin-page__create-form" onSubmit={handleCreate}>
+        <h3 className="admin-page__create-title">Новый дочерний регион</h3>
+        <p className="admin-page__hint">
+          POST /admin/commerce/regions, pricing_mode=derived. Базовый регион —
+          из уже загруженного справочника (только direct).
+        </p>
+        <div className="admin-page__create-fields">
+          <label className="admin-page__field">
+            <span className="admin-page__field-label">Базовый регион</span>
+            <select
+              className="admin-page__select admin-page__select--full"
+              value={createBaseId}
+              onChange={(e) => setCreateBaseId(e.target.value)}
+              disabled={creating || loading || !directRegions.length}
+              required
+            >
+              {!directRegions.length ? (
+                <option value="">Нет базовых регионов</option>
+              ) : (
+                directRegions.map((row) => (
+                  <option key={row.id} value={String(row.id)}>
+                    {priceRegionOptionLabel(row)}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label className="admin-page__field">
+            <span className="admin-page__field-label">Код</span>
+            <input
+              className="admin-page__input"
+              value={createCode}
+              onChange={(e) => setCreateCode(e.target.value)}
+              placeholder="Например chel"
+              disabled={creating || loading}
+              required
+              autoComplete="off"
+            />
+          </label>
+          <label className="admin-page__field">
+            <span className="admin-page__field-label">Название</span>
+            <input
+              className="admin-page__input"
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="Челябинск"
+              disabled={creating || loading}
+              required
+              autoComplete="off"
+            />
+          </label>
+          <label className="admin-page__field">
+            <span className="admin-page__field-label">Коэффициент</span>
+            <input
+              className="admin-page__input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={createCoef}
+              onChange={(e) => setCreateCoef(e.target.value)}
+              disabled={creating || loading}
+              required
+            />
+          </label>
+          <button
+            type="submit"
+            className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
+            disabled={
+              creating ||
+              loading ||
+              !createCode.trim() ||
+              !createName.trim() ||
+              !createBaseId
+            }
+          >
+            {creating ? "Создание…" : "Создать"}
+          </button>
+        </div>
+        {createError && (
+          <div className="admin-page__error" role="alert">
+            <p className="admin-page__error-title">
+              Не удалось создать регион
+            </p>
+            <pre className="admin-page__error-body">{createError}</pre>
+          </div>
+        )}
+        {createSuccess && (
+          <p className="admin-page__success" role="status">
+            {createSuccess}
+          </p>
+        )}
+      </form>
+
+      {error && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">
+            Не удалось загрузить регионы
+          </p>
+          <pre className="admin-page__error-body">{error}</pre>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">
+            Не удалось обновить регион
+          </p>
+          <pre className="admin-page__error-body">{saveError}</pre>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="admin-page__empty">Загрузка регионов…</p>
+      ) : !filtered.length ? (
+        <p className="admin-page__empty">
+          {rows.length
+            ? "Ничего не найдено по запросу."
+            : "Нет регионов в справочнике."}
+        </p>
+      ) : (
+        <div className="admin-page__table-wrap">
+          <table className="admin-page__table">
+            <thead>
+              <tr>
+                <th className="admin-page__col--compact">Код</th>
+                <th className="admin-page__col--grow">Название</th>
+                <th className="admin-page__col--compact">Режим</th>
+                <th className="admin-page__col--grow">Базовый регион</th>
+                <th className="admin-page__col--compact">Коэффициент</th>
+                <th className="admin-page__col--compact">Активен</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((row) => {
+                const derived = !isDirectPriceRegion(row);
+                const draft = coefDrafts[row.id];
+                const currentCoef =
+                  draft != null ? draft : String(row.price_coefficient ?? 1);
+                const unchanged =
+                  Number(currentCoef) === Number(row.price_coefficient);
+                return (
+                  <tr
+                    key={row.id}
+                    className={
+                      derived ? "admin-page__region-row--child" : undefined
+                    }
+                  >
+                    <td className="admin-page__col--compact">
+                      {cell(row.code)}
+                    </td>
+                    <td>{cell(row.name)}</td>
+                    <td className="admin-page__col--compact">
+                      {priceRegionModeLabel(row.pricing_mode)}
+                    </td>
+                    <td>
+                      {derived
+                        ? cell(
+                            row.base_region_name ||
+                              row.base_region?.name ||
+                              row.base_region_code ||
+                              row.base_region?.code
+                          )
+                        : "—"}
+                    </td>
+                    <td className="admin-page__col--compact">
+                      {derived ? (
+                        <input
+                          className="admin-page__input admin-page__input--compact"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={currentCoef}
+                          disabled={savingId === row.id}
+                          onChange={(e) =>
+                            setCoefDrafts((prev) => ({
+                              ...prev,
+                              [row.id]: e.target.value,
+                            }))
+                          }
+                          aria-label={`Коэффициент ${row.code}`}
+                        />
+                      ) : (
+                        cell(row.price_coefficient)
+                      )}
+                    </td>
+                    <td className="admin-page__col--compact">
+                      {cell(row.is_active)}
+                    </td>
+                    <td className="admin-page__col--compact">
+                      {derived ? (
+                        <div className="admin-page__region-actions">
+                          <button
+                            type="button"
+                            className="admin-page__btn admin-page__btn--inline"
+                            disabled={
+                              savingId === row.id ||
+                              deletingId === row.id ||
+                              unchanged ||
+                              !Number(currentCoef)
+                            }
+                            onClick={() => handleSaveCoefficient(row)}
+                          >
+                            {savingId === row.id ? "…" : "Сохранить"}
+                          </button>
+                          <DeleteIconButton
+                            deleting={deletingId === row.id}
+                            disabled={
+                              savingId === row.id || deletingId === row.id
+                            }
+                            label={priceRegionOptionLabel(row)}
+                            onClick={() => handleDeleteRegion(row)}
+                          />
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AdminMaterialPage() {
   const { code: routeCode } = useParams();
   const navigate = useNavigate();
@@ -3287,7 +4012,9 @@ export default function AdminPage() {
   const [searchParams] = useSearchParams();
   const listParam = searchParams.get("list");
   const listKey =
-    listParam === "constructions" || listParam === "materials"
+    listParam === "constructions" ||
+    listParam === "materials" ||
+    listParam === "regions"
       ? listParam
       : null;
 
@@ -3321,13 +4048,25 @@ export default function AdminPage() {
             >
               Конструкции
             </NavLink>
+            <NavLink
+              to="/admin?list=regions"
+              className={() =>
+                `admin-page__tab${
+                  listKey === "regions" ? " admin-page__tab--active" : ""
+                }`
+              }
+            >
+              Регионы
+            </NavLink>
           </nav>
         </div>
 
         {listKey === "materials" ? (
           <MaterialsListPanel />
-        ) : (
+        ) : listKey === "constructions" ? (
           <ConstructionsListPanel />
+        ) : (
+          <RegionsListPanel />
         )}
       </div>
     </AdminGate>

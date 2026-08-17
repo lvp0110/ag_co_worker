@@ -3,22 +3,34 @@
  *
  *   GET /admin/materials
  *     → AdminMaterial[] (без prices; prices только в карточке)
+ *     type: { id, code, name } | omit
+ *   GET /admin/materials/types
+ *     → { id, code, name, description }[]  (справочник materials_types)
  *   GET /admin/materials/{code}
  *     → AdminMaterialDetails { ...AdminMaterial, prices: MaterialPrice[] }
+ *   GET /admin/commerce/regions
+ *     → PriceRegion[] { id, code, name, pricing_mode, base_region, price_coefficient, sort_order, is_active }
+ *   POST /admin/commerce/regions
+ *     → body: PriceRegionUpsert { code, name, pricing_mode, base_region_id?, price_coefficient, sort_order, is_active }
+ *   PUT /admin/commerce/regions/{id}
+ *     → body: PriceRegionUpsert
+ *   DELETE /admin/commerce/regions/{id}
  *   GET /commerce/price-list/{regionCode}
  *     → MaterialPriceListItem[] { code, product_name, units, price, m2, currency_code }
  *   GET /api/v2/data/unmatched
  *     → UnmatchedMaterial[] { id, code, name, units, prices, created_at }
  *   DELETE /api/v2/data/unmatched/{code}
  *   POST /admin/materials
- *     → body: AdminMaterialUpsert
+ *     → body: AdminMaterialUpsert { ..., type_id }
  *   PUT /admin/materials/{code}
- *     → body: AdminMaterialUpsert
+ *     → body: AdminMaterialUpsert { ..., type_id }
  *   DELETE /admin/materials/{code}?replacement_code=
  *     → если материал в конструкциях — обязателен replacement_code того же type
  *   POST /admin/commerce/materials/{materialID}/prices
  *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
+ *   GET /api/v2/constructions/types
+ *     → { id, code, name }[]  (справочник construction_types)
  *   POST /admin/constructions
  *     → body: { code, name, type_id, category_id }
  *   PUT /admin/constructions/{id}
@@ -267,19 +279,48 @@ export const getMaterialCode = (row) => {
   return code || null;
 };
 
+/** ID типа материала из строки каталога / карточки. */
+export const getMaterialTypeId = (obj) => {
+  if (!obj || typeof obj !== "object") return null;
+  const nested = obj.type && typeof obj.type === "object" ? obj.type : null;
+  const raw = obj.type_id ?? nested?.id ?? null;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/** Нормализует запись справочника GET /admin/materials/types. */
+export const normalizeMaterialType = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+    description:
+      row.description == null ? "" : String(row.description).trim(),
+  };
+};
+
 /** Нормализует материал из GET /admin/materials. */
 export const normalizeAdminMaterial = (row) => {
   if (!row || typeof row !== "object") return row;
   const code = row.code == null ? "" : String(row.code).trim();
+  const typeObj =
+    row.type && typeof row.type === "object" && !Array.isArray(row.type)
+      ? row.type
+      : null;
   return {
     ...row,
+    ...flattenRef("type", typeObj, row),
     id: row.id ?? null,
     code,
     name: row.name == null ? "" : String(row.name).trim(),
     product_name:
       row.product_name == null ? "" : String(row.product_name).trim(),
     units: row.units == null ? "" : String(row.units).trim(),
-    type: row.type == null ? "" : String(row.type).trim(),
+    type: typeObj,
     usage: row.usage == null ? "" : String(row.usage).trim(),
     visible: Boolean(row.visible),
   };
@@ -345,6 +386,12 @@ export const listAdminMaterials = async () => {
   return unwrapList(body).map(normalizeAdminMaterial);
 };
 
+/** GET /admin/materials/types → справочник типов материалов. */
+export const listAdminMaterialTypes = async () => {
+  const body = await request("/admin/materials/types");
+  return unwrapList(body).map(normalizeMaterialType).filter(Boolean);
+};
+
 /**
  * GET /admin/materials/{code} — карточка материала (+ prices).
  * @param {string} code
@@ -370,6 +417,238 @@ export const listCommercePriceList = async (regionCode = "msk") => {
   return unwrapList(body)
     .map(normalizeCommercePriceListItem)
     .filter(Boolean);
+};
+
+export const PRICE_REGION_MODE_DIRECT = "direct";
+export const PRICE_REGION_MODE_DERIVED = "derived";
+
+/** Нормализует регион из GET /admin/commerce/regions. */
+export const normalizePriceRegion = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const base =
+    row.base_region && typeof row.base_region === "object"
+      ? row.base_region
+      : null;
+  const mode = String(row.pricing_mode || PRICE_REGION_MODE_DIRECT).trim();
+  return {
+    ...row,
+    ...flattenRef("base_region", base, row),
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+    pricing_mode: mode,
+    base_region: base,
+    price_coefficient: Number(row.price_coefficient) || 1,
+    sort_order: Number(row.sort_order) || 0,
+    is_active: row.is_active !== false,
+  };
+};
+
+export const isDirectPriceRegion = (row) =>
+  String(row?.pricing_mode || "").trim() !== PRICE_REGION_MODE_DERIVED;
+
+export const getPriceRegionBaseId = (row) => {
+  const n = Number(row?.base_region_id ?? row?.base_region?.id);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/** Базовые регионы, под ними их дочерние. */
+export const orderPriceRegions = (rows) => {
+  const directs = [];
+  const childrenByBase = new Map();
+  const orphans = [];
+  for (const row of rows || []) {
+    if (isDirectPriceRegion(row)) {
+      directs.push(row);
+      continue;
+    }
+    const baseId = getPriceRegionBaseId(row);
+    if (!baseId) {
+      orphans.push(row);
+      continue;
+    }
+    const list = childrenByBase.get(baseId) || [];
+    list.push(row);
+    childrenByBase.set(baseId, list);
+  }
+  const ordered = [];
+  for (const base of directs) {
+    ordered.push(base);
+    ordered.push(...(childrenByBase.get(base.id) || []));
+    childrenByBase.delete(base.id);
+  }
+  for (const leftover of childrenByBase.values()) {
+    ordered.push(...leftover);
+  }
+  ordered.push(...orphans);
+  return ordered;
+};
+
+const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+/**
+ * Цены материала + дочерние регионы (цена базового × коэффициент),
+ * даже если в material_prices ещё нет строк derived.
+ * @param {object[]} prices
+ * @param {object[]} regions
+ */
+export const expandMaterialPricesWithDerivedRegions = (prices, regions) => {
+  const list = Array.isArray(prices) ? prices : [];
+  const regs = Array.isArray(regions) ? regions.filter(Boolean) : [];
+
+  const byRegionId = new Map();
+  const byRegionCode = new Map();
+  for (const price of list) {
+    const id = Number(price?.region?.id);
+    const code = String(price?.region?.code || "")
+      .trim()
+      .toLowerCase();
+    if (Number.isFinite(id) && id > 0) byRegionId.set(id, price);
+    if (code) byRegionCode.set(code, price);
+  }
+
+  const result = [];
+  const seen = new Set();
+  const mark = (id, code) => {
+    if (Number.isFinite(id) && id > 0) seen.add(`id:${id}`);
+    const key = String(code || "").trim().toLowerCase();
+    if (key) seen.add(`code:${key}`);
+  };
+  const already = (id, code) => {
+    if (Number.isFinite(id) && id > 0 && seen.has(`id:${id}`)) return true;
+    const key = String(code || "").trim().toLowerCase();
+    return Boolean(key && seen.has(`code:${key}`));
+  };
+
+  for (const region of orderPriceRegions(regs)) {
+    if (region.is_active === false) continue;
+    const id = Number(region.id);
+    const code = String(region.code || "").trim();
+    const stored = byRegionId.get(id) || byRegionCode.get(code.toLowerCase());
+    if (stored) {
+      result.push({
+        ...stored,
+        derived: !isDirectPriceRegion(region),
+        computed: false,
+        price_coefficient: region.price_coefficient,
+        pricing_mode: region.pricing_mode,
+      });
+      mark(id, code);
+      continue;
+    }
+    if (isDirectPriceRegion(region)) continue;
+
+    const baseId = getPriceRegionBaseId(region);
+    const baseCode = String(
+      region.base_region_code || region.base_region?.code || ""
+    )
+      .trim()
+      .toLowerCase();
+    const basePrice =
+      (baseId && byRegionId.get(baseId)) ||
+      (baseCode && byRegionCode.get(baseCode)) ||
+      null;
+    const coef = Number(region.price_coefficient) || 1;
+    result.push({
+      id: region.id,
+      region: { id: region.id, code: region.code, name: region.name },
+      price: basePrice ? roundMoney(basePrice.price * coef) : null,
+      m2: basePrice ? roundMoney(basePrice.m2 * coef) : null,
+      currency_code: basePrice?.currency_code || "",
+      derived: true,
+      computed: true,
+      price_coefficient: coef,
+      pricing_mode: region.pricing_mode,
+    });
+    mark(id, code);
+  }
+
+  for (const price of list) {
+    const id = Number(price?.region?.id);
+    const code = String(price?.region?.code || "").trim();
+    if (already(id, code)) continue;
+    result.push({ ...price, derived: false, computed: false });
+    mark(id, code);
+  }
+
+  return result;
+};
+
+/** GET /admin/commerce/regions → справочник регионов цен. */
+export const listAdminCommerceRegions = async () => {
+  const body = await request("/admin/commerce/regions");
+  return unwrapList(body).map(normalizePriceRegion).filter(Boolean);
+};
+
+const buildPriceRegionUpsertBody = (payload) => {
+  const mode =
+    String(payload.pricing_mode || PRICE_REGION_MODE_DIRECT).trim() ||
+    PRICE_REGION_MODE_DIRECT;
+  const body = {
+    code: String(payload.code || "").trim(),
+    name: String(payload.name || "").trim(),
+    pricing_mode: mode,
+    price_coefficient: Number(payload.price_coefficient) || 1,
+    sort_order: Number(payload.sort_order) || 0,
+    is_active: payload.is_active !== false,
+  };
+  if (mode === PRICE_REGION_MODE_DERIVED) {
+    const baseId = Number(payload.base_region_id);
+    if (Number.isFinite(baseId) && baseId > 0) {
+      body.base_region_id = baseId;
+    }
+  }
+  return body;
+};
+
+/**
+ * POST /admin/commerce/regions — создать регион (обычно derived).
+ * @param {object} payload PriceRegionUpsert
+ */
+export const createAdminCommerceRegion = async (payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request("/admin/commerce/regions", {
+    method: "POST",
+    headers,
+    body: buildPriceRegionUpsertBody(payload),
+  });
+};
+
+/**
+ * PUT /admin/commerce/regions/{id} — обновить регион (коэффициент дочернего).
+ * @param {string|number} id
+ * @param {object} payload PriceRegionUpsert
+ */
+export const updateAdminCommerceRegion = async (id, payload) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/admin/commerce/regions/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers,
+    body: buildPriceRegionUpsertBody(payload),
+  });
+};
+
+/**
+ * DELETE /admin/commerce/regions/{id} — удалить регион (для дочерних).
+ * @param {string|number} id
+ */
+export const deleteAdminCommerceRegion = async (id) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(`/admin/commerce/regions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers,
+  });
 };
 
 /**
@@ -460,6 +739,13 @@ export const deleteAdminMaterial = async (code, options = {}) => {
   });
 };
 
+const parseMaterialTypeId = (payload) => {
+  const nested =
+    payload?.type && typeof payload.type === "object" ? payload.type : null;
+  const n = Number(payload?.type_id ?? nested?.id ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
 const buildAdminMaterialUpsertBody = (payload) => ({
   code: String(payload.code || "").trim(),
   name: String(payload.name || "").trim(),
@@ -468,7 +754,7 @@ const buildAdminMaterialUpsertBody = (payload) => ({
   width: Number(payload.width) || 0,
   height: Number(payload.height) || 0,
   units: String(payload.units || "").trim(),
-  type: String(payload.type || "").trim(),
+  type_id: parseMaterialTypeId(payload),
   unit_pack: Number(payload.unit_pack) || 0,
   info_pack: String(payload.info_pack || "").trim(),
   ratio_square: Number(payload.ratio_square) || 0,
@@ -610,20 +896,73 @@ export const deleteAdminConstruction = async (id) => {
 };
 
 /**
- * Уникальные типы конструкций из списка (для селекта при создании).
+ * Нормализует запись справочника GET /api/v2/constructions/types.
+ */
+export const normalizeConstructionType = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+  };
+};
+
+/**
+ * GET /api/v2/constructions/types — справочник типов конструкций.
+ */
+export const listConstructionTypes = async () => {
+  const body = await request("/api/v2/constructions/types");
+  return unwrapList(body).map(normalizeConstructionType).filter(Boolean);
+};
+
+/**
+ * Список типов для UI создания: GET /api/v2/constructions/types
+ * плюс типы, уже встречающиеся в загруженном списке конструкций.
+ * @param {object[]} apiTypes
  * @param {object[]} rows
  * @returns {{ id: number, code: string, name: string }[]}
  */
-export const collectConstructionTypes = (rows) => {
+export const collectConstructionTypes = (apiTypes, rows) => {
   const byId = new Map();
+  for (const item of apiTypes || []) {
+    const id = Number(item?.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    byId.set(id, {
+      id,
+      code: String(item.code ?? "").trim(),
+      name: String(item.name ?? "").trim(),
+    });
+  }
   for (const row of rows || []) {
     const id = Number(row?.type_id ?? row?.type?.id);
-    if (!Number.isFinite(id) || id <= 0) continue;
-    if (byId.has(id)) continue;
+    if (!Number.isFinite(id) || id <= 0 || byId.has(id)) continue;
     byId.set(id, {
       id,
       code: String(row.type_code ?? row.type?.code ?? "").trim(),
       name: String(row.type_name ?? row.type?.name ?? "").trim(),
+    });
+  }
+  return [...byId.values()].sort((a, b) =>
+    (a.name || a.code).localeCompare(b.name || b.code, "ru")
+  );
+};
+
+/**
+ * Уникальные категории конструкций из списка (для селекта при редактировании).
+ * @param {object[]} rows
+ * @returns {{ id: number, code: string, name: string }[]}
+ */
+export const collectConstructionCategories = (rows) => {
+  const byId = new Map();
+  for (const row of rows || []) {
+    const id = Number(row?.category_id ?? row?.category?.id);
+    if (!Number.isFinite(id) || id <= 0 || byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      code: String(row.category_code ?? row.category?.code ?? "").trim(),
+      name: String(row.category_name ?? row.category?.name ?? "").trim(),
     });
   }
   return [...byId.values()].sort((a, b) =>
@@ -766,32 +1105,29 @@ export const deleteAdminConstructionMaterial = async (
 };
 
 /**
- * Типы материалов для групп замены (materials_types из seed ConstrTodo).
- * id из живых групп перекрывает seed при совпадении code.
- */
-export const KNOWN_REPLACEMENT_MATERIAL_TYPES = [
-  { id: 1, code: "tape", name: "лента" },
-  { id: 2, code: "roll", name: "рулон" },
-  { id: 3, code: "stud", name: "стойка" },
-  { id: 4, code: "runner", name: "направляющий" },
-  { id: 5, code: "panel", name: "панель" },
-  { id: 6, code: "filling", name: "заполнение" },
-  { id: 7, code: "screw", name: "крепеж" },
-  { id: 8, code: "hunger", name: "подвес" },
-  { id: 9, code: "thing", name: "штучный" },
-];
-
-/**
- * Список типов для UI: seed + типы из уже загруженных групп замены.
+ * Список типов для UI групп замены: GET /admin/materials/types
+ * плюс типы, уже встречающиеся в загруженных группах.
+ * @param {object[]} apiTypes
  * @param {object[]} replacementGroups
  * @returns {{ id: number, code: string, name: string }[]}
  */
-export const collectReplacementMaterialTypes = (replacementGroups) => {
-  const byCode = new Map(
-    KNOWN_REPLACEMENT_MATERIAL_TYPES.map((t) => [t.code, { ...t }])
-  );
+export const collectReplacementMaterialTypes = (
+  apiTypes,
+  replacementGroups
+) => {
+  const byId = new Map();
+  for (const item of apiTypes || []) {
+    const id = Number(item?.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    byId.set(id, {
+      id,
+      code: String(item.code ?? "").trim(),
+      name: String(item.name ?? "").trim(),
+    });
+  }
   for (const group of replacementGroups || []) {
     const id = Number(getReplacementMaterialTypeId(group));
+    if (!Number.isFinite(id) || id <= 0 || byId.has(id)) continue;
     const code = String(
       group.replacement_material_type_code ??
         group.replacement_material_type?.code ??
@@ -802,10 +1138,9 @@ export const collectReplacementMaterialTypes = (replacementGroups) => {
         group.replacement_material_type?.name ??
         ""
     ).trim();
-    if (!code || !Number.isFinite(id) || id <= 0) continue;
-    byCode.set(code, { id, code, name: name || code });
+    byId.set(id, { id, code, name: name || code || String(id) });
   }
-  return [...byCode.values()].sort((a, b) =>
+  return [...byId.values()].sort((a, b) =>
     (a.name || a.code).localeCompare(b.name || b.code, "ru")
   );
 };

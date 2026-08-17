@@ -102,9 +102,15 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
-      // Unmatched import list живёт на том же сервисе, что и /admin/materials.
-      // Не через CALC_PROXY_TARGET: в .env часто staging, а materials — localhost.
+      // Unmatched import list и справочник типов конструкций живут на том же
+      // сервисе, что и /admin/materials. Не через CALC_PROXY_TARGET: в .env
+      // часто staging, а materials/types — localhost.
       '/api/v2/data/unmatched': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
+      '/api/v2/constructions/types': {
         target: authTarget,
         changeOrigin: true,
         secure: false,
