@@ -34,6 +34,12 @@ export const isZIPSCeiling = (currentSubCategory, template, itemTemplate, itemCI
 };
 
 /**
+ * id из sizeLimits: ItemsBase.id, не id публичного каталога.
+ */
+export const sizeLimitConstrId = (item, fallbackId) =>
+  item?.size_limit_id ?? item?.id ?? fallbackId;
+
+/**
  * Получить максимальную высоту конструкции из sizeLimits в метрах
  */
 export const getMaxLenZInMeters = (idConstr, step, subCategory) => {
@@ -57,6 +63,7 @@ export const validateInput = (constR, currentSubCategory, currentItems, template
   const itemTemplate = currentItem?.template;
   const itemAgId = currentItem?.ag_id;
   const itemCId = currentItem?.c_id;
+  const limitsId = sizeLimitConstrId(currentItem, currentItems);
 
   const isZIPS = isZIPSCeiling(currentSubCategory, template, itemTemplate, itemCId, itemAgId);
   const stepForLimits =
@@ -69,7 +76,7 @@ export const validateInput = (constR, currentSubCategory, currentItems, template
 
   if (currentSubCategory == "W") {
     objectX = SizeLimits.find(
-      (el) => el.id_constr == currentItems && el.step == stepForLimits
+      (el) => el.id_constr == limitsId && el.step == stepForLimits
     );
     if (!objectX) return null;
     max_constr_size = objectX.max_lenZ;
@@ -84,7 +91,7 @@ export const validateInput = (constR, currentSubCategory, currentItems, template
       return getValidationMessage("W_LENZ_MAX");
   } else if (currentSubCategory == "L" && template != 6) {
     objectX = SizeLimits.find(
-      (el) => el.id_constr == currentItems && el.step == stepForLimits
+      (el) => el.id_constr == limitsId && el.step == stepForLimits
     );
     if (!objectX) return null;
     max_constr_size = objectX.max_lenZ;
@@ -99,7 +106,7 @@ export const validateInput = (constR, currentSubCategory, currentItems, template
       return getValidationMessage("L_NOT6_LENZ_MAX");
   } else if (currentSubCategory == "L" && template == 6) {
     objectX = SizeLimits.find(
-      (el) => el.id_constr == currentItems && el.step == stepForLimits
+      (el) => el.id_constr == limitsId && el.step == stepForLimits
     );
     if (!objectX) return null;
     max_constr_size = objectX.max_lenZ;

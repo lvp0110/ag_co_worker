@@ -3,8 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import Modal from "./Modal";
 import "./Calculator.css";
 import SubCategories from "../data/subCategories";
-import Items, { getItemsWithApiImages } from "../data/items.js";
-import mainSections from "../data/mainSections";
+import { getItemsWithApiImages } from "../data/items.js";
+import fallbackMainSections from "../data/mainSections";
 import {
   constRZero,
   constSentZero,
@@ -18,21 +18,12 @@ import {
   validateFloorMaxInput,
   normalizeFacingProfileStep,
   normalizeLagProfileStep,
-  isFacingTemplate,
 } from "../utils/validation";
 import {
   calculateAreaAndPerimeter,
-  getConstructionCode,
   resolveDisplayCipher,
 } from "../utils/calculations";
-import {
-  hasCeilingMatChoice,
-  hasEcoSWoolChoice,
-  hasFloorSealantChoice,
-  hasGklaChoice,
-  normalizeCeilingMats,
-  stripHangerSuffix,
-} from "../utils/calcUlTapeFallback";
+import { stripHangerSuffix } from "../utils/calcUlTapeFallback";
 import {
   getItemsAgIdKeyMap,
   itemsBaseTableName,
@@ -41,11 +32,26 @@ import {
 import {
   sectionIdFromCode,
   sectionIdFromSubCategory,
+  sectionsFromConstructionTypes,
 } from "../utils/constructionSection";
-import { calculateConstruction } from "../services/constructionApi";
+import { listConstructionTypes } from "../services/adminApi";
+import {
+  calculateIsolationByConstruction,
+  getConstructionCalculationParams,
+  getPublicConstruction,
+} from "../services/constructionApi";
 import { createKpFromCalc } from "../services/offersApi";
 import { formatRequestError } from "../services/apiClient";
 import { buildCreateOfferPayload } from "../utils/offerMapper";
+import {
+  buildIsolationCalcRequestFromStored,
+  buildIsolationCalcRequestItem,
+  defaultCalcApiValues,
+  paramBoolValue,
+  paramIntValue,
+  parseCalcApiSpec,
+  selectedReplacementsMap,
+} from "../utils/isolationCalcV2";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useCalcField } from "../stores/calculatorStore.js";
 import ItemsList from "./ItemsList";
@@ -82,11 +88,17 @@ const Calculator = () => {
   const [materialsByConstruction, setMaterialsByConstruction] = useCalcField(
     "materialsByConstruction"
   );
-  const [itemsWithImages, setItemsWithImages] = useState(Items); // Начальное значение - базовые items
+  const [itemsWithImages, setItemsWithImages] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [mainSections, setMainSections] = useState(fallbackMainSections);
   const [isSubmittingKp, setIsSubmittingKp] = useState(false);
   // Если юзер нажал «Сделать КП» будучи анонимом — запоминаем намерение и
   // продолжаем автоматически после успешного логина.
   const [pendingCreateKp, setPendingCreateKp] = useState(false);
+  const [calcApiSpec, setCalcApiSpec] = useState(null);
+  const [calcApiValues, setCalcApiValues] = useState(defaultCalcApiValues());
+  const [calcApiLoading, setCalcApiLoading] = useState(false);
+  const [recalcKeyId, setRecalcKeyId] = useState(null);
 
   const [modal, setModal] = useState({
     isOpen: false,
@@ -99,16 +111,40 @@ const Calculator = () => {
   });
 
   useEffect(() => {
+    let cancelled = false;
     const loadItemsWithImages = async () => {
       try {
         const enrichedItems = await getItemsWithApiImages();
-        setItemsWithImages(enrichedItems);
+        if (!cancelled) setItemsWithImages(enrichedItems);
       } catch {
-        setItemsWithImages(Items);
+        if (!cancelled) setItemsWithImages([]);
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
       }
     };
 
     loadItemsWithImages();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const types = await listConstructionTypes();
+        const sections = sectionsFromConstructionTypes(types);
+        if (!cancelled && sections.length > 0) {
+          setMainSections(sections);
+        }
+      } catch {
+        // оставляем fallbackMainSections
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Получить items для конкретной секции и подкатегории
@@ -139,7 +175,7 @@ const Calculator = () => {
       }
       img.src = url;
     });
-  }, []);
+  }, [mainSections]);
 
   useEffect(() => {
     if (itemsWithImages.length === 0) return;
@@ -181,7 +217,7 @@ const Calculator = () => {
         }
       }
     }
-  }, [openedSubCategories, itemsWithImages, getItemsForSection]);
+  }, [openedSubCategories, itemsWithImages, getItemsForSection, mainSections]);
 
   const [constR, setConstR] = useState({
     title: "",
@@ -267,13 +303,9 @@ const Calculator = () => {
         setCurrentConstr(item.ag_id);
         setCurrentFloorSealant("vibrosil");
         setCurrentCeilingMats([]);
-        if (!hasGklaChoice(item.ag_id)) {
-          setCurrentGkla("default");
-        }
-        if (!hasEcoSWoolChoice(item.ag_id)) {
-          setCurrentWool("default");
-        }
-        if (isFacingTemplate(item.template)) {
+        setCurrentGkla("default");
+        setCurrentWool("default");
+        if (item.c_id === "W" || item.c_id === "L") {
           setFacingProfileStep(600);
         }
         if (item.c_id) {
@@ -334,6 +366,48 @@ const Calculator = () => {
       });
     }
   }, [currentItems]);
+
+  useEffect(() => {
+    const selectedItem = itemsWithImages.find((el) => el.id == currentItems);
+    const code = selectedItem?.ag_id;
+    if (!currentItems || !code) {
+      setCalcApiSpec(null);
+      setCalcApiValues(defaultCalcApiValues());
+      setCalcApiLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCalcApiSpec(null);
+    setCalcApiValues(defaultCalcApiValues());
+    setCalcApiLoading(true);
+    (async () => {
+      try {
+        const [paramsBody, detailBody] = await Promise.all([
+          getConstructionCalculationParams(code),
+          getPublicConstruction(code),
+        ]);
+        if (cancelled) return;
+        const spec = parseCalcApiSpec({
+          paramsBody: { data: paramsBody },
+          detailBody: { data: detailBody },
+        });
+        setCalcApiSpec(spec);
+        setCalcApiValues(defaultCalcApiValues(spec));
+      } catch {
+        if (cancelled) return;
+        const spec = parseCalcApiSpec();
+        setCalcApiSpec(spec);
+        setCalcApiValues(defaultCalcApiValues(spec));
+      } finally {
+        if (!cancelled) setCalcApiLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentItems, itemsWithImages]);
 
   const delFromOpenings = (index) => {
     const newOpenings = [...constrSent.Openings];
@@ -466,12 +540,12 @@ const Calculator = () => {
     let calcProfileStep = Number(profileStep) || 600;
     if (template === 3) {
       calcProfileStep = normalizeLagProfileStep(profileStep);
-    } else if (
-      isFacingTemplate(template) ||
-      currentSubCategory === "W" ||
-      currentSubCategory === "L"
-    ) {
+    } else if (currentSubCategory === "W" || currentSubCategory === "L") {
       calcProfileStep = normalizeFacingProfileStep(facingProfileStep);
+    }
+    const apiStep = paramIntValue(calcApiValues.paramValues, "step", 0);
+    if (apiStep) {
+      calcProfileStep = apiStep;
     }
 
     const inputError = validateInput(
@@ -526,17 +600,27 @@ const Calculator = () => {
 
     const IconType = SubCategories.find((el) => el.id == currentSubCategory);
     const Constr = itemsWithImages.find((el) => el.id == currentItems);
-    const code = getConstructionCode(currentConstr, currentGkla, currentWool);
+    const code = String(Constr?.ag_id || currentConstr || "").trim();
     const sectionId =
       sectionIdFromSubCategory(currentSubCategory) || sectionIdFromCode(code);
-    const agId = resolveDisplayCipher(code, getItemsAgIdKeyMap());
+    const agId = resolveDisplayCipher(code, getItemsAgIdKeyMap()) || code;
+    const apiDframe = paramBoolValue(
+      calcApiValues.paramValues,
+      "dframe",
+      dFrame
+    );
+    const apiCeilShift = paramIntValue(
+      calcApiValues.paramValues,
+      "add_ceil_shift",
+      +constR.AddCeilShift || 0
+    );
 
     const { title: shortTitle, description: displayDescription } =
       resolveItemsDisplayMeta({
         calcCode: code,
         cipher: agId,
         sectionId,
-        catalogId: Constr?.id,
+        catalogId: Constr?.size_limit_id,
       });
 
     const displayTitle = itemsBaseTableName({
@@ -551,11 +635,9 @@ const Calculator = () => {
       key_id: Date.now(),
       title: displayTitle,
       short_title: shortTitle,
-      catalog_id: Constr?.id,
+      catalog_id: Constr?.size_limit_id ?? Constr?.id,
       type: IconType?.title,
       section_id: sectionId,
-      // Для UI показываем базовый шифр без суффиксов (AG.F...),
-      // а полный код остаётся в newConstrSent.Code для расчёта/API.
       ag_id: agId,
       step: Constr?.step,
       weight: Constr?.weight,
@@ -577,53 +659,45 @@ const Calculator = () => {
       lenZ: +opening.lenZ || 0,
     }));
 
+    const requestItem = buildIsolationCalcRequestItem({
+      code,
+      lenX,
+      lenY,
+      lenZ,
+      area,
+      perimeter,
+      openings: openingsWithNumbers,
+      paramValues: calcApiValues.paramValues,
+      selectedReplacements: calcApiValues.selectedReplacements,
+      selectedOptionals: calcApiValues.selectedOptionals,
+    });
+
     const newConstrSent = {
       Code: code,
       LenX: lenX,
       LenY: lenY,
       LenZ: lenZ,
-      AddCeilShift: +constR.AddCeilShift || 0,
+      AddCeilShift: apiCeilShift,
       step: calcProfileStep,
-      dframe: dFrame,
+      dframe: apiDframe,
       Area: area,
       Perimeter: perimeter,
       Openings: openingsWithNumbers,
       SectionId: sectionId,
       SectionType: IconType?.title ?? "",
+      params: requestItem.params,
+      selected_replacement_materials: requestItem.selected_replacement_materials,
+      selected_optional_materials: requestItem.selected_optional_materials,
+      replacementGroups: calcApiSpec?.replacementGroups || [],
+      selectedReplacements: { ...(calcApiValues.selectedReplacements || {}) },
       ...(displayTitle ? { DisplayTitle: displayTitle } : {}),
       ...(displayDescription ? { DisplayDescription: displayDescription } : {}),
     };
 
-    if (code == "AG.L401" || code == "AG.W101" || code == "AG.W105") {
-      newConstrSent.dframe = true;
-    }
-    if (
-      (code == "AG.F615" || code == "AG.F615_vibroflex_LD") &&
-      calcProfileStep === 600
-    ) {
-      newConstrSent.step = 400;
-    }
-    const sendSealantChoice =
-      hasFloorSealantChoice({ code }) ||
-      [607.1, 608.1, 609.1, 610.1, 2.1].includes(template) ||
-      isFacingTemplate(template) ||
-      template === 4 ||
-      template === 5;
-    if (sendSealantChoice) {
-      newConstrSent.FloorSealant = currentFloorSealant;
-    }
-    const ceilingMats = normalizeCeilingMats(currentCeilingMats);
-    if (
-      hasCeilingMatChoice(Constr?.ag_id || agId) &&
-      ceilingMats.length > 0
-    ) {
-      newConstrSent.CeilingMats = ceilingMats;
-    }
-
     const deep = JSON.parse(JSON.stringify(newConstrSent));
 
     try {
-      const result = await calculateConstruction([deep]);
+      const result = await calculateIsolationByConstruction([requestItem]);
       const data = result?.data ?? [];
 
       if (data.length === 0) {
@@ -652,19 +726,17 @@ const Calculator = () => {
       setCurrentFloorSealant("vibrosil");
       setCurrentCeilingMats([]);
     } catch (error) {
-      let errorMessage = error.message;
-      if (error.message.includes("invalid construction size")) {
+      const raw = formatRequestError(error);
+      let errorMessage = error?.message || raw;
+      if (String(errorMessage).includes("invalid construction size")) {
         errorMessage =
           "Неверный размер конструкции. Пожалуйста, проверьте введенные размеры. Для ЗИПС потолка минимальный размер составляет 200 мм.";
-      } else if (error.message.includes("404")) {
-        errorMessage =
-          "Сервер API недоступен. Проверьте подключение к интернету или обратитесь к администратору.";
       }
 
       setModal({
         isOpen: true,
         title: "Ошибка",
-        html: `Не удалось рассчитать материалы.<br><br>${errorMessage}<br><br>Проверьте консоль для деталей.`,
+        html: `Не удалось рассчитать материалы.<br><br>${errorMessage}`,
         icon: "error",
         imageUrl: null,
         confirmButtonText: "OK",
@@ -681,23 +753,88 @@ const Calculator = () => {
     facingProfileStep,
     dFrame,
     constrSent,
-    currentGkla,
-    currentWool,
-    currentFloorSealant,
-    currentCeilingMats,
     template,
+    calcApiValues,
+    calcApiSpec,
   ]);
+
+  const recalcConstructionReplacement = useCallback(
+    async (keyId, group, newCode) => {
+      const index = ConstrToCalc.findIndex((item) => item.key_id === keyId);
+      if (index < 0) return;
+      const sent = ConstrToCalcToSent[index];
+      if (!sent) return;
+      const nextReplacements = {
+        ...selectedReplacementsMap(
+          sent.replacementGroups,
+          sent.selected_replacement_materials,
+          sent.selectedReplacements
+        ),
+        [group]: newCode,
+      };
+      if (String(sent.selectedReplacements?.[group] || "") === String(newCode)) {
+        return;
+      }
+      setRecalcKeyId(keyId);
+      try {
+        const requestItem = buildIsolationCalcRequestFromStored(sent, {
+          selectedReplacements: nextReplacements,
+        });
+        const result = await calculateIsolationByConstruction([requestItem]);
+        const data = result?.data ?? [];
+        if (data.length === 0) {
+          throw new Error(
+            "Расчёт не вернул материалы для выбранного варианта конструкции."
+          );
+        }
+        setConstrToCalcToSent((prev) => {
+          const next = [...prev];
+          if (!next[index]) return prev;
+          next[index] = {
+            ...next[index],
+            selectedReplacements: nextReplacements,
+            selected_replacement_materials:
+              requestItem.selected_replacement_materials,
+          };
+          return next;
+        });
+        setMaterialsByConstruction((prev) =>
+          prev.map((row) => (row.key_id === keyId ? { ...row, data } : row))
+        );
+      } catch (error) {
+        const raw = formatRequestError(error);
+        setModal({
+          isOpen: true,
+          title: "Ошибка",
+          html: `Не удалось пересчитать материалы.<br><br>${error?.message || raw}`,
+          icon: "error",
+          imageUrl: null,
+          confirmButtonText: "OK",
+          confirmButtonColor: "#6cabc8",
+        });
+      } finally {
+        setRecalcKeyId(null);
+      }
+    },
+    [
+      ConstrToCalc,
+      ConstrToCalcToSent,
+      setConstrToCalcToSent,
+      setMaterialsByConstruction,
+    ]
+  );
 
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key === "Enter" || event.keyCode === 13) {
-        if (template != null) {
+        if (currentItems != 0) {
           if (!modal.isOpen) {
             const activeElement = document.activeElement;
             const isInputField =
               activeElement &&
               (activeElement.tagName === "INPUT" ||
-                activeElement.tagName === "TEXTAREA");
+                activeElement.tagName === "TEXTAREA" ||
+                activeElement.tagName === "SELECT");
 
             if (!isInputField || activeElement.tagName === "INPUT") {
               event.preventDefault();
@@ -713,7 +850,7 @@ const Calculator = () => {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [template, modal.isOpen, addConstrToCalc]);
+  }, [currentItems, modal.isOpen, addConstrToCalc]);
 
   useEffect(() => {
     if (id != null && itemsWithImages.length > 0) {
@@ -781,7 +918,7 @@ const Calculator = () => {
                       className="section-icon"
                       loading="eager"
                       decoding="async"
-                      fetchPriority={section.id === "F" ? "high" : "auto"}
+                      fetchPriority={section.id === mainSections[0]?.id ? "high" : "auto"}
                       width="80"
                       height="80"
                       crossOrigin={import.meta.env.DEV ? undefined : "anonymous"}
@@ -897,7 +1034,9 @@ const Calculator = () => {
                           color: "#878181",
                         }}
                       >
-                        Нет элементов в этой подкатегории
+                        {catalogLoading
+                          ? "Загрузка каталога..."
+                          : "Нет элементов в этой подкатегории"}
                       </div>
                     )}
                   </div>
@@ -925,46 +1064,34 @@ const Calculator = () => {
                             constR={constR}
                             setConstR={setConstR}
                             currentSubCategory={currentSubCategory}
-                            currentConstr={currentConstr}
-                            setCurrentConstr={setCurrentConstr}
-                            currentFloorSealant={currentFloorSealant}
-                            setCurrentFloorSealant={setCurrentFloorSealant}
-                            currentCeilingMats={currentCeilingMats}
-                            setCurrentCeilingMats={setCurrentCeilingMats}
                             unvisible={unvisible}
                             setUnvisible={setUnvisible}
-                            currentGkla={currentGkla}
-                            setCurrentGkla={setCurrentGkla}
-                            currentWool={currentWool}
-                            setCurrentWool={setCurrentWool}
-                            profileStep={profileStep}
-                            setProfileStep={setProfileStep}
-                            facingProfileStep={facingProfileStep}
-                            setFacingProfileStep={setFacingProfileStep}
-                            dFrame={dFrame}
-                            setDFrame={setDFrame}
                             opening={opening}
                             setOpening={setOpening}
                             constrSent={constrSent}
                             onAddOpening={addOpening}
                             onDeleteOpening={delFromOpenings}
+                            calcApiSpec={calcApiSpec}
+                            calcApiValues={calcApiValues}
+                            onCalcApiValuesChange={setCalcApiValues}
                           />
 
-                          {selectedItem.template != null && (
-                            <div className="selected-item-calc-action">
-                              <button
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={addConstrToCalc}
-                                className="counter__button_plus counter__button_plus--shadow"
-                              >
-                                расчет конструкции
-                              </button>
-                            </div>
-                          )}
+                          <div className="selected-item-calc-action">
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={addConstrToCalc}
+                              disabled={calcApiLoading}
+                              className="counter__button_plus counter__button_plus--shadow"
+                            >
+                              {calcApiLoading
+                                ? "загрузка параметров"
+                                : "расчет конструкции"}
+                            </button>
+                          </div>
 
                           <div className="tables-and-buttons-container">
-                            {template != null && (
+                            {currentItems != 0 && (
                               <div className="tables-and-buttons-header">
                                 <h3 className="tables-and-buttons-title">
                                   Список конструкций
@@ -981,9 +1108,13 @@ const Calculator = () => {
                                     materialsByConstruction
                                   }
                                   legacyTableWithMaterials
+                                  onReplacementChange={
+                                    recalcConstructionReplacement
+                                  }
+                                  recalcKeyId={recalcKeyId}
                                 />
                               )}
-                            {template != null && showMakeKpButton && (
+                            {showMakeKpButton && (
                               <div className="tables-and-buttons-footer">
                                 <button
                                   type="button"

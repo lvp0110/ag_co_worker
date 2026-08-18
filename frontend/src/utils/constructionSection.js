@@ -4,6 +4,59 @@ const SECTION_TITLE_BY_ID = Object.fromEntries(
   mainSections.map((s) => [s.id, s.title])
 );
 
+/** GET /api/v2/constructions/types.code → id/иконка секции калькулятора. */
+const SECTION_BY_TYPE_CODE = {
+  floor: { id: "F", icon: "icon_floor_white.svg" },
+  ceiling: { id: "C", icon: "icon_ceiling_white.svg" },
+  cladding: { id: "L", icon: "icon_frame_white.svg" },
+  partition: { id: "W", icon: "icon_partition_white.svg" },
+};
+
+const SECTION_ORDER = ["F", "C", "L", "W"];
+
+/** id секции калькулятора (F/C/L/W) по construction_types.code. */
+export function sectionIdFromTypeCode(typeCode) {
+  const code = String(typeCode ?? "")
+    .trim()
+    .toLowerCase();
+  return SECTION_BY_TYPE_CODE[code]?.id ?? null;
+}
+
+function capitalizeSectionTitle(name) {
+  const s = String(name ?? "").trim();
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Справочник GET /api/v2/constructions/types → разделы калькулятора.
+ * Внутренние id F/C/L/W сохраняются: по ним фильтруются items и подкатегории.
+ */
+export function sectionsFromConstructionTypes(types) {
+  if (!Array.isArray(types) || types.length === 0) return [];
+  const seen = new Set();
+  const mapped = [];
+  for (const row of types) {
+    const code = String(row?.code ?? "")
+      .trim()
+      .toLowerCase();
+    const known = SECTION_BY_TYPE_CODE[code];
+    if (!known || seen.has(known.id)) continue;
+    seen.add(known.id);
+    mapped.push({
+      id: known.id,
+      title: capitalizeSectionTitle(row.name) || SECTION_TITLE_BY_ID[known.id],
+      icon: known.icon,
+      typeId: row.id,
+      typeCode: code,
+    });
+  }
+  mapped.sort(
+    (a, b) => SECTION_ORDER.indexOf(a.id) - SECTION_ORDER.indexOf(b.id)
+  );
+  return mapped;
+}
+
 /** Подкатегория расчёта (как в SubCategories.title) по id секции F/C/L/W. */
 const SECTION_LABEL_BY_TYPE = {
   ПОЛ: "Пол",

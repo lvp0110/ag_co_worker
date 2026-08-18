@@ -148,17 +148,28 @@ function LegacyConstructionMaterialsPanels({
   noArticle,
   baseTableId,
   showGeneralConstructionMaterials,
+  replacementGroups,
+  selectedReplacements,
+  onReplacementChange,
+  replacementBusy,
 }) {
+  const listProps = {
+    replacementGroups,
+    selectedReplacements,
+    onReplacementChange,
+    replacementBusy,
+  };
   return (
     <>
       {withArticle.length === 0 && noArticle.length === 0 && (
-        <MaterialsList data={[]} tableId={baseTableId} compositionOnly />
+        <MaterialsList data={[]} tableId={baseTableId} compositionOnly {...listProps} />
       )}
       {withArticle.length > 0 && (
         <MaterialsList
           data={withArticle}
           tableId={baseTableId}
           compositionOnly
+          {...listProps}
         />
       )}
       {showGeneralConstructionMaterials && noArticle.length > 0 && (
@@ -169,6 +180,7 @@ function LegacyConstructionMaterialsPanels({
           }
           sectionTitle="Общестроительные материалы"
           compositionOnly
+          {...listProps}
         />
       )}
     </>
@@ -189,6 +201,8 @@ const ConstructionList = ({
   materialsByConstruction,
   legacyTableWithMaterials = false,
   showGeneralConstructionMaterials = true,
+  onReplacementChange,
+  recalcKeyId = null,
 }) => {
   const [expandedLegacyKeyId, setExpandedLegacyKeyId] = useState(null);
   const legacyCardsLayout = useCalcConstructionCardsViewport();
@@ -242,6 +256,15 @@ const ConstructionList = ({
               constRItem.ag_id ||
               "";
             const materialsPanelId = `construction-legacy-materials-${constRItem.key_id}`;
+            const replacementPanelProps = {
+              replacementGroups: calcParams?.replacementGroups,
+              selectedReplacements: calcParams?.selectedReplacements,
+              onReplacementChange: onReplacementChange
+                ? (group, code) =>
+                    onReplacementChange(constRItem.key_id, group, code)
+                : undefined,
+              replacementBusy: recalcKeyId === constRItem.key_id,
+            };
 
             return (
               <article
@@ -331,6 +354,7 @@ const ConstructionList = ({
                       showGeneralConstructionMaterials={
                         showGeneralConstructionMaterials
                       }
+                      {...replacementPanelProps}
                     />
                   </div>
                 )}
@@ -379,6 +403,15 @@ const ConstructionList = ({
               "";
             const titleExpandable =
               legacyTableWithMaterials && legacyTitle !== "";
+            const replacementPanelProps = {
+              replacementGroups: calcParams?.replacementGroups,
+              selectedReplacements: calcParams?.selectedReplacements,
+              onReplacementChange: onReplacementChange
+                ? (group, code) =>
+                    onReplacementChange(constRItem.key_id, group, code)
+                : undefined,
+              replacementBusy: recalcKeyId === constRItem.key_id,
+            };
 
             return (
               <Fragment key={constRItem.key_id}>
@@ -454,6 +487,7 @@ const ConstructionList = ({
                         showGeneralConstructionMaterials={
                           showGeneralConstructionMaterials
                         }
+                        {...replacementPanelProps}
                       />
                     </td>
                   </tr>

@@ -13,16 +13,15 @@ const zipsCeilingApiImages = {
   205: "ceiling_zips_cinema.jpg",
 };
 
-/** Каталог API — только для картинок; title/description остаются из ItemsBase. */
-const mergeCatalogFromApi = (items) => items.map((item) => ({ ...item }));
+const sizeLimitId = (item) => item?.size_limit_id ?? item?.id;
 
 /**
- * Обогащает items изображениями из API по совпадению ag_id и Code
+ * Картинки — опционально из AllIsolationConstr; состав каталога только из v2.
  */
 const enrichItemsWithImages = (items, imagesMap, getImageUrl) => {
   return items.map((item) => {
-    if (item.c_id === "C" && zipsCeilingApiImages[item.id]) {
-      const newImgPath = zipsCeilingApiImages[item.id];
+    if (item.c_id === "C" && zipsCeilingApiImages[sizeLimitId(item)]) {
+      const newImgPath = zipsCeilingApiImages[sizeLimitId(item)];
       return {
         ...item,
         Img: getImageUrl(newImgPath),
@@ -31,7 +30,7 @@ const enrichItemsWithImages = (items, imagesMap, getImageUrl) => {
 
     let apiImage = imagesMap.get(item.ag_id);
 
-    if (!apiImage && item.id === "P") {
+    if (!apiImage && sizeLimitId(item) === "P") {
       const oldPath = "/Img_constr/floor/c2k2_1.png";
       apiImage = getImageUrl(oldPath);
     }
@@ -45,38 +44,36 @@ const enrichItemsWithImages = (items, imagesMap, getImageUrl) => {
 
 let itemsWithApiImagesCache = null;
 let itemsWithApiImagesInFlight = null;
-const ITEMS_WITH_IMAGES_CACHE_VERSION = 3;
+const ITEMS_WITH_IMAGES_CACHE_VERSION = 4;
 
 const loadItemsWithApiImages = async () => {
-  const {
-    getAllIsolationConstr,
-    buildImagesMapFromConstructions,
-    getImageUrl,
-  } = await import("../services/api.js");
+  const { listPublicConstructions } = await import(
+    "../services/constructionApi.js"
+  );
+  const { calcItemsFromPublicConstructions } = await import(
+    "../utils/isolationCalcV2.js"
+  );
+
+  const rows = await listPublicConstructions();
+  const catalog = calcItemsFromPublicConstructions(rows, ItemsBase);
 
   try {
+    const {
+      getAllIsolationConstr,
+      buildImagesMapFromConstructions,
+      getImageUrl,
+    } = await import("../services/api.js");
     const constructions = await getAllIsolationConstr();
-    const withCatalog = mergeCatalogFromApi(ItemsBase);
     const imagesMap = buildImagesMapFromConstructions(constructions);
-    return enrichItemsWithImages(withCatalog, imagesMap, getImageUrl);
+    return enrichItemsWithImages(catalog, imagesMap, getImageUrl);
   } catch {
     const { getImageUrl } = await import("../services/api.js");
-    return ItemsBase.map((item) => {
-      let img = null;
-      if (item.id === "P") {
-        const oldPath = "/Img_constr/floor/c2k2_1.png";
-        img = getImageUrl(oldPath);
-      }
-      return {
-        ...item,
-        Img: img,
-      };
-    });
+    return enrichItemsWithImages(catalog, new Map(), getImageUrl);
   }
 };
 
 /**
- * Обогащённые items с картинками из API (кэш на сессию вкладки).
+ * Каталог калькулятора: GET /api/v2/constructions/sound (кэш на сессию вкладки).
  */
 export const getItemsWithApiImages = async () => {
   if (

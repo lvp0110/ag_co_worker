@@ -4,57 +4,38 @@ import CeilingForm from "./forms/CeilingForm";
 import FacingForm from "./forms/FacingForm";
 import SoundboardForm from "./forms/SoundboardForm";
 import ConstructionParameters from "./ConstructionParameters";
-import {
-  hasFloorSealantChoice,
-  isSimpleCeilingMatCipher,
-} from "../utils/calcUlTapeFallback";
-import { isFacingTemplate } from "../utils/validation";
+import CalcApiOptions from "./CalcApiOptions";
+import { hasCalcApiOptions, defaultCalcApiValues } from "../utils/isolationCalcV2";
 
 /**
- * Компонент для отображения форм выбранного элемента
+ * Формы выбранного элемента: размеры — старые формы по секции,
+ * параметры и замена материалов — только из calculation-params / composition.
  */
 const SelectedItemForms = ({
   selectedItem,
   constR,
   setConstR,
   currentSubCategory,
-  currentConstr,
-  setCurrentConstr,
-  currentFloorSealant,
-  setCurrentFloorSealant,
-  currentCeilingMats,
-  setCurrentCeilingMats,
   unvisible,
   setUnvisible,
-  currentGkla,
-  setCurrentGkla,
-  currentWool,
-  setCurrentWool,
-  profileStep,
-  setProfileStep,
-  facingProfileStep,
-  setFacingProfileStep,
-  dFrame,
-  setDFrame,
   opening,
   setOpening,
   constrSent,
   onAddOpening,
   onDeleteOpening,
+  calcApiSpec,
+  calcApiValues,
+  onCalcApiValuesChange,
 }) => {
+  const cId = selectedItem?.c_id;
   const template = selectedItem?.template;
-  const isFloorTemplate = [1, 111, 3, 607.1, 608.1, 609.1, 610.1, 2.1, 9, 9.1].includes(template);
-  const hasFloorParameters = [3, 607.1, 608.1, 609.1, 610.1, 2.1, 9, 9.1].includes(
-    template
-  );
-  const showFloorConstructionParameters =
-    hasFloorParameters || hasFloorSealantChoice({ agId: selectedItem?.ag_id });
-  const isCeilingTemplate = [4, 5].includes(template);
-  const showCeilingConstructionParameters =
-    !isSimpleCeilingMatCipher(selectedItem?.ag_id);
-  const isFacing = isFacingTemplate(template);
+  const isFloor = cId === "F";
+  const isCeiling = cId === "C";
+  const isFacing = cId === "L" || cId === "W";
   const isSoundboardTemplate = [201, 202].includes(template);
   const isVerticalSoundboard = template === 201 && selectedItem?.c_id === "5";
+  const showApiOptions = hasCalcApiOptions(calcApiSpec);
+  const apiValues = calcApiValues || defaultCalcApiValues();
   const navigate = useNavigate();
 
   const getStartParam = () => {
@@ -68,6 +49,15 @@ const SelectedItemForms = ({
   };
 
   const displayTitle = selectedItem?.title ?? "";
+
+  const apiOptions = showApiOptions ? (
+    <CalcApiOptions
+      spec={calcApiSpec}
+      values={apiValues}
+      onChange={onCalcApiValuesChange}
+      itemId={selectedItem.id}
+    />
+  ) : null;
 
   return (
     <div className="selected-item-forms">
@@ -93,32 +83,18 @@ const SelectedItemForms = ({
         </span>
       </button>
 
-      {isFloorTemplate && (
+      {isFloor && (
         <>
           <FloorForm
             constR={constR}
             onLenXChange={(value) => setConstR({ ...constR, lenX: value })}
             onLenYChange={(value) => setConstR({ ...constR, lenY: value })}
           />
-          {showFloorConstructionParameters && (
-            <ConstructionParameters
-              mode="floor"
-              selectedItem={selectedItem}
-              template={template}
-              currentConstr={currentConstr}
-              setCurrentConstr={setCurrentConstr}
-              currentFloorSealant={currentFloorSealant}
-              setCurrentFloorSealant={setCurrentFloorSealant}
-              profileStep={profileStep}
-              setProfileStep={setProfileStep}
-              unvisible={unvisible}
-              onToggleVisible={getStartParam}
-            />
-          )}
+          {apiOptions}
         </>
       )}
 
-      {isCeilingTemplate && (
+      {isCeiling && (
         <>
           <CeilingForm
             constR={constR}
@@ -129,27 +105,7 @@ const SelectedItemForms = ({
             }
             showCeilShift={false}
           />
-          {showCeilingConstructionParameters && (
-            <ConstructionParameters
-              mode="ceiling"
-              selectedItem={selectedItem}
-              template={template}
-              currentConstr={currentConstr}
-              setCurrentConstr={setCurrentConstr}
-              currentGkla={currentGkla}
-              setCurrentGkla={setCurrentGkla}
-              currentWool={currentWool}
-              setCurrentWool={setCurrentWool}
-              currentFloorSealant={currentFloorSealant}
-              setCurrentFloorSealant={setCurrentFloorSealant}
-              currentCeilingMats={currentCeilingMats}
-              setCurrentCeilingMats={setCurrentCeilingMats}
-              constR={constR}
-              setConstR={setConstR}
-              unvisible={unvisible}
-              onToggleVisible={getStartParam}
-            />
-          )}
+          {apiOptions}
         </>
       )}
 
@@ -161,42 +117,33 @@ const SelectedItemForms = ({
             onLenZChange={(value) => setConstR({ ...constR, lenZ: value })}
             onShowParams={getStartParam}
           />
+          {apiOptions}
           {unvisible && (
             <ConstructionParameters
               selectedItem={selectedItem}
               currentSubCategory={currentSubCategory}
-              currentConstr={currentConstr}
-              setCurrentConstr={setCurrentConstr}
-              currentGkla={currentGkla}
-              setCurrentGkla={setCurrentGkla}
-              currentWool={currentWool}
-              setCurrentWool={setCurrentWool}
-              currentFloorSealant={currentFloorSealant}
-              setCurrentFloorSealant={setCurrentFloorSealant}
-              currentCeilingMats={currentCeilingMats}
-              setCurrentCeilingMats={setCurrentCeilingMats}
-              profileStep={facingProfileStep}
-              setProfileStep={setFacingProfileStep}
-              dFrame={dFrame}
-              setDFrame={setDFrame}
               opening={opening}
               setOpening={setOpening}
               openings={constrSent.Openings}
               onAddOpening={onAddOpening}
               onDeleteOpening={onDeleteOpening}
+              openingsOnly
             />
           )}
         </>
       )}
 
-      {isSoundboardTemplate && (
-        <SoundboardForm
-          constR={constR}
-          onLenXChange={(value) => setConstR({ ...constR, lenX: value })}
-          onLenYChange={(value) => setConstR({ ...constR, lenY: value })}
-          onLenZChange={(value) => setConstR({ ...constR, lenZ: value })}
-          isVertical={isVerticalSoundboard}
-        />
+      {isSoundboardTemplate && !isFloor && !isCeiling && !isFacing && (
+        <>
+          <SoundboardForm
+            constR={constR}
+            onLenXChange={(value) => setConstR({ ...constR, lenX: value })}
+            onLenYChange={(value) => setConstR({ ...constR, lenY: value })}
+            onLenZChange={(value) => setConstR({ ...constR, lenZ: value })}
+            isVertical={isVerticalSoundboard}
+          />
+          {apiOptions}
+        </>
       )}
     </div>
   );

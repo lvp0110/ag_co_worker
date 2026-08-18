@@ -231,6 +231,40 @@ router.get("/api/v2/constructions/types", (req, res) =>
   proxyRequest(req, res, "/api/v2/constructions/types")
 );
 
+router.get(
+  "/api/v2/constructions/:categoryCode/:code/calculation-params",
+  (req, res) =>
+    proxyRequest(
+      req,
+      res,
+      `/api/v2/constructions/${encodeURIComponent(req.params.categoryCode)}/${encodeURIComponent(req.params.code)}/calculation-params`
+    )
+);
+
+router.get("/api/v2/constructions/:categoryCode/:code", (req, res) =>
+  proxyRequest(
+    req,
+    res,
+    `/api/v2/constructions/${encodeURIComponent(req.params.categoryCode)}/${encodeURIComponent(req.params.code)}`
+  )
+);
+
+router.get("/api/v2/constructions/:categoryCode", (req, res) =>
+  proxyRequest(
+    req,
+    res,
+    `/api/v2/constructions/${encodeURIComponent(req.params.categoryCode)}`
+  )
+);
+
+router.post("/api/v2/calculations/isolation/by-construction", (req, res) =>
+  proxyRequest(req, res, "/api/v2/calculations/isolation/by-construction")
+);
+
+router.post("/api/v2/calculations/isolation/by-product", (req, res) =>
+  proxyRequest(req, res, "/api/v2/calculations/isolation/by-product")
+);
+
 // Несовпадения импорта (admin «Сравнение»).
 router.get("/api/v2/data/unmatched", (req, res) =>
   proxyRequest(req, res, "/api/v2/data/unmatched")

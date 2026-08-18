@@ -110,7 +110,12 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
-      '/api/v2/constructions/types': {
+      '/api/v2/constructions': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
+      '/api/v2/calculations': {
         target: authTarget,
         changeOrigin: true,
         secure: false,

@@ -2,7 +2,12 @@
  * API сервис для расчета конструкций
  */
 
-import { BASE_URL } from "./apiClient";
+import { BASE_URL, request } from "./apiClient";
+import {
+  SOUND_CONSTRUCTION_CATEGORY,
+  extractCalcProducts,
+  unwrapApiData,
+} from "../utils/isolationCalcV2.js";
 import {
   ecoSWoolFallbackCalcCode,
   isEcoSWoolCalcCode,
@@ -166,4 +171,68 @@ export const getMaterialsListViaCalc = async (code) => {
     // часть шифров или размеров может быть отклонена API
   }
   return null;
+};
+
+/** GET /api/v2/constructions/{category} — публичный каталог. */
+export const listPublicConstructions = async (
+  categoryCode = SOUND_CONSTRUCTION_CATEGORY,
+  typeCode = ""
+) => {
+  const params = new URLSearchParams();
+  if (typeCode) params.set("type", typeCode);
+  const qs = params.toString();
+  const path = `/api/v2/constructions/${encodeURIComponent(
+    categoryCode || SOUND_CONSTRUCTION_CATEGORY
+  )}${qs ? `?${qs}` : ""}`;
+  const body = await request(path, {}, { silent401: true, allowNotFound: true });
+  const data = unwrapApiData(body);
+  return Array.isArray(data) ? data : [];
+};
+
+const constructionPath = (categoryCode, code, suffix = "") => {
+  const category = encodeURIComponent(categoryCode || SOUND_CONSTRUCTION_CATEGORY);
+  const constr = encodeURIComponent(code);
+  return `/api/v2/constructions/${category}/${constr}${suffix}`;
+};
+
+/** GET /api/v2/constructions/{category}/{code}/calculation-params */
+export const getConstructionCalculationParams = async (
+  code,
+  categoryCode = SOUND_CONSTRUCTION_CATEGORY
+) => {
+  if (!code) return { construction_code: "", params: [] };
+  const body = await request(
+    constructionPath(categoryCode, code, "/calculation-params"),
+    {},
+    { allowNotFound: true, silent401: true }
+  );
+  return unwrapApiData(body) || { construction_code: code, params: [] };
+};
+
+/** GET /api/v2/constructions/{category}/{code} — состав и группы замены. */
+export const getPublicConstruction = async (
+  code,
+  categoryCode = SOUND_CONSTRUCTION_CATEGORY
+) => {
+  if (!code) return null;
+  const body = await request(
+    constructionPath(categoryCode, code),
+    {},
+    { allowNotFound: true, silent401: true }
+  );
+  return unwrapApiData(body);
+};
+
+/**
+ * POST /api/v2/calculations/isolation/by-construction
+ * @param {object[]} items IsolationCalculationRequestItem[]
+ */
+export const calculateIsolationByConstruction = async (items) => {
+  if (!items || items.length === 0) return { data: [] };
+  const body = await request("/api/v2/calculations/isolation/by-construction", {
+    method: "POST",
+    body: items,
+  });
+  const products = extractCalcProducts(body);
+  return { data: products, raw: body };
 };

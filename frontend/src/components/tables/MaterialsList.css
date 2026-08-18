@@ -33,6 +33,30 @@
   text-align: right;
 }
 
+.materials-list__replacement-select {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  margin: 0;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #c5ced6;
+  border-radius: 6px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.materials-list__replacement-select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .kp-page__services-input.kp-discount-input--selected {
   outline: 2px solid #6cabc8;
   outline-offset: 1px;

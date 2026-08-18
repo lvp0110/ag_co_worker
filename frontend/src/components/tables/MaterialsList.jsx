@@ -16,6 +16,10 @@ import {
 } from "../../services/priceApi";
 import { useCalcConstructionCardsViewport } from "../../hooks/useCalcConstructionCardsViewport";
 import { useKpNarrowViewport } from "../../hooks/useKpNarrowViewport";
+import {
+  materialOptionLabel,
+  replacementGroupForProductCode,
+} from "../../utils/isolationCalcV2";
 import "./MaterialsList.css";
 
 export const formatRub = (value) => {
@@ -115,6 +119,35 @@ export function computeTotalRubForMaterialsData(data) {
   }, 0);
 }
 
+function ReplacementMaterialSelect({
+  group,
+  selected,
+  disabled,
+  onChange,
+}) {
+  return (
+    <select
+      className="materials-list__replacement-select"
+      value={selected}
+      disabled={disabled}
+      aria-label={group.typeName || "замена материала"}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        e.stopPropagation();
+        const nextCode = e.target.value;
+        if (nextCode === selected) return;
+        onChange(group.group, nextCode);
+      }}
+    >
+      {group.materials.map((mat) => (
+        <option key={mat.code} value={mat.code}>
+          {materialOptionLabel(mat, group.materials)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** Сумма в ₽ по всем конструкциям (материалы по key_id). */
 export function computeGrandTotalRubForConstructions(
   constructions,
@@ -144,6 +177,10 @@ const MaterialsList = ({
   tableId = "table2",
   sectionTitle = "Материалы конструкции",
   compositionOnly = false,
+  replacementGroups,
+  selectedReplacements,
+  onReplacementChange,
+  replacementBusy = false,
 }) => {
   const isNarrowScreen = useKpNarrowViewport();
   const calcCardsViewport = useCalcConstructionCardsViewport();
@@ -224,7 +261,26 @@ const MaterialsList = ({
                     {showArticleCol && (
                       <td>{filterVariable(Material.Code)}</td>
                     )}
-                    <td>{materialName}</td>
+                    <td>
+                      {(() => {
+                        const group = replacementGroupForProductCode(
+                          replacementGroups,
+                          Material.Code
+                        );
+                        if (!group || !onReplacementChange) return materialName;
+                        return (
+                          <ReplacementMaterialSelect
+                            group={group}
+                            selected={
+                              selectedReplacements?.[group.group] ||
+                              String(Material.Code ?? "").trim()
+                            }
+                            disabled={replacementBusy}
+                            onChange={onReplacementChange}
+                          />
+                        );
+                      })()}
+                    </td>
                     {colInDom && (
                       <td>
                         {materialDisplayUnits(Material, { forKp: false })}

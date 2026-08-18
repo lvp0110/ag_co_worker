@@ -1,0 +1,374 @@
+import {
+  sectionIdFromCode,
+  sectionIdFromTypeCode,
+} from "./constructionSection.js";
+
+export const SOUND_CONSTRUCTION_CATEGORY = "sound";
+
+export const unwrapApiData = (body) => {
+  if (body == null) return null;
+  if (typeof body === "object" && !Array.isArray(body) && "data" in body) {
+    return body.data;
+  }
+  return body;
+};
+
+export const normalizeCalcParam = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const code = String(row.code ?? "").trim();
+  if (!code) return null;
+  const valueType = String(row.value_type || "int").trim() || "int";
+  const options = Array.isArray(row.options) ? row.options : [];
+  return {
+    code,
+    name: String(row.name || code).trim(),
+    description: String(row.description || "").trim(),
+    value_type: valueType,
+    is_required: row.is_required !== false,
+    default_value_int:
+      row.default_value_int == null ? null : Number(row.default_value_int),
+    default_value_bool:
+      row.default_value_bool == null ? null : Boolean(row.default_value_bool),
+    sort_order: Number(row.sort_order) || 0,
+    options,
+  };
+};
+
+export const normalizeReplacementGroup = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const group = Number(row.group);
+  const type = row.replacement_material_type;
+  const materials = (Array.isArray(row.materials) ? row.materials : [])
+    .map((item) => {
+      const mat =
+        item?.material && typeof item.material === "object" ? item.material : {};
+      const code = String(mat.code ?? item.code ?? "").trim();
+      if (!code) return null;
+      return {
+        code,
+        name: String(mat.name ?? item.name ?? code).trim(),
+        is_default: Boolean(item.is_default),
+      };
+    })
+    .filter(Boolean);
+  if (!Number.isFinite(group) || materials.length === 0) return null;
+  const defaultMat = materials.find((item) => item.is_default) || materials[0];
+  return {
+    group,
+    typeCode: String(type?.code ?? "").trim(),
+    typeName: String(type?.name ?? type?.code ?? `группа ${group}`).trim(),
+    materials,
+    defaultCode: defaultMat.code,
+  };
+};
+
+export const normalizeOptionalMaterial = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const mat =
+    row.material && typeof row.material === "object" ? row.material : {};
+  const code = String(mat.code ?? row.code ?? "").trim();
+  if (!code) return null;
+  return {
+    code,
+    name: String(mat.name ?? row.name ?? code).trim(),
+  };
+};
+
+export const parseCalcApiSpec = ({ paramsBody, detailBody } = {}) => {
+  const paramsData = unwrapApiData(paramsBody) || {};
+  const detail = unwrapApiData(detailBody) || {};
+  const composition = detail.composition || {};
+  const params = (Array.isArray(paramsData.params) ? paramsData.params : [])
+    .map(normalizeCalcParam)
+    .filter(Boolean)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const replacementGroups = (
+    Array.isArray(composition.replacement_groups)
+      ? composition.replacement_groups
+      : []
+  )
+    .map(normalizeReplacementGroup)
+    .filter(Boolean)
+    .sort((a, b) => a.group - b.group);
+  const optionalMaterials = (
+    Array.isArray(composition.optional_materials)
+      ? composition.optional_materials
+      : []
+  )
+    .map(normalizeOptionalMaterial)
+    .filter(Boolean);
+  return { params, replacementGroups, optionalMaterials };
+};
+
+export const hasCalcApiOptions = (spec) =>
+  Boolean(
+    spec?.params?.length ||
+      spec?.replacementGroups?.length ||
+      spec?.optionalMaterials?.length
+  );
+
+export const ADD_CEIL_SHIFT_PARAM = "add_ceil_shift";
+export const ADD_CEIL_SHIFT_DEFAULT_MM = 200;
+
+export const isAddCeilShiftParam = (param) =>
+  String(param?.code ?? "").trim() === ADD_CEIL_SHIFT_PARAM;
+
+export const addCeilShiftDefaultMm = (param) => {
+  const n = Number(param?.default_value_int);
+  return Number.isFinite(n) && n > 0 ? n : ADD_CEIL_SHIFT_DEFAULT_MM;
+};
+
+export const isAddCeilShiftEnabled = (value) => value?.enabled === true;
+
+export const clampAddCeilShiftMm = (value, param) => {
+  const min = addCeilShiftDefaultMm(param);
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min) return min;
+  return n;
+};
+
+export const defaultCalcApiValues = (spec) => {
+  const paramValues = {};
+  for (const param of spec?.params || []) {
+    if (isAddCeilShiftParam(param)) {
+      paramValues[param.code] = {
+        value_int: addCeilShiftDefaultMm(param),
+        enabled: false,
+      };
+      continue;
+    }
+    if (param.value_type === "bool") {
+      const fromDefault = param.default_value_bool;
+      const fromOption = param.options.find((opt) => opt.value_bool != null);
+      paramValues[param.code] = {
+        value_bool:
+          fromDefault != null
+            ? Boolean(fromDefault)
+            : Boolean(fromOption?.value_bool),
+      };
+    } else {
+      const fromDefault = param.default_value_int;
+      const fromOption = param.options.find((opt) => opt.value_int != null);
+      paramValues[param.code] = {
+        value_int:
+          fromDefault != null
+            ? Number(fromDefault)
+            : Number(fromOption?.value_int) || 0,
+      };
+    }
+  }
+  const selectedReplacements = {};
+  for (const group of spec?.replacementGroups || []) {
+    selectedReplacements[group.group] = group.defaultCode;
+  }
+  return {
+    paramValues,
+    selectedReplacements,
+    selectedOptionals: [],
+  };
+};
+
+export const materialOptionLabel = (item, siblings) => {
+  const name = String(item?.name || item?.code || "").trim();
+  const code = String(item?.code || "").trim();
+  const sameName =
+    Array.isArray(siblings) &&
+    siblings.filter((other) => other.name === name).length > 1;
+  if (sameName && code) return `${name} (${code})`;
+  return name || code;
+};
+
+export const buildIsolationCalcRequestItem = ({
+  code,
+  lenX = 0,
+  lenY = 0,
+  lenZ = 0,
+  area = 0,
+  perimeter = 0,
+  openings = [],
+  paramValues = {},
+  selectedReplacements = {},
+  selectedOptionals = [],
+} = {}) => {
+  const params = [];
+  for (const [paramCode, value] of Object.entries(paramValues || {})) {
+    if (!paramCode) continue;
+    if (paramCode === ADD_CEIL_SHIFT_PARAM) {
+      params.push({
+        code: paramCode,
+        value_int: clampAddCeilShiftMm(value?.value_int),
+      });
+      continue;
+    }
+    if (value?.value_bool != null && value?.value_int == null) {
+      params.push({ code: paramCode, value_bool: Boolean(value.value_bool) });
+    } else if (value?.value_int != null) {
+      params.push({ code: paramCode, value_int: Number(value.value_int) });
+    }
+  }
+  return {
+    code: String(code || "").trim(),
+    len_x: Number(lenX) || 0,
+    len_y: Number(lenY) || 0,
+    len_z: Number(lenZ) || 0,
+    area: Number(area) || 0,
+    perimeter: Number(perimeter) || 0,
+    openings: Array.isArray(openings) ? openings : [],
+    params,
+    selected_replacement_materials: Object.values(selectedReplacements || {})
+      .map((item) => String(item || "").trim())
+      .filter(Boolean),
+    selected_optional_materials: (selectedOptionals || [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean),
+  };
+};
+
+export const paramValuesFromStoredParams = (params) => {
+  const paramValues = {};
+  for (const row of Array.isArray(params) ? params : []) {
+    const code = String(row?.code ?? "").trim();
+    if (!code) continue;
+    if (row.value_bool != null && row.value_int == null) {
+      paramValues[code] = { value_bool: Boolean(row.value_bool) };
+    } else if (row.value_int != null) {
+      paramValues[code] = { value_int: Number(row.value_int) };
+    }
+  }
+  return paramValues;
+};
+
+export const selectedReplacementsMap = (
+  groups,
+  selectedCodes = [],
+  storedMap
+) => {
+  const next = {};
+  const codes = new Set(
+    (Array.isArray(selectedCodes) ? selectedCodes : []).map((item) =>
+      String(item || "").trim()
+    )
+  );
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const selected = group.materials.find((item) => codes.has(item.code));
+    next[group.group] = selected?.code || group.defaultCode;
+  }
+  if (storedMap && typeof storedMap === "object" && !Array.isArray(storedMap)) {
+    Object.assign(next, storedMap);
+  }
+  return next;
+};
+
+export const replaceableCalcGroups = (groups) =>
+  (Array.isArray(groups) ? groups : []).filter(
+    (group) => (group.materials || []).length > 1
+  );
+
+export const replacementGroupForProductCode = (groups, code) => {
+  const c = String(code ?? "").trim();
+  if (!c) return null;
+  return (
+    replaceableCalcGroups(groups).find((group) =>
+      group.materials.some((item) => item.code === c)
+    ) || null
+  );
+};
+
+export const buildIsolationCalcRequestFromStored = (sent, overrides = {}) => {
+  const groups = sent?.replacementGroups || [];
+  const selectedReplacements = selectedReplacementsMap(
+    groups,
+    sent?.selected_replacement_materials,
+    overrides.selectedReplacements ?? sent?.selectedReplacements
+  );
+  return buildIsolationCalcRequestItem({
+    code: sent?.Code,
+    lenX: sent?.LenX,
+    lenY: sent?.LenY,
+    lenZ: sent?.LenZ,
+    area: sent?.Area,
+    perimeter: sent?.Perimeter,
+    openings: sent?.Openings,
+    paramValues: paramValuesFromStoredParams(sent?.params),
+    selectedReplacements,
+    selectedOptionals:
+      overrides.selectedOptionals ?? sent?.selected_optional_materials ?? [],
+  });
+};
+
+export const extractCalcProducts = (body) => {
+  const data = unwrapApiData(body);
+  if (!Array.isArray(data) || data.length === 0) return [];
+  if (data[0] && Array.isArray(data[0].products)) {
+    return data.flatMap((item) =>
+      Array.isArray(item.products) ? item.products : []
+    );
+  }
+  return data;
+};
+
+export const paramIntValue = (paramValues, code, fallback = 0) => {
+  const value = paramValues?.[code];
+  if (value?.value_int == null) return fallback;
+  const n = Number(value.value_int);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+export const paramBoolValue = (paramValues, code, fallback = false) => {
+  const value = paramValues?.[code];
+  if (value?.value_bool == null) return fallback;
+  return Boolean(value.value_bool);
+};
+
+const pickItemsBaseMatch = (itemsBase, agId, sectionId) => {
+  const code = String(agId ?? "").trim();
+  if (!code || !Array.isArray(itemsBase)) return null;
+  const matches = itemsBase.filter((item) => String(item?.ag_id ?? "").trim() === code);
+  if (matches.length === 0) return null;
+  if (sectionId) {
+    const bySection = matches.find((item) => item.c_id === sectionId);
+    if (bySection) return bySection;
+  }
+  return matches[0];
+};
+
+export const publicConstructionTypeCode = (row) => {
+  if (!row || typeof row !== "object") return "";
+  if (row.type_code) return String(row.type_code).trim().toLowerCase();
+  if (typeof row.type === "string") return row.type.trim().toLowerCase();
+  if (row.type && typeof row.type === "object" && row.type.code) {
+    return String(row.type.code).trim().toLowerCase();
+  }
+  return "";
+};
+
+/**
+ * Публичный каталог GET /api/v2/constructions/{category}
+ * → карточки калькулятора. size_limit_id/template только для локального sizeLimits.
+ */
+export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
+  if (!Array.isArray(rows)) return [];
+  const items = [];
+  for (const row of rows) {
+    const agId = String(row?.code ?? "").trim();
+    const typeCode = publicConstructionTypeCode(row);
+    let c_id = sectionIdFromTypeCode(typeCode) || sectionIdFromCode(agId);
+    const base = pickItemsBaseMatch(itemsBase, agId, c_id);
+    if (!c_id) c_id = base?.c_id ?? null;
+    if (!agId || !c_id) continue;
+    const name = String(row?.name ?? "").trim();
+    items.push({
+      id: row.id,
+      size_limit_id: base?.id ?? null,
+      title: name || base?.title || agId,
+      description: String(base?.description || name || "").trim(),
+      c_id,
+      template: base?.template ?? null,
+      ag_id: agId,
+      weight: base?.weight,
+      type_code: typeCode,
+      construction_id: row.id,
+    });
+  }
+  return items;
+};

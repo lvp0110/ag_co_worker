@@ -19,6 +19,7 @@ import {
 } from "../utils/calcUlTapeFallback";
 import {
   getMaxLenZInMeters,
+  sizeLimitConstrId,
   normalizeFacingProfileStep,
   normalizeLagProfileStep,
 } from "../utils/validation";
@@ -266,11 +267,12 @@ const ConstructionParameters = ({
   setConstR,
   dFrame,
   setDFrame,
-  opening,
+  opening = { lenX: null, lenZ: null, Type: "OST_Doors" },
   setOpening,
-  openings,
+  openings = [],
   onAddOpening,
   onDeleteOpening,
+  openingsOnly = false,
 }) => {
   const isZIPSFacing =
     mode === "facing" &&
@@ -283,14 +285,16 @@ const ConstructionParameters = ({
   const lagProfileStep = normalizeLagProfileStep(profileStep);
 
   useEffect(() => {
+    if (openingsOnly) return;
     if (mode !== "facing" || isZIPSFacing) return;
     const normalized = normalizeFacingProfileStep(profileStep);
     if (normalized !== Number(profileStep)) {
       setProfileStep(normalized);
     }
-  }, [mode, selectedItem?.id, isZIPSFacing, profileStep, setProfileStep]);
+  }, [openingsOnly, mode, selectedItem?.id, isZIPSFacing, profileStep, setProfileStep]);
 
   useEffect(() => {
+    if (openingsOnly || !setCurrentWool) return;
     if (
       hasEcoSWoolChoice(selectedItem?.ag_id) ||
       currentWool !== WOOL_ECO_S
@@ -298,28 +302,28 @@ const ConstructionParameters = ({
       return;
     }
     setCurrentWool("default");
-  }, [selectedItem?.ag_id, currentWool, setCurrentWool]);
+  }, [openingsOnly, selectedItem?.ag_id, currentWool, setCurrentWool]);
 
   useEffect(() => {
-    if (mode !== "floor" || !selectedItem?.ag_id) return;
+    if (openingsOnly || mode !== "floor" || !selectedItem?.ag_id) return;
     const agId = selectedItem.ag_id;
     if (FLOOR_K2_PERIMETER_AG_IDS.has(agId)) {
       setCurrentConstr(agId);
     }
-  }, [mode, selectedItem?.id, selectedItem?.ag_id, setCurrentConstr]);
+  }, [openingsOnly, mode, selectedItem?.id, selectedItem?.ag_id, setCurrentConstr]);
 
   useEffect(() => {
-    if (mode !== "floor" || !selectedItem?.ag_id) return;
+    if (openingsOnly || mode !== "floor" || !selectedItem?.ag_id) return;
     const agId = selectedItem.ag_id;
     if (FLOOR_K2_PERIMETER_AG_IDS.has(agId)) return;
     const validTape = floorPerimeterTapeCodes(agId);
     if (validTape.length > 0 && !validTape.includes(currentConstr)) {
       setCurrentConstr(agId);
     }
-  }, [mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
+  }, [openingsOnly, mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
 
   useEffect(() => {
-    if (mode !== "ceiling" || !selectedItem?.ag_id) return;
+    if (openingsOnly || mode !== "ceiling" || !selectedItem?.ag_id) return;
     const agId = selectedItem.ag_id;
     if (!hasCeilingTapeChoice(agId)) {
       if (currentConstr !== agId) {
@@ -331,10 +335,10 @@ const ConstructionParameters = ({
     if (!validTape.includes(currentConstr)) {
       setCurrentConstr(agId);
     }
-  }, [mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
+  }, [openingsOnly, mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
 
   useEffect(() => {
-    if (mode !== "facing" || !selectedItem?.ag_id) return;
+    if (openingsOnly || mode !== "facing" || !selectedItem?.ag_id) return;
     const agId = selectedItem.ag_id;
     if (!hasFacingTapeChoice(agId)) {
       if (currentConstr !== agId) {
@@ -346,14 +350,15 @@ const ConstructionParameters = ({
     if (!validTape.includes(currentConstr)) {
       setCurrentConstr(agId);
     }
-  }, [mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
+  }, [openingsOnly, mode, selectedItem?.ag_id, selectedItem?.id, currentConstr, setCurrentConstr]);
 
   useEffect(() => {
+    if (openingsOnly || !setCurrentGkla) return;
     if (!selectedItem?.ag_id || hasGklaChoice(selectedItem.ag_id)) return;
     if (currentGkla !== "default") {
       setCurrentGkla("default");
     }
-  }, [selectedItem?.ag_id, currentGkla, setCurrentGkla]);
+  }, [openingsOnly, selectedItem?.ag_id, currentGkla, setCurrentGkla]);
 
   useEffect(() => {
     if (!setCurrentCeilingMats) return;
@@ -799,7 +804,7 @@ const ConstructionParameters = ({
 
   return (
     <div className="selected-item-forms__stack">
-      {showGklaChoice && (
+      {!openingsOnly && showGklaChoice && (
         <>
           <h4 className="selected-item-forms__group-heading">
             выбрать тип гипсокартона
@@ -849,6 +854,8 @@ const ConstructionParameters = ({
         </>
       )}
 
+      {!openingsOnly && (
+        <>
       {!isZIPSFacing && (
         <WoolChoiceRadios
           idPrefix="facing"
@@ -879,7 +886,7 @@ const ConstructionParameters = ({
               шаг профиля 600 мм{" "}
               {(() => {
                 const maxHeight = getMaxLenZInMeters(
-                  selectedItem.id,
+                  sizeLimitConstrId(selectedItem),
                   600,
                   currentSubCategory
                 );
@@ -903,7 +910,7 @@ const ConstructionParameters = ({
               шаг профиля 400 мм{" "}
               {(() => {
                 const maxHeight = getMaxLenZInMeters(
-                  selectedItem.id,
+                  sizeLimitConstrId(selectedItem),
                   400,
                   currentSubCategory
                 );
@@ -927,7 +934,7 @@ const ConstructionParameters = ({
               шаг профиля 300 мм{" "}
               {(() => {
                 const maxHeight = getMaxLenZInMeters(
-                  selectedItem.id,
+                  sizeLimitConstrId(selectedItem),
                   300,
                   currentSubCategory
                 );
@@ -980,6 +987,8 @@ const ConstructionParameters = ({
         value={currentFloorSealant}
         onChange={setCurrentFloorSealant}
       />
+        </>
+      )}
 
       <h4 className="selected-item-forms__group-heading">размер проема</h4>
       <input

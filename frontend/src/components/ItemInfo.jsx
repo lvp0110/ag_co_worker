@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import Items, { getItemsWithApiImages } from "../data/items.js";
+import { getItemsWithApiImages } from "../data/items.js";
 import {
   getImageUrl,
   getConstructionByCode,
@@ -71,7 +71,8 @@ const ItemInfo = () => {
           setItem(foundItem);
           
           // Для ЗИПС (id 201-205) получаем оба варианта (потолок и облицовка)
-          const isZIPS = [201, 202, 203, 204, 205].includes(foundItem.id);
+          const catalogId = foundItem.size_limit_id ?? foundItem.id;
+          const isZIPS = [201, 202, 203, 204, 205].includes(catalogId);
           let constructionRecord = null;
 
           if (isZIPS) {
@@ -231,8 +232,8 @@ const ItemInfo = () => {
         zipsItems.ceilingConstruction?.Img;
       if (ceilingImg) imageSources.push({ src: ceilingImg, label: "Потолок" });
 
-      if (zipsItems.ceiling.id && zipsCeilingCadImages[zipsItems.ceiling.id]) {
-        const ceilingCadImg = getImageUrl(zipsCeilingCadImages[zipsItems.ceiling.id]);
+      if (zipsItems.ceiling.id && zipsCeilingCadImages[zipsItems.ceiling.size_limit_id ?? zipsItems.ceiling.id]) {
+        const ceilingCadImg = getImageUrl(zipsCeilingCadImages[zipsItems.ceiling.size_limit_id ?? zipsItems.ceiling.id]);
         cadImageSources.push({ src: ceilingCadImg, label: "Потолок" });
       }
     } else if (zipsItems.lining) {
