@@ -1,34 +1,20 @@
 import { Fragment, useMemo, useState } from "react";
 import { formatRub } from "./tables/MaterialsList";
-import {
-  REGION_SELECT_OPTIONS,
-  filterVisibleRegionOptions,
-  getPriceCoefficient,
-} from "../constants/regionSelectOptions.js";
+import { catalogToRegionSelectOptions } from "../constants/regionSelectOptions.js";
 import { setPriceRegion, usePriceData } from "../services/priceApi";
 import { filterPriceRows } from "./priceSearch";
 import { usePriceNarrowViewport } from "../hooks/usePriceNarrowViewport";
 import "./PricePage.css";
-
-const getDefaultRegionOption = (availableRegionKeys) =>
-  REGION_SELECT_OPTIONS.find((option) => availableRegionKeys.has(option.regionKey))?.value ??
-  "";
 
 function formatPriceCell(value) {
   if (value == null || Number.isNaN(Number(value))) return "—";
   return formatRub(Number(value));
 }
 
-function getPriceByRegion(row, region, key, cityValue) {
+function getPriceByRegion(row, region, key) {
   if (!row) return undefined;
   const regional = region ? row.regionalPrices?.[region]?.[key] : undefined;
-  if (regional != null) {
-    if (region === "ural") {
-      const coef = getPriceCoefficient(cityValue);
-      return coef === 1 ? regional : regional * coef;
-    }
-    return regional;
-  }
+  if (regional != null) return regional;
   return row[key];
 }
 
@@ -36,7 +22,7 @@ function getPriceRowKey(row, region) {
   return `${row.article}-${region || "default"}`;
 }
 
-function PriceRowDetailCard({ row, selectedRegion, selectedCity }) {
+function PriceRowDetailCard({ row, selectedRegion }) {
   return (
     <div className="price-page__detail-card">
       <p className="price-page__detail-name">
@@ -55,7 +41,7 @@ function PriceRowDetailCard({ row, selectedRegion, selectedCity }) {
           <dt>₽ / м²</dt>
           <dd>
             {formatPriceCell(
-              getPriceByRegion(row, selectedRegion, "pricePerM2", selectedCity)
+              getPriceByRegion(row, selectedRegion, "pricePerM2")
             )}
           </dd>
         </div>
@@ -63,7 +49,7 @@ function PriceRowDetailCard({ row, selectedRegion, selectedCity }) {
           <dt>₽ / ед.</dt>
           <dd>
             {formatPriceCell(
-              getPriceByRegion(row, selectedRegion, "pricePerUnit", selectedCity)
+              getPriceByRegion(row, selectedRegion, "pricePerUnit")
             )}
           </dd>
         </div>
@@ -81,51 +67,28 @@ const PricePage = () => {
     error,
     loaded,
     loading,
-    regions,
+    regionCatalog,
     selectedRegion,
-    selectedCityRegion,
   } = usePriceData();
 
   const visibleRegionOptions = useMemo(
-    () => filterVisibleRegionOptions(regions),
-    [regions]
-  );
-
-  const availableRegionKeys = useMemo(
-    () => new Set(visibleRegionOptions.map((option) => option.regionKey)),
-    [visibleRegionOptions]
+    () => catalogToRegionSelectOptions(regionCatalog),
+    [regionCatalog]
   );
 
   const isPriceRegionsLoading = loading || (!loaded && !error);
 
-  const effectiveSelectedRegionOption = useMemo(() => {
-    if (
-      selectedCityRegion &&
-      visibleRegionOptions.some((option) => option.value === selectedCityRegion)
-    ) {
-      return selectedCityRegion;
+  const selectedRegionValue = useMemo(() => {
+    if (isPriceRegionsLoading || visibleRegionOptions.length === 0) return "";
+    if (visibleRegionOptions.some((option) => option.value === selectedRegion)) {
+      return selectedRegion;
     }
-    if (selectedRegion) {
-      const regionKey = String(selectedRegion).toLowerCase();
-      const match = visibleRegionOptions.find(
-        (option) => option.regionKey === regionKey
-      );
-      if (match) return match.value;
-    }
-    return getDefaultRegionOption(availableRegionKeys);
-  }, [
-    selectedCityRegion,
-    selectedRegion,
-    visibleRegionOptions,
-    availableRegionKeys,
-  ]);
+    return visibleRegionOptions[0]?.value ?? "";
+  }, [isPriceRegionsLoading, visibleRegionOptions, selectedRegion]);
 
   const handleRegionChange = (optionValue) => {
-    const selectedOption = REGION_SELECT_OPTIONS.find(
-      (option) => option.value === optionValue
-    );
-    if (!selectedOption) return;
-    setPriceRegion(selectedOption.regionKey, { cityValue: optionValue });
+    if (!optionValue) return;
+    setPriceRegion(optionValue);
   };
 
   const copyArticle = (row) => {
@@ -156,11 +119,7 @@ const PricePage = () => {
         <select
           id="price-region"
           className="price-page__search price-page__region-select"
-          value={
-            isPriceRegionsLoading || visibleRegionOptions.length === 0
-              ? ""
-              : effectiveSelectedRegionOption
-          }
+          value={selectedRegionValue}
           onChange={(e) => handleRegionChange(e.target.value)}
           disabled={isPriceRegionsLoading || visibleRegionOptions.length === 0}
         >
@@ -254,22 +213,12 @@ const PricePage = () => {
                       </td>
                       <td>
                         {formatPriceCell(
-                          getPriceByRegion(
-                            row,
-                            selectedRegion,
-                            "pricePerM2",
-                            effectiveSelectedRegionOption
-                          )
+                          getPriceByRegion(row, selectedRegion, "pricePerM2")
                         )}
                       </td>
                       <td>
                         {formatPriceCell(
-                          getPriceByRegion(
-                            row,
-                            selectedRegion,
-                            "pricePerUnit",
-                            effectiveSelectedRegionOption
-                          )
+                          getPriceByRegion(row, selectedRegion, "pricePerUnit")
                         )}
                       </td>
                       <td>
@@ -292,7 +241,6 @@ const PricePage = () => {
                           <PriceRowDetailCard
                             row={row}
                             selectedRegion={selectedRegion}
-                            selectedCity={effectiveSelectedRegionOption}
                           />
                         </td>
                       </tr>

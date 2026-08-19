@@ -67,6 +67,52 @@ export function filterVisibleRegionOptions(regions) {
   );
 }
 
+/** Опции селекта из справочника админки (code + name). */
+export function catalogToRegionSelectOptions(regions) {
+  return (regions ?? [])
+    .filter((row) => row && row.is_active !== false)
+    .map((row) => {
+      const code = String(row.code ?? "").trim();
+      if (!code) return null;
+      const name = String(row.name ?? "").trim();
+      return { value: code, label: name || code };
+    })
+    .filter(Boolean);
+}
+
+/** Цена базового региона × коэффициент дочернего. */
+export function scalePriceByCoefficient(value, coefficient) {
+  if (value == null || value === "") return value;
+  const coef = Number(coefficient);
+  if (!Number.isFinite(coef) || coef === 1) return value;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return value;
+  return Math.round(num * coef * 100) / 100;
+}
+
+/**
+ * Прайс базового региона → прайс дочернего (коэффициент из админки).
+ * @param {object[]} rows
+ * @param {{ regionCode?: string, coefficient?: number }} [options]
+ */
+export function applyDerivedRegionPrices(rows, { regionCode, coefficient } = {}) {
+  const region = String(regionCode ?? "").trim();
+  const coef = Number(coefficient);
+  const safeCoef = Number.isFinite(coef) && coef > 0 ? coef : 1;
+  return (rows ?? []).map((row) => {
+    const pricePerM2 = scalePriceByCoefficient(row.pricePerM2, safeCoef);
+    const pricePerUnit = scalePriceByCoefficient(row.pricePerUnit, safeCoef);
+    return {
+      ...row,
+      pricePerM2,
+      pricePerUnit,
+      regionalPrices: region
+        ? { [region]: { pricePerM2, pricePerUnit } }
+        : row.regionalPrices,
+    };
+  });
+}
+
 /** Значение региона из оффера (slug города) → подпись как в селекте прайса. */
 export function findRegionOptionByValue(value) {
   const normalized = String(value ?? "").trim().toLowerCase();

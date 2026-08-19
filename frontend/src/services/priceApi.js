@@ -1,32 +1,39 @@
 import { useEffect, useState } from "react";
 import {
+  applyDerivedRegionPrices,
   REGION_SELECT_OPTIONS,
-  findRegionOptionByValue,
-  getPriceCoefficient,
 } from "../constants/regionSelectOptions.js";
+import {
+  getPriceRegionBaseId,
+  isDirectPriceRegion,
+  normalizePriceRegion,
+  orderPriceRegions,
+} from "./adminApi.js";
 import { BASE_URL } from "./apiClient";
 
 /**
  * Прайс: GET /commerce/price-list/{regionCode}
- * Регионы: GET /admin/commerce/regions (если недоступно — ключи из REGION_SELECT_OPTIONS).
+ * Регионы: GET /commerce/regions, иначе GET /admin/commerce/regions
+ * (как в админке). Если оба недоступны — ключи из REGION_SELECT_OPTIONS.
  *
- * Раньше регионы вытаскивались из полей /api/v2/data; теперь список регионов
- * отдельный, а прайс грузится по выбранному regionCode.
+ * Список регионов — справочник админки (code + name, включая дочерние).
+ * Для дочерних регионов прайс берётся у базового и умножается на
+ * price_coefficient: в material_prices своих строк у derived нет.
  */
-const COMMERCE_REGIONS_URL = `${BASE_URL}/admin/commerce/regions`;
+const COMMERCE_REGIONS_URL = `${BASE_URL}/commerce/regions`;
+const ADMIN_COMMERCE_REGIONS_URL = `${BASE_URL}/admin/commerce/regions`;
 const commercePriceListUrl = (regionCode) =>
   `${BASE_URL}/commerce/price-list/${encodeURIComponent(regionCode)}`;
 
 /** Bump when normalized row shape / source changes — forces refetch after HMR. */
-const NORMALIZE_SCHEMA_VERSION = 3;
+const NORMALIZE_SCHEMA_VERSION = 5;
 
 const cache = {
   byArticle: new Map(),
   list: [],
   regions: [],
+  regionCatalog: [],
   selectedRegion: "",
-  /** Slug города (moscow, kazan, …) — совпадает с form.region на КП и селектом прайса. */
-  selectedCityRegion: "",
   loaded: false,
   loadingPromise: null,
   error: null,
@@ -42,6 +49,8 @@ const invalidatePriceCacheIfStale = () => {
   cache.list = [];
   cache.byArticle = new Map();
   cache.listByRegion = new Map();
+  cache.regionCatalog = [];
+  cache.regions = [];
   cache.loadingPromise = null;
   cache.error = null;
 };
@@ -58,14 +67,6 @@ const REGION_LABELS = {
   kazahstan: "Казахстан",
   kazakhstan: "Казахстан",
 };
-const HIDDEN_REGION_KEYS = new Set([
-  "minsk",
-  "минск",
-  "kasahstan",
-  "kazahstan",
-  "kazakhstan",
-  "казахстан",
-]);
 
 const listeners = new Set();
 
@@ -85,13 +86,6 @@ const normalizeRegionName = (value) => {
   return String(value).trim();
 };
 
-const shouldHideRegion = (region) => {
-  const normalized = normalizeRegionName(region).toLowerCase();
-  if (!normalized) return false;
-  const mappedLabel = REGION_LABELS[normalized]?.toLowerCase();
-  return HIDDEN_REGION_KEYS.has(normalized) || HIDDEN_REGION_KEYS.has(mappedLabel);
-};
-
 const unwrapList = (body) => {
   if (Array.isArray(body)) return body;
   if (Array.isArray(body?.data)) return body.data;
@@ -100,14 +94,29 @@ const unwrapList = (body) => {
   return [];
 };
 
-/** Регионы из селекта городов — fallback, если /admin/commerce/regions недоступен. */
-const fallbackRegionCodes = () => {
-  const codes = new Set();
+const toActiveCatalog = (rows) =>
+  orderPriceRegions(rows).filter(
+    (row) => row.is_active !== false && normalizeRegionName(row.code)
+  );
+
+/** Регионы из селекта городов — fallback, если справочник API недоступен. */
+const fallbackRegionCatalog = () => {
+  const seen = new Set();
+  const rows = [];
   for (const option of REGION_SELECT_OPTIONS) {
     const code = normalizeRegionName(option.regionKey);
-    if (code && !shouldHideRegion(code)) codes.add(code);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    rows.push({
+      id: rows.length + 1,
+      code,
+      name: REGION_LABELS[code.toLowerCase()] || option.label,
+      pricing_mode: "direct",
+      price_coefficient: 1,
+      is_active: true,
+    });
   }
-  return [...codes];
+  return rows;
 };
 
 const fetchJson = async (url) => {
@@ -124,21 +133,23 @@ const fetchJson = async (url) => {
   return response.json();
 };
 
+const catalogFromBody = (body) =>
+  toActiveCatalog(unwrapList(body).map(normalizePriceRegion).filter(Boolean));
+
 /**
- * GET /admin/commerce/regions → коды активных регионов.
- * Без прав admin возвращает null (вызывающий использует fallback).
+ * Справочник регионов как в админке.
+ * Сначала GET /commerce/regions (любой залогиненный), затем admin.
  */
-const fetchCommerceRegionCodes = async () => {
-  try {
-    const body = await fetchJson(COMMERCE_REGIONS_URL);
-    const codes = unwrapList(body)
-      .filter((row) => row && row.is_active !== false)
-      .map((row) => normalizeRegionName(row.code))
-      .filter((code) => code && !shouldHideRegion(code));
-    return codes.length ? [...new Set(codes)] : null;
-  } catch {
-    return null;
+const fetchCommerceRegionCatalog = async () => {
+  for (const url of [COMMERCE_REGIONS_URL, ADMIN_COMMERCE_REGIONS_URL]) {
+    try {
+      const rows = catalogFromBody(await fetchJson(url));
+      if (rows.length) return rows;
+    } catch {
+      // следующий источник
+    }
   }
+  return null;
 };
 
 /**
@@ -187,52 +198,93 @@ const pickDefaultRegion = (regions) => {
   return found ?? regions[0] ?? "";
 };
 
-const applyRowsToCache = (rows, regions) => {
-  cache.list = rows;
-  cache.byArticle = new Map(rows.map((row) => [row.article, row]));
-  if (Array.isArray(regions) && regions.length) {
-    cache.regions = [...regions];
-  }
+const applyCatalogToCache = (catalog) => {
+  const rows = Array.isArray(catalog) ? catalog : [];
+  cache.regionCatalog = [...rows];
+  cache.regions = rows.map((row) => row.code);
   if (!cache.regions.includes(cache.selectedRegion)) {
     cache.selectedRegion = pickDefaultRegion(cache.regions);
   }
-  cache.loaded = true;
-  cache.error = null;
 };
 
-const applyPriceCoefficient = (price, cityValue) => {
-  if (price == null) return undefined;
-  const coef = getPriceCoefficient(cityValue ?? cache.selectedCityRegion);
-  return coef === 1 ? price : price * coef;
+const applyRowsToCache = (rows) => {
+  cache.list = rows;
+  cache.byArticle = new Map(rows.map((row) => [row.article, row]));
+  cache.loaded = true;
+  cache.error = null;
 };
 
 const pickRegionalOrBasePrice = (row, selectedRegion, key) => {
   if (!row) return undefined;
   const region = normalizeRegionName(selectedRegion);
   const regional = region ? row.regionalPrices?.[region]?.[key] : undefined;
-  if (regional != null) {
-    return region === "ural" ? applyPriceCoefficient(regional) : regional;
-  }
+  if (regional != null) return regional;
+  if (row[key] != null) return row[key];
   const mskFallback = row.regionalPrices?.msk?.[key];
   if (mskFallback != null) return mskFallback;
-  return row[key];
+  return undefined;
+};
+
+const findCatalogRegion = (regionCode) => {
+  const needle = normalizeRegionName(regionCode).toLowerCase();
+  if (!needle) return null;
+  return (
+    cache.regionCatalog.find(
+      (row) => String(row.code).toLowerCase() === needle
+    ) ?? null
+  );
+};
+
+/** Дочерний регион: прайс базового × коэффициент из админки. */
+const resolvePriceListSource = (regionCode) => {
+  const row = findCatalogRegion(regionCode);
+  if (!row || isDirectPriceRegion(row)) {
+    return { fetchCode: regionCode, coefficient: 1 };
+  }
+  const baseId = getPriceRegionBaseId(row);
+  const baseFromCatalog = baseId
+    ? cache.regionCatalog.find((item) => item.id === baseId)
+    : null;
+  const baseCode = normalizeRegionName(
+    row.base_region_code || row.base_region?.code || baseFromCatalog?.code
+  );
+  return {
+    fetchCode: baseCode || regionCode,
+    coefficient: Number(row.price_coefficient) || 1,
+  };
 };
 
 const loadPriceListForRegion = async (regionCode) => {
   const region = normalizeRegionName(regionCode);
   if (!region) {
-    applyRowsToCache([], cache.regions);
+    applyRowsToCache([]);
     return;
   }
 
   if (cache.listByRegion.has(region)) {
-    applyRowsToCache(cache.listByRegion.get(region), cache.regions);
+    applyRowsToCache(cache.listByRegion.get(region));
     return;
   }
 
-  const rows = await fetchCommercePriceList(region);
+  const source = resolvePriceListSource(region);
+  let sourceRows;
+  if (cache.listByRegion.has(source.fetchCode)) {
+    sourceRows = cache.listByRegion.get(source.fetchCode);
+  } else {
+    sourceRows = await fetchCommercePriceList(source.fetchCode);
+    cache.listByRegion.set(source.fetchCode, sourceRows);
+  }
+
+  const rows =
+    source.fetchCode === region
+      ? sourceRows
+      : applyDerivedRegionPrices(sourceRows, {
+          regionCode: region,
+          coefficient: source.coefficient,
+        });
+
   cache.listByRegion.set(region, rows);
-  applyRowsToCache(rows, cache.regions);
+  applyRowsToCache(rows);
 };
 
 /**
@@ -250,12 +302,9 @@ export const ensurePriceDataLoaded = async (options = {}) => {
   const regionReady =
     cache.selectedRegion && cache.listByRegion.has(cache.selectedRegion);
 
-  if (!forceRegion && regionReady && cache.regions.length > 0) {
+  if (!forceRegion && regionReady && cache.regionCatalog.length > 0) {
     if (!cache.loaded) {
-      applyRowsToCache(
-        cache.listByRegion.get(cache.selectedRegion),
-        cache.regions
-      );
+      applyRowsToCache(cache.listByRegion.get(cache.selectedRegion));
       notifyListeners();
     }
     return;
@@ -273,9 +322,9 @@ export const ensurePriceDataLoaded = async (options = {}) => {
 
   cache.loadingPromise = (async () => {
     try {
-      if (!cache.regions.length) {
-        const fromApi = await fetchCommerceRegionCodes();
-        cache.regions = fromApi?.length ? fromApi : fallbackRegionCodes();
+      if (!cache.regionCatalog.length) {
+        const fromApi = await fetchCommerceRegionCatalog();
+        applyCatalogToCache(fromApi?.length ? fromApi : fallbackRegionCatalog());
       }
 
       if (!cache.selectedRegion || !cache.regions.includes(cache.selectedRegion)) {
@@ -325,41 +374,26 @@ export const getPriceName = (article) => {
 };
 
 export const getRegionLabel = (region) => {
-  const normalized = normalizeRegionName(region).toLowerCase();
-  return REGION_LABELS[normalized] ?? normalizeRegionName(region);
+  const code = normalizeRegionName(region);
+  if (!code) return "";
+  const fromCatalog = cache.regionCatalog.find(
+    (row) => String(row.code).toLowerCase() === code.toLowerCase()
+  );
+  if (fromCatalog?.name) return fromCatalog.name;
+  return REGION_LABELS[code.toLowerCase()] ?? code;
 };
 
-export const setPriceRegion = (region, { cityValue } = {}) => {
+export const setPriceRegion = (region) => {
   const nextRegion = normalizeRegionName(region);
-  let cityChanged = false;
-  let regionChanged = false;
-
-  if (cityValue != null && cityValue !== "") {
-    const cityOption = findRegionOptionByValue(cityValue);
-    if (cityOption && cache.selectedCityRegion !== cityOption.value) {
-      cache.selectedCityRegion = cityOption.value;
-      cityChanged = true;
-    }
-  }
-
-  if (nextRegion && nextRegion !== cache.selectedRegion) {
-    if (cache.regions.length > 0 && !cache.regions.includes(nextRegion)) {
-      if (cityChanged) notifyListeners();
-      return;
-    }
-    cache.selectedRegion = nextRegion;
-    regionChanged = true;
-  }
-
-  if (regionChanged) {
-    cache.loaded = false;
-    cache.error = null;
-    notifyListeners();
-    void ensurePriceDataLoaded({ forceRegion: cache.selectedRegion });
+  if (!nextRegion || nextRegion === cache.selectedRegion) return;
+  if (cache.regions.length > 0 && !cache.regions.includes(nextRegion)) {
     return;
   }
-
-  if (cityChanged) notifyListeners();
+  cache.selectedRegion = nextRegion;
+  cache.loaded = false;
+  cache.error = null;
+  notifyListeners();
+  void ensurePriceDataLoaded({ forceRegion: cache.selectedRegion });
 };
 
 export const getPriceState = () => ({
@@ -368,8 +402,8 @@ export const getPriceState = () => ({
   error: cache.error,
   list: cache.list,
   regions: cache.regions,
+  regionCatalog: cache.regionCatalog,
   selectedRegion: cache.selectedRegion,
-  selectedCityRegion: cache.selectedCityRegion,
 });
 
 export const usePriceData = () => {
