@@ -2,7 +2,14 @@
 /**
  * Форма ввода размеров для потолков
  */
-const CeilingForm = ({ constR, onLenXChange, onLenYChange, onAddCeilShiftChange, showCeilShift = false }) => {
+const CeilingForm = ({
+  constR,
+  onLenXChange,
+  onLenYChange,
+  onAddCeilShiftChange,
+  showCeilShift = false,
+  onShowParams,
+}) => {
   return (
     <div className="selected-item-forms__panel selected-item-forms__dimensions">
       <h4 className="selected-item-forms__title">размер конструкции</h4>
@@ -28,6 +35,15 @@ const CeilingForm = ({ constR, onLenXChange, onLenYChange, onAddCeilShiftChange,
           />
         )}
       </div>
+      {onShowParams && (
+        <button
+          type="button"
+          className="counter__button_param selected-item-forms__param-btn"
+          onClick={onShowParams}
+        >
+          параметры
+        </button>
+      )}
     </div>
   );
 };

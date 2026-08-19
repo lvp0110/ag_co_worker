@@ -86,6 +86,38 @@ describe("isolationCalcV2", () => {
     expect(values.selectedOptionals).toEqual([]);
   });
 
+  it("does not treat replacement groups as form options", () => {
+    const spec = parseCalcApiSpec({
+      detailBody: {
+        data: {
+          composition: {
+            replacement_groups: [
+              {
+                group: 1,
+                replacement_material_type: { code: "tape", name: "лента" },
+                materials: [
+                  {
+                    is_default: true,
+                    material: { code: "1185.1101", name: "Вибростек-М100" },
+                  },
+                  {
+                    is_default: false,
+                    material: {
+                      code: "1405.1101",
+                      name: "Ультракустик-лента F100",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(spec.replacementGroups).toHaveLength(1);
+    expect(hasCalcApiOptions(spec)).toBe(false);
+  });
+
   it("builds request without options when spec is empty", () => {
     const spec = parseCalcApiSpec({ paramsBody: { data: { params: [] } } });
     expect(hasCalcApiOptions(spec)).toBe(false);

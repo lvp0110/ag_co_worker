@@ -4,7 +4,6 @@ import {
   clampAddCeilShiftMm,
   isAddCeilShiftEnabled,
   isAddCeilShiftParam,
-  materialOptionLabel,
 } from "../utils/isolationCalcV2";
 
 const optionKey = (opt, index) =>
@@ -74,13 +73,6 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
     });
   };
 
-  const setReplacement = (group, code) => {
-    onChange({
-      ...values,
-      selectedReplacements: { ...values.selectedReplacements, [group]: code },
-    });
-  };
-
   const toggleOptional = (code, checked) => {
     const current = values.selectedOptionals || [];
     onChange({
@@ -91,9 +83,13 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
     });
   };
 
+  const params = spec.params || [];
+  const optionals = spec.optionalMaterials || [];
+  if (!params.length && !optionals.length) return null;
+
   return (
     <div className="selected-item-forms__stack">
-      {(spec.params || []).map((param) => {
+      {params.map((param) => {
         const current = values.paramValues?.[param.code] || {};
         const isBool = param.value_type === "bool";
         const options = param.options || [];
@@ -160,36 +156,12 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
         );
       })}
 
-      {(spec.replacementGroups || []).map((group) => (
-        <div key={group.group}>
-          <h4 className="selected-item-forms__group-heading">{group.typeName}</h4>
-          {group.materials.map((mat) => {
-            const id = `repl_${group.group}_${itemId}_${mat.code}`;
-            return (
-              <div className="radio-option" key={mat.code}>
-                <input
-                  className="radio"
-                  type="radio"
-                  id={id}
-                  name={`repl_${group.group}_${itemId}`}
-                  checked={values.selectedReplacements?.[group.group] === mat.code}
-                  onChange={() => setReplacement(group.group, mat.code)}
-                />
-                <label className="label" htmlFor={id}>
-                  {materialOptionLabel(mat, group.materials)}
-                </label>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-
-      {(spec.optionalMaterials || []).length > 0 && (
+      {optionals.length > 0 && (
         <div>
           <h4 className="selected-item-forms__group-heading">
             дополнительные материалы
           </h4>
-          {spec.optionalMaterials.map((mat) => {
+          {optionals.map((mat) => {
             const id = `opt_${itemId}_${mat.code}`;
             const checked = (values.selectedOptionals || []).includes(mat.code);
             return (

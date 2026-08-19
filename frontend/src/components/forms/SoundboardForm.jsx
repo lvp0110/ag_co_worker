@@ -2,7 +2,14 @@
 /**
  * Форма ввода размеров для звукобордов
  */
-const SoundboardForm = ({ constR, onLenXChange, onLenYChange, onLenZChange, isVertical = false }) => {
+const SoundboardForm = ({
+  constR,
+  onLenXChange,
+  onLenYChange,
+  onLenZChange,
+  isVertical = false,
+  onShowParams,
+}) => {
   return (
     <div className="selected-item-forms__panel selected-item-forms__dimensions">
       <h4 className="selected-item-forms__title">размер конструкции</h4>
@@ -39,6 +46,15 @@ const SoundboardForm = ({ constR, onLenXChange, onLenYChange, onLenZChange, isVe
           </>
         )}
       </div>
+      {onShowParams && (
+        <button
+          type="button"
+          className="counter__button_param selected-item-forms__param-btn"
+          onClick={onShowParams}
+        >
+          параметры
+        </button>
+      )}
     </div>
   );
 };

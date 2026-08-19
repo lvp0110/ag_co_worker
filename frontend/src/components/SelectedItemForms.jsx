@@ -9,7 +9,8 @@ import { hasCalcApiOptions, defaultCalcApiValues } from "../utils/isolationCalcV
 
 /**
  * Формы выбранного элемента: размеры — старые формы по секции,
- * параметры и замена материалов — только из calculation-params / composition.
+ * параметры и доп. материалы — из calculation-params / composition.
+ * Замена материалов — в таблице состава, не в этой форме.
  */
 const SelectedItemForms = ({
   selectedItem,
@@ -50,14 +51,16 @@ const SelectedItemForms = ({
 
   const displayTitle = selectedItem?.title ?? "";
 
-  const apiOptions = showApiOptions ? (
-    <CalcApiOptions
-      spec={calcApiSpec}
-      values={apiValues}
-      onChange={onCalcApiValuesChange}
-      itemId={selectedItem.id}
-    />
-  ) : null;
+  const toggleParams = showApiOptions || isFacing ? getStartParam : undefined;
+  const apiOptions =
+    showApiOptions && unvisible ? (
+      <CalcApiOptions
+        spec={calcApiSpec}
+        values={apiValues}
+        onChange={onCalcApiValuesChange}
+        itemId={selectedItem.id}
+      />
+    ) : null;
 
   return (
     <div className="selected-item-forms">
@@ -89,6 +92,7 @@ const SelectedItemForms = ({
             constR={constR}
             onLenXChange={(value) => setConstR({ ...constR, lenX: value })}
             onLenYChange={(value) => setConstR({ ...constR, lenY: value })}
+            onShowParams={toggleParams}
           />
           {apiOptions}
         </>
@@ -104,6 +108,7 @@ const SelectedItemForms = ({
               setConstR({ ...constR, AddCeilShift: value })
             }
             showCeilShift={false}
+            onShowParams={toggleParams}
           />
           {apiOptions}
         </>
@@ -115,7 +120,7 @@ const SelectedItemForms = ({
             constR={constR}
             onLenXChange={(value) => setConstR({ ...constR, lenX: value })}
             onLenZChange={(value) => setConstR({ ...constR, lenZ: value })}
-            onShowParams={getStartParam}
+            onShowParams={toggleParams}
           />
           {apiOptions}
           {unvisible && (
@@ -141,6 +146,7 @@ const SelectedItemForms = ({
             onLenYChange={(value) => setConstR({ ...constR, lenY: value })}
             onLenZChange={(value) => setConstR({ ...constR, lenZ: value })}
             isVertical={isVerticalSoundboard}
+            onShowParams={toggleParams}
           />
           {apiOptions}
         </>

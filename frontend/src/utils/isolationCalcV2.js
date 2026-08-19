@@ -101,11 +101,7 @@ export const parseCalcApiSpec = ({ paramsBody, detailBody } = {}) => {
 };
 
 export const hasCalcApiOptions = (spec) =>
-  Boolean(
-    spec?.params?.length ||
-      spec?.replacementGroups?.length ||
-      spec?.optionalMaterials?.length
-  );
+  Boolean(spec?.params?.length || spec?.optionalMaterials?.length);
 
 export const ADD_CEIL_SHIFT_PARAM = "add_ceil_shift";
 export const ADD_CEIL_SHIFT_DEFAULT_MM = 200;
