@@ -58,6 +58,7 @@ import {
   updateAdminMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
+import AdminImagesPanel from "./AdminImagesPanel.jsx";
 import "./AdminPage.css";
 
 const MATERIAL_USAGE_FILTERS = [
@@ -128,10 +129,16 @@ const MATERIAL_COLUMNS = [
   },
   { key: "units", label: "Ед.", className: "admin-page__col--compact" },
   {
-    key: "visible",
-    label: "Видим",
-    className: "admin-page__col--compact",
-    render: (row) => cell(row.visible),
+    key: "updated_at",
+    label: "Обновлён",
+    className: "admin-page__col--datetime",
+    render: (row) => {
+      if (!row.updated_at) return "—";
+      const d = new Date(row.updated_at);
+      return Number.isNaN(d.getTime())
+        ? String(row.updated_at)
+        : d.toLocaleString("ru-RU");
+    },
   },
 ];
 
@@ -748,6 +755,16 @@ function groupTypeLabel(group) {
     (typeof nested === "string" ? nested : null) ||
     (group.group != null ? `Группа ${group.group}` : "Замена")
   );
+}
+
+const NEW_REPLACEMENT_GROUP = "new";
+
+function replacementGroupOptionLabel(group) {
+  const typeLabel = groupTypeLabel(group);
+  if (group.group == null || group.group === "") return typeLabel;
+  const groupNo = String(group.group);
+  if (typeLabel === `Группа ${groupNo}`) return typeLabel;
+  return `${typeLabel} (${groupNo})`;
 }
 
 function cell(value) {
@@ -2492,6 +2509,7 @@ function ConstructionDetail({
   const [defaultAddQuery, setDefaultAddQuery] = useState("");
   const [defaultAddCalcTypeId, setDefaultAddCalcTypeId] = useState("");
   const [promoteItemId, setPromoteItemId] = useState("");
+  const [promoteGroupId, setPromoteGroupId] = useState("");
   const [promoteTypeId, setPromoteTypeId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2860,6 +2878,7 @@ function ConstructionDetail({
         setDefaultAddQuery("");
         setDefaultAddCalcTypeId("");
         setPromoteItemId("");
+        setPromoteGroupId("");
         setPromoteTypeId("");
       } catch (err) {
         if (!cancelled) {
@@ -2887,6 +2906,7 @@ function ConstructionDetail({
           setDefaultAddQuery("");
           setDefaultAddCalcTypeId("");
           setPromoteItemId("");
+          setPromoteGroupId("");
           setPromoteTypeId("");
           setError(formatRequestError(err));
         }
@@ -3216,13 +3236,8 @@ function ConstructionDetail({
 
   const handlePromoteDefaultToReplacement = async () => {
     const itemId = Number(promoteItemId);
-    const typeId = Number(promoteTypeId);
     if (!Number.isFinite(itemId) || itemId <= 0) {
       setPromoteError("Выберите материал из списка по умолчанию.");
-      return;
-    }
-    if (!Number.isFinite(typeId) || typeId <= 0) {
-      setPromoteError("Выберите тип группы замены.");
       return;
     }
 
@@ -3238,11 +3253,39 @@ function ConstructionDetail({
       return;
     }
 
-    const nextGroup =
-      replacementGroups.reduce(
-        (max, g) => Math.max(max, Number(g.group) || 0),
-        0
-      ) + 1;
+    const creatingNewGroup = promoteGroupId === NEW_REPLACEMENT_GROUP;
+    let nextGroup;
+    let typeId;
+    let isDefault;
+
+    if (creatingNewGroup) {
+      typeId = Number(promoteTypeId);
+      if (!Number.isFinite(typeId) || typeId <= 0) {
+        setPromoteError("Выберите тип новой группы замены.");
+        return;
+      }
+      nextGroup =
+        replacementGroups.reduce(
+          (max, g) => Math.max(max, Number(g.group) || 0),
+          0
+        ) + 1;
+      isDefault = true;
+    } else {
+      const group = replacementGroups.find(
+        (item) => String(item.group) === String(promoteGroupId)
+      );
+      nextGroup = Number(group?.group);
+      typeId = Number(getReplacementMaterialTypeId(group));
+      if (!Number.isFinite(nextGroup) || nextGroup <= 0) {
+        setPromoteError("Выберите группу замены.");
+        return;
+      }
+      if (!Number.isFinite(typeId) || typeId <= 0) {
+        setPromoteError("У выбранной группы нет replacement_material_type_id.");
+        return;
+      }
+      isDefault = false;
+    }
 
     setPromoting(true);
     setPromoteError(null);
@@ -3251,7 +3294,7 @@ function ConstructionDetail({
         id: materialId,
         weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
         sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
-        is_default: true,
+        is_default: isDefault,
         replacement_group: nextGroup,
         replacement_material_type_id: typeId,
         calculation_type_id: getCalculationTypeId(row),
@@ -3566,27 +3609,57 @@ function ConstructionDetail({
             </select>
             <select
               className="admin-page__select"
-              value={promoteTypeId}
-              disabled={promoting || !replacementMaterialTypes.length}
+              value={promoteGroupId}
+              disabled={promoting}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
-                setPromoteTypeId(e.target.value);
+                const next = e.target.value;
+                setPromoteGroupId(next);
+                if (next !== NEW_REPLACEMENT_GROUP) setPromoteTypeId("");
               }}
               aria-label="Тип группы замены"
             >
-              <option value="">Тип группы…</option>
-              {replacementMaterialTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.name || type.code}
-                  {type.code ? ` (${type.code})` : ""}
-                </option>
-              ))}
+              <option value="">Группа замены…</option>
+              <option value={NEW_REPLACEMENT_GROUP}>Новая группа</option>
+              {replacementGroups
+                .filter((group) => Number(group.group) > 0)
+                .map((group) => (
+                  <option key={`rg-${group.group}`} value={String(group.group)}>
+                    {replacementGroupOptionLabel(group)}
+                  </option>
+                ))}
             </select>
+            {promoteGroupId === NEW_REPLACEMENT_GROUP ? (
+              <select
+                className="admin-page__select"
+                value={promoteTypeId}
+                disabled={promoting || !replacementMaterialTypes.length}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  setPromoteTypeId(e.target.value);
+                }}
+                aria-label="Тип новой группы замены"
+              >
+                <option value="">Тип группы…</option>
+                {replacementMaterialTypes.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name || type.code}
+                    {type.code ? ` (${type.code})` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <button
               type="button"
               className="admin-page__btn admin-page__btn--inline"
-              disabled={promoting || !promoteItemId || !promoteTypeId}
+              disabled={
+                promoting ||
+                !promoteItemId ||
+                !promoteGroupId ||
+                (promoteGroupId === NEW_REPLACEMENT_GROUP && !promoteTypeId)
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 handlePromoteDefaultToReplacement();
@@ -4788,7 +4861,8 @@ export default function AdminPage() {
   const listKey =
     listParam === "constructions" ||
     listParam === "materials" ||
-    listParam === "regions"
+    listParam === "regions" ||
+    listParam === "images"
       ? listParam
       : null;
 
@@ -4832,6 +4906,16 @@ export default function AdminPage() {
             >
               Регионы
             </NavLink>
+            <NavLink
+              to="/admin?list=images"
+              className={() =>
+                `admin-page__tab${
+                  listKey === "images" ? " admin-page__tab--active" : ""
+                }`
+              }
+            >
+              Изображения
+            </NavLink>
           </nav>
         </div>
 
@@ -4839,8 +4923,10 @@ export default function AdminPage() {
           <MaterialsListPanel />
         ) : listKey === "constructions" ? (
           <ConstructionsListPanel />
-        ) : (
+        ) : listKey === "regions" ? (
           <RegionsListPanel />
+        ) : (
+          <AdminImagesPanel />
         )}
       </div>
     </AdminGate>

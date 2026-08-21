@@ -19,7 +19,9 @@ export const normalizeCalcParam = (row) => {
   if (!code) return null;
   const valueType = String(row.value_type || "int").trim() || "int";
   const options = Array.isArray(row.options) ? row.options : [];
+  const id = Number(row.id ?? row.param_id);
   return {
+    id: Number.isFinite(id) && id > 0 ? id : null,
     code,
     name: String(row.name || code).trim(),
     description: String(row.description || "").trim(),
@@ -32,6 +34,144 @@ export const normalizeCalcParam = (row) => {
     sort_order: Number(row.sort_order) || 0,
     options,
   };
+};
+
+const pickText = (...values) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
+
+const warningFromPayload = (payload) => {
+  if (!payload || typeof payload !== "object") return null;
+  const title = pickText(
+    payload.title,
+    payload.name,
+    payload.heading,
+    payload.header
+  );
+  const message = pickText(
+    payload.html,
+    payload.text,
+    payload.message,
+    payload.content,
+    payload.body,
+    payload.description
+  );
+  if (!title && !message) return null;
+  return { title, message };
+};
+
+export const normalizeSizeLimitWarning = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    const message = raw.trim();
+    return message ? { title: "", message } : null;
+  }
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const warning = normalizeSizeLimitWarning(item);
+      if (warning) return warning;
+    }
+    return null;
+  }
+  if (typeof raw !== "object") return null;
+  const fromPayload = warningFromPayload(raw.payload);
+  const fromSelf = warningFromPayload({
+    ...raw,
+    payload: undefined,
+    content: undefined,
+    warning: undefined,
+  });
+  const nested =
+    normalizeSizeLimitWarning(raw.content) ||
+    (raw.warning && raw.warning !== raw
+      ? normalizeSizeLimitWarning(raw.warning)
+      : null);
+  const title = pickText(
+    fromSelf?.title,
+    raw.name,
+    fromPayload?.title,
+    nested?.title
+  );
+  const message = pickText(
+    fromPayload?.message,
+    fromSelf?.message,
+    nested?.message
+  );
+  if (!title && !message) return null;
+  return { title, message };
+};
+
+export const normalizeSizeLimitCondition = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const paramId = Number(
+    row.construction_system_param_id ?? row.param_id ?? row.id
+  );
+  const code = String(
+    row.code ?? row.param_code ?? row.param?.code ?? ""
+  ).trim();
+  const hasInt = row.value_int != null;
+  const hasBool = row.value_bool != null;
+  if (!code && !(Number.isFinite(paramId) && paramId > 0) && !hasInt && !hasBool) {
+    return null;
+  }
+  return {
+    construction_system_param_id:
+      Number.isFinite(paramId) && paramId > 0 ? paramId : null,
+    code,
+    value_int: hasInt ? Number(row.value_int) : null,
+    value_bool: hasBool ? Boolean(row.value_bool) : null,
+  };
+};
+
+export const normalizeSizeLimit = (row, warningsById = new Map()) => {
+  if (!row || typeof row !== "object") return null;
+  const dimension = String(row.dimension || "").trim();
+  if (dimension !== "len_x" && dimension !== "len_z" && dimension !== "len_y") {
+    return null;
+  }
+  const mode = String(row.mode || "common").trim() || "common";
+  const warningId = String(row.warning_content_id ?? row.warning_id ?? "").trim();
+  const warning =
+    normalizeSizeLimitWarning(row.warning) ||
+    normalizeSizeLimitWarning(row.warning_content) ||
+    normalizeSizeLimitWarning(row.warning_block) ||
+    normalizeSizeLimitWarning(row.warning_blocks) ||
+    (warningId ? warningsById.get(warningId) : null) ||
+    null;
+  const minRaw = Number(row.min_value);
+  const maxRaw = Number(row.max_value);
+  return {
+    id: Number(row.id) || null,
+    dimension,
+    mode: mode === "parametric" ? "parametric" : "common",
+    min_value: Number.isFinite(minRaw) && minRaw > 0 ? minRaw : null,
+    max_value: Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : null,
+    sort_order: Number(row.sort_order) || 0,
+    warning_content_id: warningId || "",
+    warning,
+    conditions: (Array.isArray(row.conditions) ? row.conditions : [])
+      .map(normalizeSizeLimitCondition)
+      .filter(Boolean),
+  };
+};
+
+const warningsMapFromParamsData = (paramsData) => {
+  const map = new Map();
+  const rows = [
+    ...(Array.isArray(paramsData?.warnings) ? paramsData.warnings : []),
+    ...(Array.isArray(paramsData?.warning_blocks)
+      ? paramsData.warning_blocks
+      : []),
+  ];
+  for (const row of rows) {
+    const id = String(row?.id ?? row?.content_id ?? "").trim();
+    const warning = normalizeSizeLimitWarning(row);
+    if (id && warning) map.set(id, warning);
+  }
+  return map;
 };
 
 export const normalizeReplacementGroup = (row) => {
@@ -82,6 +222,17 @@ export const parseCalcApiSpec = ({ paramsBody, detailBody } = {}) => {
     .map(normalizeCalcParam)
     .filter(Boolean)
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const warningsById = warningsMapFromParamsData(paramsData);
+  const sizeLimits = (
+    Array.isArray(paramsData.size_limits)
+      ? paramsData.size_limits
+      : Array.isArray(paramsData.sizeLimits)
+        ? paramsData.sizeLimits
+        : []
+  )
+    .map((row) => normalizeSizeLimit(row, warningsById))
+    .filter(Boolean)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   const replacementGroups = (
     Array.isArray(composition.replacement_groups)
       ? composition.replacement_groups
@@ -97,7 +248,7 @@ export const parseCalcApiSpec = ({ paramsBody, detailBody } = {}) => {
   )
     .map(normalizeOptionalMaterial)
     .filter(Boolean);
-  return { params, replacementGroups, optionalMaterials };
+  return { params, replacementGroups, optionalMaterials, sizeLimits };
 };
 
 export const hasCalcApiOptions = (spec) =>
@@ -338,6 +489,21 @@ export const publicConstructionTypeCode = (row) => {
   return "";
 };
 
+/** url основной картинки из images[] (is_primary, иначе меньший sort_order). */
+export const pickEntityImageUrl = (images) => {
+  if (!Array.isArray(images) || images.length === 0) return "";
+  const ranked = [...images].sort((a, b) => {
+    const pa = a?.is_primary ? 1 : 0;
+    const pb = b?.is_primary ? 1 : 0;
+    if (pb !== pa) return pb - pa;
+    const sa = Number(a?.sort_order) || 0;
+    const sb = Number(b?.sort_order) || 0;
+    if (sa !== sb) return sa - sb;
+    return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+  });
+  return String(ranked[0]?.url || "").trim();
+};
+
 /**
  * Публичный каталог GET /api/v2/constructions/{category}
  * → карточки калькулятора. size_limit_id/template только для локального sizeLimits.
@@ -353,6 +519,7 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
     if (!c_id) c_id = base?.c_id ?? null;
     if (!agId || !c_id) continue;
     const name = String(row?.name ?? "").trim();
+    const images = Array.isArray(row.images) ? row.images : [];
     items.push({
       id: row.id,
       size_limit_id: base?.id ?? null,
@@ -364,6 +531,8 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
       weight: base?.weight,
       type_code: typeCode,
       construction_id: row.id,
+      imageUrl: pickEntityImageUrl(images),
+      images,
     });
   }
   return items;

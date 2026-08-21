@@ -57,6 +57,17 @@
  *   PUT /admin/constructions/{id}/optional-materials/{itemId}
  *     → body: { id, weight, sort_order, calculation_type_id, calculation_note }
  *   DELETE /admin/constructions/{id}/optional-materials/{itemId}
+ *   GET /admin/images/types
+ *     → { id, code, name, description }[]
+ *   POST /admin/images/types  JSON ImageTypeUpsert { code, name, description }
+ *   PUT /admin/images/types/{id}
+ *   DELETE /admin/images/types/{id}
+ *   POST /admin/images/upload  multipart: entity_type, image_type_code, entity_code?, file
+ *     → { file_name, url, mime_type, file_size, width, height }
+ *   GET /admin/images?entity_type=&entity_id=
+ *   POST /admin/images  JSON AdminEntityImageUpsert (привязка уже загруженного файла)
+ *   PUT /admin/images/{id}
+ *   DELETE /admin/images/{id}  (только привязка, не файл)
  *
  * Same-origin через Vite / frontend server.js proxy → AUTH_SERVICE_URL.
  * Нужна cookie access_token (роль admin на стороне сервиса).
@@ -73,6 +84,24 @@ const unwrapList = (body) => {
   if (Array.isArray(body?.items)) return body.items;
   return [];
 };
+
+const unwrapData = (body) => {
+  if (body == null) return null;
+  if (typeof body === "object" && !Array.isArray(body) && "data" in body) {
+    return body.data ?? null;
+  }
+  return body;
+};
+
+const csrfHeaders = async () => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  return headers;
+};
+
+export const IMAGE_ENTITY_CONSTR = "constr";
+export const IMAGE_ENTITY_MATERIAL = "material";
 
 /** Ссылка { id, code, name } → плоские поля с префиксом (для UI/поиска). */
 const flattenRef = (prefix, ref, fallback = {}) => {
@@ -355,6 +384,7 @@ export const normalizeAdminMaterial = (row) => {
     type: typeObj,
     usage: row.usage == null ? "" : String(row.usage).trim(),
     visible: Boolean(row.visible),
+    updated_at: row.updated_at ?? null,
   };
 };
 
@@ -1481,3 +1511,211 @@ export const filterMaterialsByUsage = (materials, usage) => {
 /** Каталог materials с usage === "si" (звукоизоляция). */
 export const filterMaterialsByUsageSi = (materials) =>
   filterMaterialsByUsage(materials, "si");
+
+/** Нормализует запись справочника GET /admin/images/types. */
+export const normalizeImageType = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    ...row,
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+    description: row.description == null ? "" : String(row.description).trim(),
+  };
+};
+
+/** Ответ POST /admin/images/upload. */
+export const normalizeImageUpload = (row) => {
+  if (!row || typeof row !== "object") return null;
+  return {
+    file_name: row.file_name == null ? "" : String(row.file_name).trim(),
+    url: row.url == null ? "" : String(row.url).trim(),
+    mime_type: row.mime_type == null ? "" : String(row.mime_type).trim(),
+    file_size: Number(row.file_size) || 0,
+    width: Number(row.width) || 0,
+    height: Number(row.height) || 0,
+  };
+};
+
+const fileNameFromImageUrl = (url) => {
+  const s = String(url || "").trim();
+  const marker = "/api/v2/public/image/";
+  const index = s.indexOf(marker);
+  if (index < 0) return "";
+  try {
+    return decodeURIComponent(s.slice(index + marker.length).split("?")[0]).replace(
+      /^\/+/,
+      ""
+    );
+  } catch {
+    return s.slice(index + marker.length).split("?")[0];
+  }
+};
+
+/** Элемент GET /admin/images и images[] публичных конструкций. */
+export const normalizeEntityImage = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const typeObj =
+    row.type && typeof row.type === "object" && !Array.isArray(row.type)
+      ? normalizeImageType(row.type)
+      : null;
+  const id = Number(row.id);
+  const url = row.url == null ? "" : String(row.url).trim();
+  const fileName =
+    (row.file_name == null ? "" : String(row.file_name).trim()) ||
+    fileNameFromImageUrl(url);
+  return {
+    ...row,
+    id: Number.isFinite(id) && id > 0 ? id : null,
+    entity_type: row.entity_type == null ? "" : String(row.entity_type).trim(),
+    entity_id: Number(row.entity_id) || 0,
+    type: typeObj,
+    image_type_id: Number(row.image_type_id ?? typeObj?.id) || 0,
+    file_name: fileName,
+    url,
+    mime_type: row.mime_type == null ? "" : String(row.mime_type).trim(),
+    file_size: Number(row.file_size) || 0,
+    width: Number(row.width) || 0,
+    height: Number(row.height) || 0,
+    title: row.title == null ? "" : String(row.title).trim(),
+    alt: row.alt == null ? "" : String(row.alt).trim(),
+    sort_order: Number(row.sort_order) || 0,
+    is_primary: Boolean(row.is_primary),
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
+  };
+};
+
+const buildEntityImageUpsertBody = (payload) => ({
+  entity_type: String(payload.entity_type || "").trim(),
+  entity_id: Number(payload.entity_id) || 0,
+  image_type_id: Number(payload.image_type_id) || 0,
+  file_name: String(payload.file_name || "").trim(),
+  mime_type: String(payload.mime_type || "").trim(),
+  file_size: Number(payload.file_size) || 0,
+  width: Number(payload.width) || 0,
+  height: Number(payload.height) || 0,
+  title: String(payload.title || "").trim(),
+  alt: String(payload.alt || "").trim(),
+  sort_order: Number(payload.sort_order) || 0,
+  is_primary: Boolean(payload.is_primary),
+});
+
+/** GET /admin/images/types — справочник типов изображений. */
+export const listAdminImageTypes = async () => {
+  const body = await request("/admin/images/types");
+  return unwrapList(body).map(normalizeImageType).filter(Boolean);
+};
+
+const buildImageTypeUpsertBody = (payload) => ({
+  code: String(payload.code || "").trim(),
+  name: String(payload.name || "").trim(),
+  description: String(payload.description || "").trim(),
+});
+
+/** POST /admin/images/types — создать тип. */
+export const createAdminImageType = async (payload) => {
+  const headers = await csrfHeaders();
+  return request("/admin/images/types", {
+    method: "POST",
+    headers,
+    body: buildImageTypeUpsertBody(payload),
+  });
+};
+
+/** PUT /admin/images/types/{id} — обновить тип. */
+export const updateAdminImageType = async (id, payload) => {
+  const headers = await csrfHeaders();
+  return request(`/admin/images/types/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers,
+    body: buildImageTypeUpsertBody(payload),
+  });
+};
+
+/** DELETE /admin/images/types/{id} — удалить тип. */
+export const deleteAdminImageType = async (id) => {
+  const headers = await csrfHeaders();
+  return request(`/admin/images/types/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers,
+  });
+};
+
+/**
+ * POST /admin/images/upload — бинарный файл в хранилище (без привязки к сущности).
+ * @param {{ entity_type: string, image_type_code: string, entity_code?: string, file: File }} payload
+ */
+export const uploadAdminImage = async (payload) => {
+  const headers = await csrfHeaders();
+  const form = new FormData();
+  form.append("entity_type", String(payload.entity_type || "").trim());
+  form.append("image_type_code", String(payload.image_type_code || "").trim());
+  const entityCode = String(payload.entity_code || "").trim();
+  if (entityCode) form.append("entity_code", entityCode);
+  form.append("file", payload.file);
+
+  const body = await request("/admin/images/upload", {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  return normalizeImageUpload(unwrapData(body) ?? body);
+};
+
+/**
+ * GET /admin/images?entity_type=&entity_id=
+ * @param {string} entityType constr | material
+ * @param {string|number} entityId
+ */
+export const listAdminEntityImages = async (entityType, entityId) => {
+  const params = new URLSearchParams({
+    entity_type: String(entityType || "").trim(),
+    entity_id: String(entityId),
+  });
+  const body = await request(`/admin/images?${params}`);
+  return unwrapList(body).map(normalizeEntityImage).filter(Boolean);
+};
+
+/**
+ * POST /admin/images — привязать уже загруженный файл к сущности.
+ * @param {object} payload AdminEntityImageUpsert
+ */
+export const createAdminEntityImage = async (payload) => {
+  const headers = await csrfHeaders();
+  const body = await request("/admin/images", {
+    method: "POST",
+    headers,
+    body: buildEntityImageUpsertBody(payload),
+  });
+  return normalizeEntityImage(unwrapData(body) ?? body);
+};
+
+/**
+ * PUT /admin/images/{id} — метаданные и привязка.
+ * @param {string|number} id
+ * @param {object} payload AdminEntityImageUpsert
+ */
+export const updateAdminEntityImage = async (id, payload) => {
+  const headers = await csrfHeaders();
+  const body = await request(`/admin/images/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers,
+    body: buildEntityImageUpsertBody(payload),
+  });
+  return normalizeEntityImage(unwrapData(body) ?? body);
+};
+
+/**
+ * DELETE /admin/images/{id} — снять привязку (файл в хранилище не трогает).
+ * @param {string|number} id
+ */
+export const deleteAdminEntityImage = async (id) => {
+  const headers = await csrfHeaders();
+  return request(`/admin/images/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers,
+  });
+};

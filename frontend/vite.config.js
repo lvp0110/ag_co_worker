@@ -96,6 +96,11 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      '/admin/images': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
       // Commerce price-list + regions (same auth cookies as /admin).
       '/commerce': {
         target: authTarget,

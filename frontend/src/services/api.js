@@ -22,6 +22,11 @@ const resolveConstrPreviewUrl = (processedImageName) => {
   return `${BASE_URL}/api/v2/public/image/${processedImageName}`;
 };
 
+const isLocalApiHost = (hostname) => {
+  const host = String(hostname || "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+};
+
 /** Нормализует тело ответа GET /api/v1/AllIsolationConstr к массиву записей. */
 const parseAllIsolationConstrBody = (result) => {
   if (!result) return [];
@@ -97,20 +102,25 @@ export const getImageUrl = (imageName) => {
 
   const s = String(imageName).trim();
 
-  // Новый формат API (v2 public/image): прицеливаемся на backend, тот сам проксирует.
-  if (s.startsWith('/api/v2/public/image/')) {
-    return `${BASE_URL}${s}`;
-  }
-
+  // Готовый публичный URL с локального ConstrTodo (:3005) нельзя сжимать
+  // в относительный `/api/v2/...`: Vite проксирует `/api/v2` на CALC
+  // (часто staging), а файл лежит в локальном MinIO.
   if (s.startsWith('http://') || s.startsWith('https://')) {
     try {
       const parsed = new URL(s);
       if (parsed.pathname.startsWith('/api/v2/public/image/')) {
+        if (isLocalApiHost(parsed.hostname)) {
+          return s;
+        }
         return `${BASE_URL}${parsed.pathname}${parsed.search}`;
       }
     } catch {
       // Если URL не распарсился, продолжаем старую логику.
     }
+  }
+
+  if (s.startsWith('/api/v2/public/image/')) {
+    return `${BASE_URL}${s}`;
   }
 
   imageName = s;

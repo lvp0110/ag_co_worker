@@ -16,6 +16,8 @@ import {
   validateInput,
   validateFloorInput,
   validateFloorMaxInput,
+  validateConstructionSizeLimits,
+  hasApiSizeLimits,
   normalizeFacingProfileStep,
   normalizeLagProfileStep,
 } from "../utils/validation";
@@ -548,54 +550,62 @@ const Calculator = () => {
       calcProfileStep = apiStep;
     }
 
-    const inputError = validateInput(
-      constR,
-      currentSubCategory,
-      currentItems,
-      template,
-      calcProfileStep,
-      itemsWithImages
-    );
-
-    if (inputError) {
+    const showSizeError = (html, confirmButtonText = "OK") => {
       setModal({
         isOpen: true,
         title: null,
-        html: inputError,
+        html,
         icon: null,
         imageUrl: `${import.meta.env.BASE_URL}logo1.png`,
-        confirmButtonText: "OK",
+        confirmButtonText,
         confirmButtonColor: "#6cabc8",
       });
-      return;
-    }
+    };
 
-    const floorError = validateFloorInput(constR, currentSubCategory, template);
-    if (floorError) {
-      setModal({
-        isOpen: true,
-        title: null,
-        html: floorError,
-        icon: null,
-        imageUrl: `${import.meta.env.BASE_URL}logo1.png`,
-        confirmButtonText: "Ok",
-        confirmButtonColor: "#6cabc8",
-      });
-      return;
-    }
+    if (hasApiSizeLimits(calcApiSpec?.sizeLimits)) {
+      const apiSizeError = validateConstructionSizeLimits(
+        constR,
+        calcApiSpec.sizeLimits,
+        calcApiValues.paramValues,
+        calcApiSpec.params
+      );
+      if (apiSizeError) {
+        showSizeError(apiSizeError);
+        return;
+      }
+    } else {
+      const inputError = validateInput(
+        constR,
+        currentSubCategory,
+        currentItems,
+        template,
+        calcProfileStep,
+        itemsWithImages
+      );
+      if (inputError) {
+        showSizeError(inputError);
+        return;
+      }
 
-    const floorMaxError = validateFloorMaxInput(constR, currentSubCategory, template);
-    if (floorMaxError) {
-      setModal({
-        isOpen: true,
-        title: null,
-        html: floorMaxError,
-        icon: null,
-        imageUrl: `${import.meta.env.BASE_URL}logo1.png`,
-        confirmButtonText: "Принять",
-        confirmButtonColor: "#6cabc8",
-      });
-      return;
+      const floorError = validateFloorInput(
+        constR,
+        currentSubCategory,
+        template
+      );
+      if (floorError) {
+        showSizeError(floorError);
+        return;
+      }
+
+      const floorMaxError = validateFloorMaxInput(
+        constR,
+        currentSubCategory,
+        template
+      );
+      if (floorMaxError) {
+        showSizeError(floorMaxError, "Принять");
+        return;
+      }
     }
 
     const IconType = SubCategories.find((el) => el.id == currentSubCategory);

@@ -55,6 +55,107 @@ export const getMaxLenZInMeters = (idConstr, step, subCategory) => {
   return null;
 };
 
+export const hasApiSizeLimits = (sizeLimits) =>
+  Array.isArray(sizeLimits) && sizeLimits.length > 0;
+
+const paramCodeForCondition = (condition, params = []) => {
+  if (condition?.code) return condition.code;
+  const paramId = Number(condition?.construction_system_param_id);
+  if (Number.isFinite(paramId) && paramId > 0) {
+    const byId = params.find((param) => Number(param?.id) === paramId);
+    if (byId?.code) return byId.code;
+  }
+  if (condition?.value_int != null) return "step";
+  return "";
+};
+
+export const sizeLimitApplies = (limit, paramValues = {}, params = []) => {
+  if (!limit) return false;
+  if (limit.mode !== "parametric") return true;
+  const conditions = Array.isArray(limit.conditions) ? limit.conditions : [];
+  if (conditions.length === 0) return false;
+  return conditions.every((condition) => {
+    const code = paramCodeForCondition(condition, params);
+    const current = code ? paramValues[code] : null;
+    if (condition.value_bool != null && condition.value_int == null) {
+      return Boolean(current?.value_bool) === Boolean(condition.value_bool);
+    }
+    if (condition.value_int != null) {
+      return Number(current?.value_int) === Number(condition.value_int);
+    }
+    return Boolean(current);
+  });
+};
+
+const formatSizeLimitMessage = (limit, kind) => {
+  const title =
+    limit?.warning?.title ||
+    (kind === "min" ? "Введите правильный размер" : "Внимание!");
+  const fallback =
+    kind === "min"
+      ? `Минимальный размер конструкции ${limit?.min_value} мм`
+      : `Максимальный размер конструкции ${limit?.max_value} мм`;
+  const message = limit?.warning?.message || fallback;
+  if (title) return `<span class="p1">${title}</span> <br>${message}`;
+  return message;
+};
+
+const toMm = (raw) => {
+  if (raw === null || raw === undefined || raw === "") return NaN;
+  const n = +raw;
+  return Number.isFinite(n) ? n : NaN;
+};
+
+const dimensionValueMm = (dimension, constR) => {
+  const lenX = toMm(constR?.lenX);
+  const lenY = toMm(constR?.lenY);
+  const lenZ = toMm(constR?.lenZ);
+  if (dimension === "len_x") return lenX;
+  if (dimension === "len_y") return lenY;
+  if (dimension === "len_z") return Number.isFinite(lenZ) ? lenZ : lenY;
+  return NaN;
+};
+
+/**
+ * Валидация размеров по size_limits из calculation-params.
+ * Пустой список — null (нужен локальный fallback).
+ */
+export const validateConstructionSizeLimits = (
+  constR,
+  sizeLimits,
+  paramValues = {},
+  params = []
+) => {
+  if (!hasApiSizeLimits(sizeLimits)) return null;
+  for (const limit of sizeLimits) {
+    if (!sizeLimitApplies(limit, paramValues, params)) continue;
+    const value = dimensionValueMm(limit.dimension, constR);
+    if (limit.min_value != null && (!Number.isFinite(value) || value < limit.min_value)) {
+      return formatSizeLimitMessage(limit, "min");
+    }
+    if (limit.max_value != null && Number.isFinite(value) && value > limit.max_value) {
+      return formatSizeLimitMessage(limit, "max");
+    }
+  }
+  return null;
+};
+
+/** Макс. высота (м) из API size_limits для шага профиля. */
+export const getMaxLenZFromSizeLimits = (sizeLimits, step, params = []) => {
+  if (!hasApiSizeLimits(sizeLimits)) return null;
+  const paramValues = { step: { value_int: Number(step) } };
+  const maxes = sizeLimits
+    .filter(
+      (limit) =>
+        limit.dimension === "len_z" &&
+        limit.max_value != null &&
+        sizeLimitApplies(limit, paramValues, params)
+    )
+    .map((limit) => limit.max_value);
+  if (!maxes.length) return null;
+  return (Math.min(...maxes) / 1000).toFixed(1);
+};
+
 /**
  * Валидация входных данных для конструкций
  */

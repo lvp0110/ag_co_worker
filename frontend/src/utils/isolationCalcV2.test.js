@@ -8,6 +8,7 @@ import {
   hasCalcApiOptions,
   materialOptionLabel,
   parseCalcApiSpec,
+  pickEntityImageUrl,
   replacementGroupForProductCode,
 } from "./isolationCalcV2.js";
 
@@ -79,6 +80,7 @@ describe("isolationCalcV2", () => {
 
     expect(hasCalcApiOptions(spec)).toBe(true);
     expect(spec.params.map((p) => p.code)).toEqual(["dframe", "step"]);
+    expect(spec.sizeLimits).toEqual([]);
     const values = defaultCalcApiValues(spec);
     expect(values.paramValues.dframe.value_bool).toBe(false);
     expect(values.paramValues.step.value_int).toBe(600);
@@ -116,6 +118,80 @@ describe("isolationCalcV2", () => {
     });
     expect(spec.replacementGroups).toHaveLength(1);
     expect(hasCalcApiOptions(spec)).toBe(false);
+  });
+
+  it("parses size_limits and nested warning blocks from calculation-params", () => {
+    const spec = parseCalcApiSpec({
+      paramsBody: {
+        data: {
+          construction_code: "AG.L401",
+          params: [
+            {
+              id: 15,
+              code: "step",
+              name: "Шаг",
+              value_type: "int",
+              default_value_int: 600,
+              options: [{ value_int: 600, label: "600 мм" }],
+            },
+          ],
+          size_limits: [
+            {
+              dimension: "len_x",
+              mode: "common",
+              min_value: 100,
+              max_value: 50000,
+              sort_order: 1,
+              warning: {
+                title: "Введите правильную ширину",
+                text: "Минимальная ШИРИНА конструкции 100 мм",
+              },
+            },
+            {
+              dimension: "len_z",
+              mode: "parametric",
+              max_value: 3000,
+              sort_order: 2,
+              warning_content_id: "warn-z",
+              conditions: [
+                { construction_system_param_id: 15, value_int: 600 },
+              ],
+            },
+          ],
+          warnings: [
+            {
+              id: "warn-z",
+              name: "Введите правильную высоту",
+              payload: {
+                text: "Максимальная ВЫСОТА указана в меню шага профиля",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(spec.sizeLimits).toHaveLength(2);
+    expect(spec.sizeLimits[0]).toMatchObject({
+      dimension: "len_x",
+      mode: "common",
+      min_value: 100,
+      max_value: 50000,
+      warning: {
+        title: "Введите правильную ширину",
+        message: "Минимальная ШИРИНА конструкции 100 мм",
+      },
+    });
+    expect(spec.sizeLimits[1]).toMatchObject({
+      dimension: "len_z",
+      mode: "parametric",
+      max_value: 3000,
+      conditions: [{ construction_system_param_id: 15, value_int: 600 }],
+      warning: {
+        title: "Введите правильную высоту",
+        message: "Максимальная ВЫСОТА указана в меню шага профиля",
+      },
+    });
   });
 
   it("builds request without options when spec is empty", () => {
@@ -286,6 +362,8 @@ describe("calcItemsFromPublicConstructions", () => {
         weight: undefined,
         type_code: "cladding",
         construction_id: 15,
+        imageUrl: "",
+        images: [],
       },
       {
         id: 3,
@@ -298,6 +376,8 @@ describe("calcItemsFromPublicConstructions", () => {
         weight: undefined,
         type_code: "ceiling",
         construction_id: 3,
+        imageUrl: "",
+        images: [],
       },
     ]);
   });
@@ -321,5 +401,54 @@ describe("calcItemsFromPublicConstructions", () => {
       template: 4,
       size_limit_id: 201,
     });
+  });
+
+  it("keeps primary image url from images[]", () => {
+    const items = calcItemsFromPublicConstructions(
+      [
+        {
+          id: 15,
+          code: "AG.L404",
+          name: "AG.L404",
+          type: "cladding",
+          images: [
+            {
+              url: "https://example.com/api/v2/public/image/a.jpg",
+              sort_order: 20,
+              is_primary: false,
+            },
+            {
+              url: "https://example.com/api/v2/public/image/b.jpg",
+              sort_order: 10,
+              is_primary: true,
+            },
+          ],
+        },
+      ],
+      []
+    );
+    expect(items[0].imageUrl).toBe(
+      "https://example.com/api/v2/public/image/b.jpg"
+    );
+    expect(items[0].images).toHaveLength(2);
+  });
+});
+
+describe("pickEntityImageUrl", () => {
+  it("prefers is_primary, then sort_order", () => {
+    expect(pickEntityImageUrl([])).toBe("");
+    expect(
+      pickEntityImageUrl([
+        { url: "/second", sort_order: 20, is_primary: false },
+        { url: "/first", sort_order: 10, is_primary: false },
+        { url: "/primary", sort_order: 50, is_primary: true },
+      ])
+    ).toBe("/primary");
+    expect(
+      pickEntityImageUrl([
+        { url: "https://example.com/b.jpg", sort_order: 20 },
+        { url: "https://example.com/a.jpg", sort_order: 10 },
+      ])
+    ).toBe("https://example.com/a.jpg");
   });
 });

@@ -5,6 +5,7 @@ import {
   isAddCeilShiftEnabled,
   isAddCeilShiftParam,
 } from "../utils/isolationCalcV2";
+import { getMaxLenZFromSizeLimits } from "../utils/validation";
 
 const optionKey = (opt, index) =>
   `${opt.value_int ?? ""}-${opt.value_bool ?? ""}-${opt.label ?? index}`;
@@ -131,7 +132,24 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
                       }
                     />
                     <label className="label" htmlFor={id}>
-                      {opt.label || (isBool ? (opt.value_bool ? "Да" : "Нет") : String(opt.value_int))}
+                      {opt.label ||
+                        (isBool
+                          ? opt.value_bool
+                            ? "Да"
+                            : "Нет"
+                          : String(opt.value_int))}
+                      {param.code === "step"
+                        ? (() => {
+                            const maxHeight = getMaxLenZFromSizeLimits(
+                              spec.sizeLimits,
+                              opt.value_int,
+                              spec.params
+                            );
+                            return maxHeight
+                              ? ` (макс.высота конструкции ${maxHeight} м)`
+                              : "";
+                          })()
+                        : ""}
                     </label>
                   </div>
                 );

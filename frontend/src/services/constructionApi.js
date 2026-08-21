@@ -195,18 +195,24 @@ const constructionPath = (categoryCode, code, suffix = "") => {
   return `/api/v2/constructions/${category}/${constr}${suffix}`;
 };
 
-/** GET /api/v2/constructions/{category}/{code}/calculation-params */
+/** GET /api/v2/constructions/{category}/{code}/calculation-params — params + size_limits. */
 export const getConstructionCalculationParams = async (
   code,
   categoryCode = SOUND_CONSTRUCTION_CATEGORY
 ) => {
-  if (!code) return { construction_code: "", params: [] };
+  if (!code) return { construction_code: "", params: [], size_limits: [] };
   const body = await request(
     constructionPath(categoryCode, code, "/calculation-params"),
     {},
     { allowNotFound: true, silent401: true }
   );
-  return unwrapApiData(body) || { construction_code: code, params: [] };
+  return (
+    unwrapApiData(body) || {
+      construction_code: code,
+      params: [],
+      size_limits: [],
+    }
+  );
 };
 
 /** GET /api/v2/constructions/{category}/{code} — состав и группы замены. */

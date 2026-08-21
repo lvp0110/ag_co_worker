@@ -28,7 +28,9 @@ const enrichItemsWithImages = (items, imagesMap, getImageUrl) => {
       };
     }
 
-    let apiImage = imagesMap.get(item.ag_id);
+    let apiImage = item.imageUrl
+      ? getImageUrl(item.imageUrl)
+      : imagesMap.get(item.ag_id);
 
     if (!apiImage && sizeLimitId(item) === "P") {
       const oldPath = "/Img_constr/floor/c2k2_1.png";
@@ -44,7 +46,7 @@ const enrichItemsWithImages = (items, imagesMap, getImageUrl) => {
 
 let itemsWithApiImagesCache = null;
 let itemsWithApiImagesInFlight = null;
-const ITEMS_WITH_IMAGES_CACHE_VERSION = 4;
+const ITEMS_WITH_IMAGES_CACHE_VERSION = 5;
 
 const loadItemsWithApiImages = async () => {
   const { listPublicConstructions } = await import(
