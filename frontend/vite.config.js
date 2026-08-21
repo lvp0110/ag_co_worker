@@ -101,6 +101,12 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      // CMS warning-блоки для size-limits (роль manager).
+      '/content': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
       // Commerce price-list + regions (same auth cookies as /admin).
       '/commerce': {
         target: authTarget,

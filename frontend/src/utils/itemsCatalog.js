@@ -81,7 +81,7 @@ function pickItemsBaseRow({ calcCode = "", cipher = "", sectionId = "", catalogI
 }
 
 /**
- * Название и описание конструкции из ItemsBase (не из AllIsolationConstr).
+ * Fallback-название из ItemsBase, если в карточке ещё нет имени из админки.
  * Для ЗИПС с одним ag_id в потолке и облицовке учитывается sectionId (F/C/L/W).
  */
 export function resolveItemsDisplayMeta({
@@ -128,14 +128,14 @@ export function shouldSkipSectionLabelPrefix(
   return false;
 }
 
-/** Имя для таблицы: ItemsBase.description, иначе title. */
+/** Имя для таблицы: description, иначе title. */
 export function itemsBaseTableName({ title = "", description = "" } = {}) {
   const desc = String(description ?? "").trim();
   if (desc) return desc;
   return String(title ?? "").trim();
 }
 
-/** Синхронизирует title/description/ag_id в карточках конструкций из ItemsBase. */
+/** Синхронизирует пустые title/description; уже записанное имя из админки не трогает. */
 export function syncConstructionsTitlesFromItems(
   constructions,
   constrToCalcToSent = [],
@@ -143,21 +143,9 @@ export function syncConstructionsTitlesFromItems(
   if (!Array.isArray(constructions)) return constructions;
   return constructions.map((item, index) => {
     const cp = constrToCalcToSent[index] || {};
-    const calcCode = cp.Code ?? "";
-    const cipher = normalizeItemsAgId(calcCode, item?.ag_id);
-    const catalogId = item?.catalog_id ?? item?.id;
-    const meta = resolveItemsDisplayMeta({
-      calcCode,
-      cipher,
-      sectionId: cp.SectionId ?? item?.section_id,
-      catalogId,
-    });
     const { title, description, shortTitle } = resolveConstructionTableText(item, cp);
     if (!title && !description) return item;
-    const nextAgId = meta.ag_id || cipher || item.ag_id;
     if (
-      item.catalog_id === meta.catalogId &&
-      item.ag_id === nextAgId &&
       item.title === title &&
       item.description === description &&
       item.short_title === shortTitle
@@ -166,8 +154,6 @@ export function syncConstructionsTitlesFromItems(
     }
     return {
       ...item,
-      catalog_id: meta.catalogId ?? item.catalog_id,
-      ag_id: nextAgId,
       title,
       description,
       short_title: shortTitle,
@@ -176,9 +162,26 @@ export function syncConstructionsTitlesFromItems(
 }
 
 /**
- * Текст для таблицы: ItemsBase.description.
+ * Текст для таблицы: имя из админки (карточка / DisplayTitle), иначе ItemsBase.
  */
 export function resolveConstructionTableText(item, calcParams) {
+  const storedTitle = String(
+    calcParams?.DisplayTitle || item?.title || ""
+  ).trim();
+  const storedDescription = String(
+    calcParams?.DisplayDescription || item?.description || storedTitle
+  ).trim();
+  if (storedTitle || storedDescription) {
+    return {
+      title: itemsBaseTableName({
+        title: storedTitle,
+        description: storedDescription,
+      }),
+      description: storedDescription,
+      shortTitle: storedTitle || storedDescription,
+    };
+  }
+
   const calcCode = calcParams?.Code ?? "";
   const agId = normalizeItemsAgId(calcCode, item?.ag_id);
   const sectionId = calcParams?.SectionId ?? item?.section_id;

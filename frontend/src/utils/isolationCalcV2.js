@@ -489,10 +489,17 @@ export const publicConstructionTypeCode = (row) => {
   return "";
 };
 
-/** url основной картинки из images[] (is_primary, иначе меньший sort_order). */
-export const pickEntityImageUrl = (images) => {
-  if (!Array.isArray(images) || images.length === 0) return "";
-  const ranked = [...images].sort((a, b) => {
+export const imageTypeCode = (image) =>
+  String(image?.type?.code ?? image?.type_code ?? "").trim().toLowerCase();
+
+export const isCadEntityImage = (image) => {
+  const code = imageTypeCode(image);
+  const name = String(image?.type?.name ?? "").trim().toLowerCase();
+  return /cad|drawing|scheme|чертёж|чертеж/.test(`${code} ${name}`);
+};
+
+const rankEntityImages = (images) =>
+  [...images].sort((a, b) => {
     const pa = a?.is_primary ? 1 : 0;
     const pb = b?.is_primary ? 1 : 0;
     if (pb !== pa) return pb - pa;
@@ -501,12 +508,130 @@ export const pickEntityImageUrl = (images) => {
     if (sa !== sb) return sa - sb;
     return (Number(a?.id) || 0) - (Number(b?.id) || 0);
   });
-  return String(ranked[0]?.url || "").trim();
+
+/** url картинки из images[] админки (is_primary, иначе меньший sort_order). */
+export const pickEntityImageUrl = (images, { cad = false } = {}) => {
+  if (!Array.isArray(images) || images.length === 0) return "";
+  const filtered = images.filter((img) =>
+    cad ? isCadEntityImage(img) : !isCadEntityImage(img)
+  );
+  const pool = filtered.length > 0 ? filtered : cad ? [] : images;
+  if (pool.length === 0) return "";
+  return String(rankEntityImages(pool)[0]?.url || "").trim();
+};
+
+const numericPhysical = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n !== 0 ? n : null;
+};
+
+export const physicalParamsFromConstruction = (row) => {
+  const p =
+    row?.physical_params && typeof row.physical_params === "object"
+      ? row.physical_params
+      : {};
+  return {
+    thickness: numericPhysical(p.Thickness ?? p.thickness),
+    soundIndex: numericPhysical(p.SoundIndex ?? p.sound_index),
+    soundIndexRight: numericPhysical(p.SoundIndexRight ?? p.sound_index_right),
+    impactNoiseIndex: numericPhysical(
+      p.ImpactNoiseIndex ?? p.impact_noise_index ?? p.ImpactNoseIndex
+    ),
+  };
+};
+
+export const textSectionText = (sections, codes = []) => {
+  const list = Array.isArray(sections) ? sections : [];
+  const wanted = new Set(codes.map((code) => String(code).trim().toLowerCase()));
+  const found = list.find((row) =>
+    wanted.has(String(row?.code ?? "").trim().toLowerCase())
+  );
+  return String(found?.text ?? "").trim();
+};
+
+export const unwrapPublicConstructionDetail = (body) => {
+  const data = unwrapApiData(body);
+  if (!data || typeof data !== "object") return null;
+  if (data.construction && typeof data.construction === "object") {
+    return {
+      construction: data.construction,
+      composition: data.composition || {},
+      text_sections: Array.isArray(data.text_sections) ? data.text_sections : [],
+    };
+  }
+  return {
+    construction: data,
+    composition: data.composition || {},
+    text_sections: Array.isArray(data.text_sections) ? data.text_sections : [],
+  };
+};
+
+const materialRowFromCompositionItem = (row) => {
+  const mat =
+    row?.material && typeof row.material === "object" ? row.material : row;
+  const code = String(mat?.code ?? row?.code ?? "").trim();
+  const name = String(mat?.name ?? row?.name ?? "").trim();
+  if (!code && !name) return null;
+  return { code, name, Code: code, Name: name };
+};
+
+/** Плоский список материалов из composition публичной карточки. */
+export const materialsFromPublicComposition = (composition) => {
+  const defaults = Array.isArray(composition?.default_materials)
+    ? composition.default_materials
+    : [];
+  const optionals = Array.isArray(composition?.optional_materials)
+    ? composition.optional_materials
+    : [];
+  const fromGroups = (Array.isArray(composition?.replacement_groups)
+    ? composition.replacement_groups
+    : []
+  ).flatMap((group) =>
+    (Array.isArray(group?.materials) ? group.materials : []).filter(
+      (item) => item?.is_default
+    )
+  );
+  return [...defaults, ...fromGroups, ...optionals]
+    .map(materialRowFromCompositionItem)
+    .filter(Boolean);
+};
+
+/**
+ * Публичная карточка / список админки → запись для инфо-страницы.
+ */
+export const mapPublicConstructionToInfoRecord = (detail) => {
+  const unwrapped = unwrapPublicConstructionDetail(detail);
+  if (!unwrapped) return null;
+  const construction = unwrapped.construction;
+  const code = String(construction?.code ?? "").trim();
+  if (!code) return null;
+  const name = String(construction?.name ?? "").trim();
+  const images = Array.isArray(construction.images) ? construction.images : [];
+  const physical = physicalParamsFromConstruction(construction);
+  return {
+    Code: code,
+    Name: name || code,
+    Description: name || code,
+    Img: pickEntityImageUrl(images),
+    CadImg: pickEntityImageUrl(images, { cad: true }),
+    Thickness: physical.thickness,
+    SoundIndex: physical.soundIndex,
+    ImpactNoseIndex: physical.impactNoiseIndex,
+    Specification: textSectionText(unwrapped.text_sections, [
+      "specification",
+      "description",
+      "opisanie",
+    ]),
+    images,
+    text_sections: unwrapped.text_sections,
+    composition: unwrapped.composition,
+  };
 };
 
 /**
  * Публичный каталог GET /api/v2/constructions/{category}
- * → карточки калькулятора. size_limit_id/template только для локального sizeLimits.
+ * (те же конструкции, что в админке). title/description/картинки — из API.
+ * ItemsBase только для template/size_limit_id, пока лимиты не заведены в админке.
  */
 export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
   if (!Array.isArray(rows)) return [];
@@ -518,13 +643,14 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
     const base = pickItemsBaseMatch(itemsBase, agId, c_id);
     if (!c_id) c_id = base?.c_id ?? null;
     if (!agId || !c_id) continue;
-    const name = String(row?.name ?? "").trim();
+    const name = String(row?.name ?? "").trim() || agId;
     const images = Array.isArray(row.images) ? row.images : [];
+    const physical = physicalParamsFromConstruction(row);
     items.push({
       id: row.id,
       size_limit_id: base?.id ?? null,
-      title: name || base?.title || agId,
-      description: String(base?.description || name || "").trim(),
+      title: name,
+      description: name,
       c_id,
       template: base?.template ?? null,
       ag_id: agId,
@@ -532,7 +658,11 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
       type_code: typeCode,
       construction_id: row.id,
       imageUrl: pickEntityImageUrl(images),
+      cadImageUrl: pickEntityImageUrl(images, { cad: true }),
       images,
+      thickness: physical.thickness,
+      soundIndex: physical.soundIndex,
+      impactNoiseIndex: physical.impactNoiseIndex,
     });
   }
   return items;

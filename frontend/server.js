@@ -6,7 +6,7 @@
  *   1) отдаёт статику из DIST_DIR (vite build, rsync);
  *   2) проксирует /api/* и /health в backend (BACKEND_URL);
  *   3) проксирует /login и /auth/* во внешний auth (AUTH_SERVICE_URL);
- *   4) проксирует /admin/* (materials/constructions) и /commerce/* туда же;
+ *   4) проксирует /admin/*, /commerce/* и /content/* туда же;
  *   5) SPA-fallback на index.html.
  */
 import express from "express";
@@ -47,7 +47,9 @@ const authProxy = createProxyMiddleware({
       pathname === "/auth" ||
       pathname.startsWith("/auth/") ||
       pathname === "/commerce" ||
-      pathname.startsWith("/commerce/")
+      pathname.startsWith("/commerce/") ||
+      pathname === "/content" ||
+      pathname.startsWith("/content/")
     ) {
       return true;
     }

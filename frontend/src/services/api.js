@@ -3,7 +3,15 @@
  */
 
 import { BASE_URL } from './apiClient';
-import { getMaterialsListViaCalc } from './constructionApi';
+import {
+  getMaterialsListViaCalc,
+  getPublicConstruction,
+} from './constructionApi';
+import {
+  mapPublicConstructionToInfoRecord,
+  materialsFromPublicComposition,
+  unwrapPublicConstructionDetail,
+} from '../utils/isolationCalcV2';
 
 // Все calc-запросы идут на backend (calc.ts proxy → внешний calcService).
 // BASE_URL пустой → относительные `/api/v1/*` (Vite/nginx проксируют на backend).
@@ -185,22 +193,16 @@ export const buildImagesMapFromConstructions = (constructions) => {
  */
 export const getConstructionByCode = async (code) => {
   if (!code) return null;
-  
+
   try {
-    const constructions = await getAllIsolationConstr();
-    const construction = constructions.find(item => item.Code === code);
-    
-    if (construction) {
-      // Обрабатываем изображения
-      if (construction.Img) {
-        construction.Img = getImageUrl(construction.Img);
-      }
-      if (construction.CadImg) {
-        construction.CadImg = getImageUrl(construction.CadImg);
-      }
-    }
-    
-    return construction || null;
+    const detail = await getPublicConstruction(code);
+    const record = mapPublicConstructionToInfoRecord(detail);
+    if (!record) return null;
+    return {
+      ...record,
+      Img: record.Img ? getImageUrl(record.Img) : "",
+      CadImg: record.CadImg ? getImageUrl(record.CadImg) : "",
+    };
   } catch {
     return null;
   }
@@ -284,11 +286,20 @@ export const getIsolationConstrMaterials = async (isolationConstrCode) => {
 };
 
 /**
- * Список материалов для страницы «Инфо»: v1 IsolationConstrMaterials (200),
- * затем calc byProduct, затем v2 props (часто 404 на dev3).
+ * Список материалов для страницы «Инфо»: состав из админки,
+ * затем legacy IsolationConstrMaterials / calc.
  */
 export const loadInfoPageMaterialsList = async (code) => {
   if (!code) return null;
+
+  try {
+    const detail = await getPublicConstruction(code);
+    const unwrapped = unwrapPublicConstructionDetail(detail);
+    const fromAdmin = materialsFromPublicComposition(unwrapped?.composition);
+    if (fromAdmin.length) return fromAdmin;
+  } catch {
+    // fallback ниже
+  }
 
   const isolation = await getIsolationConstrMaterials(code);
   const fromIsolation = Array.isArray(isolation?.data) ? isolation.data : null;

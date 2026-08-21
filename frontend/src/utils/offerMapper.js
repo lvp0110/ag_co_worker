@@ -5,9 +5,22 @@ import {
   resolveItemsDisplayMeta,
 } from "./itemsCatalog.js";
 
-/** Сохраняет UI-название в calc_params из ItemsBase (не из API-каталога). */
+/** Сохраняет UI-название в calc_params: сначала админка, иначе ItemsBase. */
 function mergeUiDisplayIntoCalcParams(calcParams, ui) {
   if (!calcParams || typeof calcParams !== "object") return calcParams;
+  const storedTitle = String(
+    calcParams.DisplayTitle || ui?.title || ui?.short_title || ""
+  ).trim();
+  const storedDescription = String(
+    calcParams.DisplayDescription || ui?.description || storedTitle
+  ).trim();
+  if (storedTitle || storedDescription) {
+    const next = { ...calcParams };
+    if (storedTitle) next.DisplayTitle = storedTitle;
+    if (storedDescription) next.DisplayDescription = storedDescription;
+    return next;
+  }
+
   const cipher = resolveDisplayCipher(calcParams.Code, getItemsAgIdKeyMap());
   const sectionId = ui?.section_id || calcParams.SectionId;
   const fromItems = resolveItemsDisplayMeta({

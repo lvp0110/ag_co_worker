@@ -46,7 +46,10 @@
  *   POST /admin/constructions/{id}/calculation-params
  *     → body: AdminConstructionCalculationParamUpsert { param_id, options[], ... }
  *   PUT /admin/constructions/{id}/calculation-params/{paramConfigID}
- *   DELETE /admin/constructions/{id}/calculation-params/{paramConfigID}
+ *   GET /admin/constructions/{id}/size-limits
+ *   POST /admin/constructions/{id}/size-limits
+ *   PUT /admin/constructions/{id}/size-limits/{limitID}
+ *   DELETE /admin/constructions/{id}/size-limits/{limitID}
  *   POST /admin/constructions/{id}/materials
  *     → body: { id, weight, sort_order, is_default, replacement_group, replacement_material_type_id, calculation_type_id, calculation_note }
  *   PUT /admin/constructions/{id}/materials/{itemId}
@@ -1190,6 +1193,258 @@ export const deleteAdminConstructionCalculationParam = async (
   );
 };
 
+export const SIZE_LIMIT_DIMENSIONS = [
+  { code: "len_x", label: "Ширина (len_x)" },
+  { code: "len_z", label: "Высота (len_z)" },
+];
+
+export const SIZE_LIMIT_MODES = [
+  { code: "common", label: "Всегда" },
+  { code: "parametric", label: "При шаге профиля" },
+];
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isUuid = (value) => UUID_RE.test(String(value || "").trim());
+
+export const sizeLimitDimensionLabel = (code) =>
+  SIZE_LIMIT_DIMENSIONS.find((item) => item.code === code)?.label ||
+  String(code || "");
+
+export const sizeLimitModeLabel = (code) =>
+  SIZE_LIMIT_MODES.find((item) => item.code === code)?.label ||
+  String(code || "");
+
+const optionalMm = (raw) => {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+export const normalizeWarningContent = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = String(row.id ?? row.warning_content_id ?? "").trim();
+  const name = String(row.name ?? row.title ?? "").trim();
+  const text = String(row.text ?? row.message ?? "").trim();
+  const code = String(row.code ?? "").trim();
+  if (!id && !name && !text && !code) return null;
+  return { id, code, name, text };
+};
+
+export const normalizeAdminSizeLimitCondition = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const paramId = Number(
+    row.construction_system_param_id ?? row.param_id ?? row.id
+  );
+  const valueInt =
+    row.value_int != null && Number.isFinite(Number(row.value_int))
+      ? Number(row.value_int)
+      : null;
+  const hasBool = row.value_bool != null;
+  if (!(Number.isFinite(paramId) && paramId > 0) && valueInt == null && !hasBool) {
+    return null;
+  }
+  const param = row.param && typeof row.param === "object" ? row.param : null;
+  return {
+    id: Number(row.id) || null,
+    construction_system_param_id:
+      Number.isFinite(paramId) && paramId > 0 ? paramId : null,
+    code: String(param?.code ?? row.code ?? "").trim(),
+    value_int: valueInt,
+    value_bool: hasBool ? Boolean(row.value_bool) : null,
+  };
+};
+
+export const normalizeAdminSizeLimit = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const dimension = String(row.dimension || "").trim();
+  if (dimension !== "len_x" && dimension !== "len_z") return null;
+  const warning =
+    normalizeWarningContent(row.warning_content) ||
+    normalizeWarningContent(row.warning) ||
+    null;
+  const warningId = String(
+    row.warning_content_id ?? warning?.id ?? ""
+  ).trim();
+  return {
+    id: Number(row.id) || null,
+    construction_system_id: Number(row.construction_system_id) || null,
+    dimension,
+    mode: String(row.mode || "common").trim() === "parametric"
+      ? "parametric"
+      : "common",
+    min_value: optionalMm(row.min_value),
+    max_value: optionalMm(row.max_value),
+    sort_order: Number(row.sort_order) || 0,
+    warning_content_id: warningId,
+    warning_content: warning
+      ? { ...warning, id: warning.id || warningId }
+      : warningId
+        ? { id: warningId, code: "", name: "", text: "" }
+        : null,
+    conditions: (Array.isArray(row.conditions) ? row.conditions : [])
+      .map(normalizeAdminSizeLimitCondition)
+      .filter(Boolean),
+  };
+};
+
+export const buildSizeLimitUpsertBody = (payload) => {
+  const mode =
+    String(payload?.mode || "common").trim() === "parametric"
+      ? "parametric"
+      : "common";
+  const conditions =
+    mode === "parametric"
+      ? (Array.isArray(payload?.conditions) ? payload.conditions : [])
+          .map((row) => {
+            const paramId = Number(row?.construction_system_param_id);
+            if (!Number.isFinite(paramId) || paramId <= 0) return null;
+            const body = { construction_system_param_id: paramId };
+            if (row?.value_int != null) {
+              body.value_int = Number(row.value_int) || 0;
+            }
+            if (row?.value_bool != null) {
+              body.value_bool = Boolean(row.value_bool);
+            }
+            return body;
+          })
+          .filter(Boolean)
+      : [];
+  return {
+    dimension: String(payload?.dimension || "len_x").trim(),
+    mode,
+    min_value: optionalMm(payload?.min_value),
+    max_value: optionalMm(payload?.max_value),
+    warning_content_id: String(payload?.warning_content_id || "").trim(),
+    sort_order: Number(payload?.sort_order) || 0,
+    conditions,
+  };
+};
+
+/** GET /admin/constructions/{id}/size-limits */
+export const listAdminConstructionSizeLimits = async (id) => {
+  const body = await request(
+    `/admin/constructions/${encodeURIComponent(id)}/size-limits`
+  );
+  return unwrapNestedList(body, ["size_limits", "items"])
+    .map(normalizeAdminSizeLimit)
+    .filter(Boolean)
+    .sort(
+      (a, b) =>
+        (a.sort_order || 0) - (b.sort_order || 0) || (a.id || 0) - (b.id || 0)
+    );
+};
+
+/**
+ * POST /admin/constructions/{id}/size-limits
+ * @param {string|number} constructionId
+ * @param {object} payload AdminConstructionSizeLimitUpsert
+ */
+export const createAdminConstructionSizeLimit = async (
+  constructionId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/size-limits`,
+    {
+      method: "POST",
+      headers,
+      body: buildSizeLimitUpsertBody(payload),
+    }
+  );
+};
+
+/**
+ * PUT /admin/constructions/{id}/size-limits/{limitID}
+ */
+export const updateAdminConstructionSizeLimit = async (
+  constructionId,
+  limitId,
+  payload
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/size-limits/${encodeURIComponent(limitId)}`,
+    {
+      method: "PUT",
+      headers,
+      body: buildSizeLimitUpsertBody(payload),
+    }
+  );
+};
+
+/** DELETE /admin/constructions/{id}/size-limits/{limitID} */
+export const deleteAdminConstructionSizeLimit = async (
+  constructionId,
+  limitId
+) => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request(
+    `/admin/constructions/${encodeURIComponent(constructionId)}/size-limits/${encodeURIComponent(limitId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  );
+};
+
+const looksLikeWarningContentType = (row) => {
+  const hay = `${row?.code || ""} ${row?.name || ""} ${row?.description || ""}`;
+  return /warn|size.?limit|limit|alert|предупрежд|огранич/i.test(hay);
+};
+
+/**
+ * GET /content/types + /content/list/{type} — warning-блоки CMS (роль manager).
+ * Если роли нет или типов нет — пустой массив, без разлогина.
+ */
+export const listAdminWarningContents = async () => {
+  let types = [];
+  try {
+    const body = await request("/content/types", {}, { silent401: true });
+    types = unwrapList(body);
+  } catch {
+    return [];
+  }
+
+  const preferred = types.filter(looksLikeWarningContentType);
+  const toFetch = preferred.slice(0, 8);
+  if (!toFetch.length) return [];
+  const byId = new Map();
+
+  for (const type of toFetch) {
+    const code = String(type?.code || "").trim();
+    if (!code) continue;
+    try {
+      const body = await request(
+        `/content/list/${encodeURIComponent(code)}`,
+        {},
+        { silent401: true, allowNotFound: true }
+      );
+      for (const row of unwrapList(body)) {
+        const item = normalizeWarningContent(row);
+        if (item?.id) byId.set(item.id, item);
+      }
+    } catch {
+      /* тип недоступен — пропускаем */
+    }
+  }
+
+  return [...byId.values()].sort((a, b) =>
+    (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id, "ru")
+  );
+};
+
 /**
  * Список типов для UI создания: GET /api/v2/constructions/types
  * плюс типы, уже встречающиеся в загруженном списке конструкций.
@@ -1603,10 +1858,39 @@ const buildEntityImageUpsertBody = (payload) => ({
   is_primary: Boolean(payload.is_primary),
 });
 
+export const IMAGE_TYPE_PREVIEW = "preview";
+export const IMAGE_TYPE_CAD = "cad";
+
+const CONSTRUCTION_IMAGE_TYPES = [
+  { code: IMAGE_TYPE_PREVIEW, name: "Превью" },
+  { code: IMAGE_TYPE_CAD, name: "Чертёж" },
+];
+
 /** GET /admin/images/types — справочник типов изображений. */
 export const listAdminImageTypes = async () => {
   const body = await request("/admin/images/types");
   return unwrapList(body).map(normalizeImageType).filter(Boolean);
+};
+
+/** Создаёт preview/cad, если их ещё нет в справочнике. */
+export const ensureConstructionImageTypes = async () => {
+  let types = await listAdminImageTypes();
+  for (const needed of CONSTRUCTION_IMAGE_TYPES) {
+    if (types.some((row) => row.code === needed.code)) continue;
+    try {
+      await createAdminImageType({
+        code: needed.code,
+        name: needed.name,
+        description: "",
+      });
+    } catch {
+      // уже создан параллельно или нет прав — перечитаем список
+    }
+  }
+  types = await listAdminImageTypes();
+  return types.filter((row) =>
+    CONSTRUCTION_IMAGE_TYPES.some((needed) => needed.code === row.code)
+  );
 };
 
 const buildImageTypeUpsertBody = (payload) => ({

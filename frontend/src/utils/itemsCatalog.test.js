@@ -7,7 +7,7 @@ import {
 } from "./itemsCatalog.js";
 
 describe("itemsCatalog", () => {
-  it("uses ItemsBase.description as table name for AG.W101", () => {
+  it("uses ItemsBase.description as fallback table name for AG.W101", () => {
     const meta = resolveItemsDisplayMeta({
       calcCode: "AG.W101",
       cipher: "AG.W101",
@@ -21,27 +21,28 @@ describe("itemsCatalog", () => {
     );
   });
 
-  it("resolves table name from description at render time", () => {
+  it("keeps construction title from admin/API instead of ItemsBase", () => {
     const title = resolveConstructionTableTitle(
       {
         ag_id: "AG.W101",
         section_id: "W",
         type: "ПЕРЕГОРОДКА",
-        title: "устаревшее из API",
+        title: "Перегородка из админки",
+        description: "Перегородка из админки",
       },
-      { Code: "AG.W101", SectionId: "W" },
+      { Code: "AG.W101", SectionId: "W", DisplayTitle: "Перегородка из админки" },
     );
-    expect(title).toBe("Перегородка на одинарном каркасе 50 мм");
+    expect(title).toBe("Перегородка из админки");
   });
 
-  it("syncs stale session titles from ItemsBase.description", () => {
+  it("fills empty titles from ItemsBase for old sessions", () => {
     const [synced] = syncConstructionsTitlesFromItems(
       [
         {
           key_id: 1,
           ag_id: "AG.W101",
           section_id: "W",
-          title: "устаревшее из API",
+          title: "",
           description: "",
           type: "ПЕРЕГОРОДКА",
         },

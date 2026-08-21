@@ -49,10 +49,14 @@ const ItemsList = ({ items, onItemSelect, selectedItemId }) => {
           ? getResponsiveImageProps(imageSrc, 'item')
           : null;
 
-        // Проверяем, является ли это ЗИПС для потолка (ID: 201-205)
-        // Также проверяем по названию на случай, если структура данных отличается
-        const isZIPSCeiling = (elem.c_id === "C" && elem.id >= 201 && elem.id <= 205) ||
-                              (elem.c_id === "C" && elem.title && elem.title.includes("ЗИПС"));
+        const catalogId = elem.size_limit_id ?? elem.id;
+        const isZIPSCeiling =
+          (elem.c_id === "C" &&
+            ((catalogId >= 201 && catalogId <= 205) ||
+              String(elem.ag_id || "").startsWith("AG.Z"))) ||
+          (elem.c_id === "C" &&
+            elem.title &&
+            String(elem.title).toUpperCase().includes("ЗИПС"));
         
         const isSelected = selectedItemId === elem.id;
         const buttonClassName = [

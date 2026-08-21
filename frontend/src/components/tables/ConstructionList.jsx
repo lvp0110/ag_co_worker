@@ -82,7 +82,7 @@ function constructionDimensionsMm(item) {
   return `${width} x ${height}`;
 }
 
-/** Имя в таблице — ItemsBase.description (без префиксов ЗИПС). */
+/** Имя в таблице — из админки (карточка / DisplayTitle). */
 function constructionDisplayTitle({ title }) {
   return title != null ? String(title).trim() : "";
 }

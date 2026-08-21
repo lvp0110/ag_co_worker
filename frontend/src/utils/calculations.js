@@ -57,7 +57,7 @@ export const getConstructionCode = (
 
 /**
  * Базовый шифр для колонки «шифр» в UI (AG.L401), если в расчёт ушёл вариант
- * с суффиксом материалов (AG.L401_2500P). Сопоставление — по каталогу AllIsolationConstr.
+ * с суффиксом материалов (AG.L401_2500P). Сопоставление — по каталогу админки.
  */
 export const resolveDisplayCipher = (calcCode, titleByCode) => {
   const code = String(calcCode ?? "").trim();

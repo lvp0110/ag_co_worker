@@ -11,15 +11,6 @@ import { getResponsiveImageProps } from "../utils/responsiveImages";
 import { constructionDisplayCipher } from "../utils/calcUlTapeFallback";
 import "./Calculator.css";
 
-// Мапа CAD изображений (чертежей) для потолков ЗИПС
-const zipsCeilingCadImages = {
-  201: "cad_ceiling_zips_vector.png",
-  202: "cad_ceiling_zips_module.png",
-  203: "cad_ceiling_zips_IIIultra.png",
-  204: "cad_ceiling_zips_Z4.png",
-  205: "cad_ceiling_zips_cinema.png",
-};
-
 const ItemInfo = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -232,8 +223,9 @@ const ItemInfo = () => {
         zipsItems.ceilingConstruction?.Img;
       if (ceilingImg) imageSources.push({ src: ceilingImg, label: "Потолок" });
 
-      if (zipsItems.ceiling.id && zipsCeilingCadImages[zipsItems.ceiling.size_limit_id ?? zipsItems.ceiling.id]) {
-        const ceilingCadImg = getImageUrl(zipsCeilingCadImages[zipsItems.ceiling.size_limit_id ?? zipsItems.ceiling.id]);
+      const ceilingCadImg =
+        zipsItems.ceiling.CadImg || zipsItems.ceilingConstruction?.CadImg;
+      if (ceilingCadImg) {
         cadImageSources.push({ src: ceilingCadImg, label: "Потолок" });
       }
     } else if (zipsItems.lining) {
@@ -550,26 +542,26 @@ const ItemInfo = () => {
           )}
 
           {/* Description */}
-          {data.Description && (
+          {(data.Description || item.description || item.title) && (
             <div className="item-info-section">
               <h3>Название</h3>
-              <p>{data.Description}</p>
+              <p>{data.Description || item.description || item.title}</p>
             </div>
           )}
 
           {/* Thickness */}
-          {data.Thickness && (
+          {(data.Thickness || item.thickness) && (
             <div className="item-info-section">
               <h3>Толщина, мм</h3>
-              <p>{data.Thickness}</p>
+              <p>{data.Thickness || item.thickness}</p>
             </div>
           )}
 
           {/* SoundIndex */}
-          {data.SoundIndex && (
+          {(data.SoundIndex || item.soundIndex) && (
             <div className="item-info-section">
               <h3>Индекс звукоизоляции воздушного шума, Rw</h3>
-              <p>{data.SoundIndex}</p>
+              <p>{data.SoundIndex || item.soundIndex}</p>
             </div>
           )}
 

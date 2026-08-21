@@ -386,13 +386,6 @@ export default function AdminEntityImages({
                   alt={pending.alt || pending.title || "Превью"}
                 />
               ) : null}
-              <p className="admin-page__images-meta">
-                {pending.width}×{pending.height}
-                {pending.mime_type ? ` · ${pending.mime_type}` : ""}
-                {pending.file_size
-                  ? ` · ${Math.round(pending.file_size / 1024)} КБ`
-                  : ""}
-              </p>
               <div className="admin-page__create-fields">
                 <label className="admin-page__field">
                   <span className="admin-page__field-label">Заголовок</span>
@@ -504,12 +497,6 @@ export default function AdminEntityImages({
                       </div>
                       <p className="admin-page__images-item-title">
                         {row.title || "без заголовка"}
-                      </p>
-                      <p className="admin-page__images-meta">
-                        {row.width}×{row.height}
-                        {row.sort_order != null
-                          ? ` · порядок ${row.sort_order}`
-                          : ""}
                       </p>
 
                       {editing && editForm ? (

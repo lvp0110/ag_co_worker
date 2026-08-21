@@ -215,18 +215,26 @@ export const getConstructionCalculationParams = async (
   );
 };
 
+const publicConstructionCache = new Map();
+
 /** GET /api/v2/constructions/{category}/{code} — состав и группы замены. */
 export const getPublicConstruction = async (
   code,
   categoryCode = SOUND_CONSTRUCTION_CATEGORY
 ) => {
   if (!code) return null;
+  const key = `${categoryCode}:${code}`;
+  if (publicConstructionCache.has(key)) {
+    return publicConstructionCache.get(key);
+  }
   const body = await request(
     constructionPath(categoryCode, code),
     {},
     { allowNotFound: true, silent401: true }
   );
-  return unwrapApiData(body);
+  const data = unwrapApiData(body);
+  publicConstructionCache.set(key, data);
+  return data;
 };
 
 /**

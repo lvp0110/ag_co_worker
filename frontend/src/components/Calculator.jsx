@@ -29,7 +29,6 @@ import { stripHangerSuffix } from "../utils/calcUlTapeFallback";
 import {
   getItemsAgIdKeyMap,
   itemsBaseTableName,
-  resolveItemsDisplayMeta,
 } from "../utils/itemsCatalog.js";
 import {
   sectionIdFromCode,
@@ -625,18 +624,14 @@ const Calculator = () => {
       +constR.AddCeilShift || 0
     );
 
-    const { title: shortTitle, description: displayDescription } =
-      resolveItemsDisplayMeta({
-        calcCode: code,
-        cipher: agId,
-        sectionId,
-        catalogId: Constr?.size_limit_id,
-      });
-
+    const shortTitle = String(Constr?.title || "").trim();
+    const displayDescription = String(
+      Constr?.description || Constr?.title || ""
+    ).trim();
     const displayTitle = itemsBaseTableName({
       title: shortTitle,
       description: displayDescription,
-    });
+    }) || code;
 
     const newConstR = {
       ...constR,

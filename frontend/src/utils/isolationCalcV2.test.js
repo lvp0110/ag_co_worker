@@ -3,6 +3,8 @@ import {
   buildIsolationCalcRequestFromStored,
   buildIsolationCalcRequestItem,
   calcItemsFromPublicConstructions,
+  mapPublicConstructionToInfoRecord,
+  materialsFromPublicComposition,
   defaultCalcApiValues,
   extractCalcProducts,
   hasCalcApiOptions,
@@ -355,7 +357,7 @@ describe("calcItemsFromPublicConstructions", () => {
         id: 15,
         size_limit_id: 401,
         title: "Облицовка на каркасе 50 мм",
-        description: "Облицовка на каркасе 50 мм (описание)",
+        description: "Облицовка на каркасе 50 мм",
         c_id: "L",
         template: 50,
         ag_id: "AG.L401",
@@ -363,7 +365,11 @@ describe("calcItemsFromPublicConstructions", () => {
         type_code: "cladding",
         construction_id: 15,
         imageUrl: "",
+        cadImageUrl: "",
         images: [],
+        thickness: null,
+        soundIndex: null,
+        impactNoiseIndex: null,
       },
       {
         id: 3,
@@ -377,7 +383,11 @@ describe("calcItemsFromPublicConstructions", () => {
         type_code: "ceiling",
         construction_id: 3,
         imageUrl: "",
+        cadImageUrl: "",
         images: [],
+        thickness: null,
+        soundIndex: null,
+        impactNoiseIndex: null,
       },
     ]);
   });
@@ -450,5 +460,57 @@ describe("pickEntityImageUrl", () => {
         { url: "https://example.com/a.jpg", sort_order: 10 },
       ])
     ).toBe("https://example.com/a.jpg");
+  });
+
+  it("separates preview and cad by image type", () => {
+    const images = [
+      {
+        url: "/preview.jpg",
+        sort_order: 20,
+        is_primary: true,
+        type: { code: "preview" },
+      },
+      {
+        url: "/cad.png",
+        sort_order: 10,
+        type: { code: "cad", name: "Чертёж" },
+      },
+    ];
+    expect(pickEntityImageUrl(images)).toBe("/preview.jpg");
+    expect(pickEntityImageUrl(images, { cad: true })).toBe("/cad.png");
+  });
+});
+
+describe("mapPublicConstructionToInfoRecord", () => {
+  it("maps admin/public detail to info-page fields", () => {
+    const record = mapPublicConstructionToInfoRecord({
+      construction: {
+        code: "AG.L401",
+        name: "Облицовка на каркасе 50 мм",
+        physical_params: { Thickness: 70, SoundIndex: 65 },
+        images: [
+          { url: "/photo.jpg", is_primary: true, type: { code: "preview" } },
+          { url: "/cad.png", type: { code: "cad" } },
+        ],
+      },
+      composition: {
+        default_materials: [
+          { material: { code: "1111", name: "Профиль" }, is_default: true },
+        ],
+      },
+      text_sections: [{ code: "specification", text: "Описание из админки" }],
+    });
+    expect(record).toMatchObject({
+      Code: "AG.L401",
+      Description: "Облицовка на каркасе 50 мм",
+      Img: "/photo.jpg",
+      CadImg: "/cad.png",
+      Thickness: 70,
+      SoundIndex: 65,
+      Specification: "Описание из админки",
+    });
+    expect(materialsFromPublicComposition(record.composition)).toEqual([
+      { code: "1111", name: "Профиль", Code: "1111", Name: "Профиль" },
+    ]);
   });
 });

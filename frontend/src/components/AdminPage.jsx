@@ -58,6 +58,9 @@ import {
   updateAdminMaterial,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
+import AdminCollapsibleSection from "./AdminCollapsibleSection.jsx";
+import AdminConstructionImages from "./AdminConstructionImages.jsx";
+import AdminConstructionSizeLimits from "./AdminConstructionSizeLimits.jsx";
 import AdminImagesPanel from "./AdminImagesPanel.jsx";
 import "./AdminPage.css";
 
@@ -2226,16 +2229,10 @@ function ConstructionCalcParamsPanel({ constructionId }) {
   };
 
   return (
-    <>
-      <div className="admin-page__composition-head admin-page__composition-head--spaced">
-        <h3 className="admin-page__composition-title">
-          Опции расчета
-          <span className="admin-page__count">
-            {loading ? "…" : `${rows.length} / ${catalog.length}`}
-          </span>
-        </h3>
-      </div>
-
+    <AdminCollapsibleSection
+      title="Опции расчета"
+      count={loading ? "…" : `${rows.length} / ${catalog.length}`}
+    >
       {error && (
         <div className="admin-page__error" role="alert">
           <p className="admin-page__error-title">
@@ -2470,7 +2467,7 @@ function ConstructionCalcParamsPanel({ constructionId }) {
           </form>
         </>
       )}
-    </>
+    </AdminCollapsibleSection>
   );
 }
 
@@ -3335,6 +3332,7 @@ function ConstructionDetail({
         </p>
       ) : (
         <>
+          <div className="admin-page__construction-top">
           <form
             className="admin-page__meta-form"
             onSubmit={handleSaveConstructionMeta}
@@ -3476,17 +3474,20 @@ function ConstructionDetail({
             )}
           </form>
 
-          <ConstructionCalcParamsPanel constructionId={constructionId} />
-
-          <div className="admin-page__composition-head admin-page__composition-head--spaced">
-            <h3 className="admin-page__composition-title">
-              Материалы по умолчанию
-              <span className="admin-page__count">
-                {defaultMaterials.length} мат.
-              </span>
-            </h3>
+          <AdminConstructionImages
+            constructionId={constructionId}
+            constructionCode={detail.code || editCode}
+          />
           </div>
 
+          <ConstructionCalcParamsPanel constructionId={constructionId} />
+
+          <AdminConstructionSizeLimits constructionId={constructionId} />
+
+          <AdminCollapsibleSection
+            title="Материалы по умолчанию"
+            count={`${defaultMaterials.length} мат.`}
+          >
           {defaultAddError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
@@ -3565,16 +3566,12 @@ function ConstructionDetail({
               {addingDefault ? "Добавление…" : "Добавить"}
             </button>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="admin-page__composition-head admin-page__composition-head--spaced">
-            <h3 className="admin-page__composition-title">
-              Заменяемые материалы
-              <span className="admin-page__count">
-                {replacementGroups.length} групп
-              </span>
-            </h3>
-          </div>
-
+          <AdminCollapsibleSection
+            title="Заменяемые материалы"
+            count={`${replacementGroups.length} групп`}
+          >
           {promoteError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
@@ -3844,16 +3841,12 @@ function ConstructionDetail({
               })}
             </div>
           )}
+          </AdminCollapsibleSection>
 
-          <div className="admin-page__composition-head admin-page__composition-head--spaced">
-            <h3 className="admin-page__composition-title">
-              Дополнительные материалы
-              <span className="admin-page__count">
-                {optionalMaterials.length} мат.
-              </span>
-            </h3>
-          </div>
-
+          <AdminCollapsibleSection
+            title="Дополнительные материалы"
+            count={`${optionalMaterials.length} мат.`}
+          >
           {optionalAddError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
@@ -3932,6 +3925,7 @@ function ConstructionDetail({
               {addingOptional ? "Добавление…" : "Добавить"}
             </button>
           </div>
+          </AdminCollapsibleSection>
         </>
       )}
     </div>
