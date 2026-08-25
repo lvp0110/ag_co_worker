@@ -10,7 +10,12 @@ import {
   listAdminEntityImages,
 } from "../services/adminApi.js";
 import { formatRequestError } from "../services/apiClient.js";
-import { addToAdminImageLibrary, useAdminImageLibrary } from "../utils/adminImageLibrary.js";
+import {
+  overlayLibraryFields,
+  readAdminImageLibrary,
+  useAdminImageLibrary,
+} from "../utils/adminImageLibrary.js";
+import { adminImageSrc } from "../utils/adminImageSrc.js";
 import { isCadEntityImage } from "../utils/isolationCalcV2.js";
 import AdminZoomableImage from "./AdminZoomableImage.jsx";
 
@@ -18,14 +23,6 @@ const SLOTS = [
   { code: IMAGE_TYPE_PREVIEW, title: "Превью", primary: true, sortOrder: 10 },
   { code: IMAGE_TYPE_CAD, title: "Чертёж", primary: false, sortOrder: 20 },
 ];
-
-const displayUrl = (url) => {
-  const s = String(url || "").trim();
-  if (!s) return "";
-  const path = s.split("?")[0];
-  if (/\/api\/v2\/public\/image\/?$/i.test(path)) return "";
-  return s;
-};
 
 const imageTypeCode = (row) =>
   String(row?.type?.code ?? row?.image_type_code ?? "")
@@ -43,14 +40,8 @@ const matchSlot = (row, slotCode) => {
   return code === slotCode;
 };
 
-const SlotCard = ({
-  slot,
-  image,
-  busy,
-  onPick,
-  onClear,
-}) => {
-  const src = displayUrl(image?.url);
+const SlotCard = ({ slot, image, busy, onPick, onClear }) => {
+  const src = adminImageSrc(image);
   return (
     <div className="admin-page__image-slot">
       <h4 className="admin-page__image-slot-title">{slot.title}</h4>
@@ -110,10 +101,7 @@ export default function AdminConstructionImages({
       return;
     }
     const rows = await listAdminEntityImages(IMAGE_ENTITY_CONSTR, numericId);
-    for (const row of rows) {
-      addToAdminImageLibrary(row);
-    }
-    setImages(rows);
+    setImages(rows.map((row) => overlayLibraryFields(row, readAdminImageLibrary())));
   };
 
   useEffect(() => {
@@ -131,7 +119,6 @@ export default function AdminConstructionImages({
             numericId
           );
           if (cancelled) return;
-          for (const row of rows) addToAdminImageLibrary(row);
           setImages(rows);
         } else {
           setImages([]);
@@ -163,17 +150,38 @@ export default function AdminConstructionImages({
     return map;
   }, [types]);
 
+  const resolveSlotType = async (slot) => {
+    let type = typeByCode[slot.code];
+    if (type?.id) return type;
+    const typeRows = await ensureConstructionImageTypes();
+    setTypes(typeRows);
+    type = typeRows.find((row) => row.code === slot.code) || null;
+    if (!type?.id) {
+      throw new Error(
+        `Нет типа «${slot.title}» (${slot.code}). Нужен для привязки в карточке.`
+      );
+    }
+    return type;
+  };
+
   const handleAssign = async (slot, libraryItem) => {
-    const type = typeByCode[slot.code];
-    if (!hasEntity || !type || !libraryItem?.file_name) return;
+    if (!libraryItem?.file_name) {
+      setError("Не выбран файл из раздела «Изображения».");
+      return;
+    }
+    if (!hasEntity) {
+      setError("Сначала сохраните конструкцию, затем выберите изображение.");
+      return;
+    }
     setBusySlot(slot.code);
     setError(null);
     try {
+      const type = await resolveSlotType(slot);
       const existing = images.filter((row) => matchSlot(row, slot.code));
       for (const row of existing) {
         if (row.id) await deleteAdminEntityImage(row.id);
       }
-      await createAdminEntityImage({
+      const created = await createAdminEntityImage({
         entity_type: IMAGE_ENTITY_CONSTR,
         entity_id: numericId,
         image_type_id: type.id,
@@ -191,8 +199,31 @@ export default function AdminConstructionImages({
         sort_order: slot.sortOrder,
         is_primary: slot.primary,
       });
-      await reload();
+      setImages((prev) => {
+        const rest = prev.filter((row) => !matchSlot(row, slot.code));
+        return [
+          ...rest,
+          overlayLibraryFields(
+            {
+              ...(created || {}),
+              file_name: libraryItem.file_name,
+              url: created?.url || libraryItem.url,
+              mime_type: created?.mime_type || libraryItem.mime_type,
+              type: created?.type || {
+                id: type.id,
+                code: slot.code,
+                name: slot.title,
+              },
+              image_type_id: type.id,
+              is_primary: slot.primary,
+              sort_order: slot.sortOrder,
+            },
+            library
+          ),
+        ];
+      });
       setPickerSlot("");
+      await reload();
     } catch (err) {
       setError(formatRequestError(err));
     } finally {
@@ -220,7 +251,10 @@ export default function AdminConstructionImages({
   const picker = SLOTS.find((slot) => slot.code === pickerSlot) || null;
 
   return (
-    <div className="admin-page__construction-images" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="admin-page__construction-images"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="admin-page__composition-head admin-page__composition-head--spaced">
         <h3 className="admin-page__composition-title">Изображения</h3>
       </div>
@@ -242,7 +276,7 @@ export default function AdminConstructionImages({
             <SlotCard
               key={slot.code}
               slot={slot}
-              image={bySlot[slot.code]}
+              image={overlayLibraryFields(bySlot[slot.code], library)}
               busy={Boolean(busySlot)}
               onPick={() => setPickerSlot(slot.code)}
               onClear={() => handleClear(slot)}
@@ -277,7 +311,7 @@ export default function AdminConstructionImages({
           ) : (
             <ul className="admin-page__images-grid">
               {library.map((item) => {
-                const src = displayUrl(item.url);
+                const src = adminImageSrc(item);
                 return (
                   <li key={item.file_name}>
                     <button

@@ -725,7 +725,19 @@ const Calculator = () => {
       setConstR({ ...constRZero });
       setDFrame(false);
       setUnvisible(false);
+      setProfileStep(400);
       setFacingProfileStep(600);
+      setCalcApiValues((prev) => {
+        const defaultStep = defaultCalcApiValues(calcApiSpec).paramValues?.step;
+        if (!defaultStep) return prev;
+        return {
+          ...prev,
+          paramValues: {
+            ...prev.paramValues,
+            step: defaultStep,
+          },
+        };
+      });
       setCurrentGkla("default");
       setCurrentWool("default");
       setCurrentFloorSealant("vibrosil");
@@ -761,6 +773,8 @@ const Calculator = () => {
     template,
     calcApiValues,
     calcApiSpec,
+    setProfileStep,
+    setFacingProfileStep,
   ]);
 
   const recalcConstructionReplacement = useCallback(

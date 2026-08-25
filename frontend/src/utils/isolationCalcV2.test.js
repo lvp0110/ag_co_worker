@@ -154,7 +154,7 @@ describe("isolationCalcV2", () => {
               mode: "parametric",
               max_value: 3000,
               sort_order: 2,
-              warning_content_id: "warn-z",
+              warning_text: "Максимальная ВЫСОТА указана в меню шага профиля",
               conditions: [
                 { construction_system_param_id: 15, value_int: 600 },
               ],
@@ -188,9 +188,10 @@ describe("isolationCalcV2", () => {
       dimension: "len_z",
       mode: "parametric",
       max_value: 3000,
+      warning_text: "Максимальная ВЫСОТА указана в меню шага профиля",
       conditions: [{ construction_system_param_id: 15, value_int: 600 }],
       warning: {
-        title: "Введите правильную высоту",
+        title: "",
         message: "Максимальная ВЫСОТА указана в меню шага профиля",
       },
     });

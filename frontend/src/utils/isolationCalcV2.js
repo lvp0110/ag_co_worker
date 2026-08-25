@@ -133,8 +133,10 @@ export const normalizeSizeLimit = (row, warningsById = new Map()) => {
     return null;
   }
   const mode = String(row.mode || "common").trim() || "common";
+  const warningText = String(row.warning_text || "").trim();
   const warningId = String(row.warning_content_id ?? row.warning_id ?? "").trim();
   const warning =
+    (warningText ? { title: "", message: warningText } : null) ||
     normalizeSizeLimitWarning(row.warning) ||
     normalizeSizeLimitWarning(row.warning_content) ||
     normalizeSizeLimitWarning(row.warning_block) ||
@@ -150,6 +152,7 @@ export const normalizeSizeLimit = (row, warningsById = new Map()) => {
     min_value: Number.isFinite(minRaw) && minRaw > 0 ? minRaw : null,
     max_value: Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : null,
     sort_order: Number(row.sort_order) || 0,
+    warning_text: warningText || warning?.message || "",
     warning_content_id: warningId || "",
     warning,
     conditions: (Array.isArray(row.conditions) ? row.conditions : [])

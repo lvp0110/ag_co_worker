@@ -4,10 +4,8 @@ import {
   SIZE_LIMIT_MODES,
   createAdminConstructionSizeLimit,
   deleteAdminConstructionSizeLimit,
-  isUuid,
   listAdminConstructionCalculationParams,
   listAdminConstructionSizeLimits,
-  listAdminWarningContents,
   sizeLimitDimensionLabel,
   sizeLimitModeLabel,
   updateAdminConstructionSizeLimit,
@@ -36,18 +34,10 @@ const draftFromLimit = (limit) => ({
   mode: limit.mode || "common",
   min_value: mmField(limit.min_value),
   max_value: mmField(limit.max_value),
-  warning_content_id: limit.warning_content_id || "",
+  warning_text: String(limit.warning_text || "").trim(),
   step_value: mmField(stepFromLimit(limit)),
   sort_order: Number(limit.sort_order) || 0,
 });
-
-const warningOptionLabel = (item) => {
-  const name = String(item?.name || "").trim();
-  const code = String(item?.code || "").trim();
-  const id = String(item?.id || "").trim();
-  if (name && code) return `${name} (${code})`;
-  return name || code || id;
-};
 
 const findStepParam = (params) =>
   (params || []).find((row) => String(row.code || "").trim() === "step") ||
@@ -62,13 +52,23 @@ const stepOptionsFromParam = (param) => {
   return Number.isFinite(fallback) && fallback > 0 ? [fallback] : [];
 };
 
+/**
+ * construction_system_param_id в size-limits — id конфигурации параметра
+ * у конструкции (GET .../calculation-params → row.id), не param_id справочника.
+ */
+const stepConfigId = (stepParam) => {
+  const configId = Number(stepParam?.id);
+  return Number.isFinite(configId) && configId > 0 ? configId : null;
+};
+
 const buildPayload = (draft, stepParam) => {
   const mode = draft.mode === "parametric" ? "parametric" : "common";
+  const configId = stepConfigId(stepParam);
   const conditions =
-    mode === "parametric" && stepParam?.id
+    mode === "parametric" && configId
       ? [
           {
-            construction_system_param_id: stepParam.id,
+            construction_system_param_id: configId,
             value_int: Number(draft.step_value) || 0,
           },
         ]
@@ -78,7 +78,7 @@ const buildPayload = (draft, stepParam) => {
     mode,
     min_value: parseMm(draft.min_value),
     max_value: parseMm(draft.max_value),
-    warning_content_id: String(draft.warning_content_id || "").trim(),
+    warning_text: String(draft.warning_text || "").trim(),
     sort_order: Number(draft.sort_order) || 0,
     conditions,
   };
@@ -91,12 +91,12 @@ const validateDraft = (draft, stepParam) => {
   if (!parseMm(draft.min_value) && !parseMm(draft.max_value)) {
     return "Укажите минимум и/или максимум в мм.";
   }
-  if (!isUuid(draft.warning_content_id)) {
-    return "Нужен UUID warning-блока из CMS (поле warning_content_id).";
+  if (!String(draft.warning_text || "").trim()) {
+    return "Укажите текст предупреждения (warning_text).";
   }
   if (draft.mode === "parametric") {
-    if (!stepParam?.id) {
-      return "Сначала добавьте параметр расчёта «step» у конструкции.";
+    if (!stepConfigId(stepParam)) {
+      return "Сначала добавьте параметр расчёта «step» в блоке «Опции расчета».";
     }
     if (!Number(draft.step_value)) {
       return "Для ограничения по шагу выберите значение шага профиля.";
@@ -108,7 +108,6 @@ const validateDraft = (draft, stepParam) => {
 export default function AdminConstructionSizeLimits({ constructionId }) {
   const [rows, setRows] = useState([]);
   const [calcParams, setCalcParams] = useState([]);
-  const [warnings, setWarnings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -118,12 +117,13 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
   const [actionError, setActionError] = useState(null);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
+  const [openLimitIds, setOpenLimitIds] = useState(() => new Set());
   const [addDraft, setAddDraft] = useState({
     dimension: "len_x",
     mode: "common",
     min_value: "",
     max_value: "",
-    warning_content_id: "",
+    warning_text: "",
     step_value: "",
     sort_order: 0,
   });
@@ -137,26 +137,23 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
       setAddError(null);
       setActionError(null);
       try {
-        const [limits, params, cmsWarnings] = await Promise.all([
+        const [limitsBody, params] = await Promise.all([
           listAdminConstructionSizeLimits(constructionId),
           listAdminConstructionCalculationParams(constructionId).catch(() => []),
-          listAdminWarningContents().catch(() => []),
         ]);
         if (cancelled) return;
+        const limits = Array.isArray(limitsBody?.limits)
+          ? limitsBody.limits
+          : [];
         setRows(limits);
         setCalcParams(params);
-        setWarnings(cmsWarnings);
         setDrafts(
           Object.fromEntries(limits.map((row) => [row.id, draftFromLimit(row)]))
         );
         setAddDraft((prev) => ({
           ...prev,
           sort_order: limits.length,
-          warning_content_id:
-            prev.warning_content_id ||
-            limits[0]?.warning_content_id ||
-            cmsWarnings[0]?.id ||
-            "",
+          warning_text: prev.warning_text || limits[0]?.warning_text || "",
           step_value:
             prev.step_value ||
             String(findStepParam(params)?.default_value_int || "") ||
@@ -184,23 +181,20 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     [stepParam]
   );
 
-  const warningChoices = useMemo(() => {
-    const byId = new Map();
-    for (const item of warnings) {
-      if (item?.id) byId.set(item.id, item);
-    }
-    for (const row of rows) {
-      const item = row.warning_content;
-      if (item?.id) byId.set(item.id, item);
-    }
-    return [...byId.values()];
-  }, [warnings, rows]);
-
   const patchDraft = (id, patch) => {
     setDrafts((prev) => ({
       ...prev,
       [id]: { ...(prev[id] || {}), ...patch },
     }));
+  };
+
+  const toggleLimitOpen = (limitId) => {
+    setOpenLimitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(limitId)) next.delete(limitId);
+      else next.add(limitId);
+      return next;
+    });
   };
 
   const handleSave = async (row) => {
@@ -276,49 +270,19 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     }
   };
 
-  const renderWarningField = (draft, onChange, disabled) => {
-    const selectedId = String(draft.warning_content_id || "").trim();
-    const selected = warningChoices.find((item) => item.id === selectedId);
-    const known = warningChoices.some((item) => item.id === selectedId);
-    return (
-      <>
-        {warningChoices.length ? (
-          <label className="admin-page__field">
-            <span className="admin-page__field-label">Warning-блок</span>
-            <select
-              className="admin-page__select admin-page__select--full"
-              value={known ? selectedId : ""}
-              disabled={disabled}
-              onChange={(e) => onChange({ warning_content_id: e.target.value })}
-            >
-              <option value="">Указать UUID вручную…</option>
-              {warningChoices.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {warningOptionLabel(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <label className="admin-page__field">
-          <span className="admin-page__field-label">UUID warning-блока</span>
-          <input
-            className="admin-page__input"
-            value={draft.warning_content_id}
-            disabled={disabled}
-            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            onChange={(e) => onChange({ warning_content_id: e.target.value })}
-          />
-        </label>
-        {selected?.text || selected?.name ? (
-          <p className="admin-page__empty admin-page__empty--inline">
-            {selected.name ? <strong>{selected.name}. </strong> : null}
-            {selected.text}
-          </p>
-        ) : null}
-      </>
-    );
-  };
+  const renderWarningField = (draft, onChange, disabled) => (
+    <label className="admin-page__field">
+      <span className="admin-page__field-label">Текст предупреждения</span>
+      <textarea
+        className="admin-page__input"
+        rows={3}
+        value={draft.warning_text}
+        disabled={disabled}
+        placeholder="Например: Превышена допустимая высота для шага 600 мм"
+        onChange={(e) => onChange({ warning_text: e.target.value })}
+      />
+    </label>
+  );
 
   const renderLimitFields = (draft, onChange, disabled) => (
     <>
@@ -346,16 +310,18 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
           onChange={(e) => onChange({ mode: e.target.value })}
         >
           {SIZE_LIMIT_MODES.map((item) => (
-            <option
-              key={item.code}
-              value={item.code}
-              disabled={item.code === "parametric" && !stepParam}
-            >
+            <option key={item.code} value={item.code}>
               {item.label}
             </option>
           ))}
         </select>
       </label>
+      {draft.mode === "parametric" && !stepParam ? (
+        <p className="admin-page__empty admin-page__empty--inline">
+          Для режима «при шаге профиля» сначала добавьте параметр{" "}
+          <code>step</code> в блоке «Опции расчета».
+        </p>
+      ) : null}
       {draft.mode === "parametric" ? (
         <label className="admin-page__field">
           <span className="admin-page__field-label">Шаг профиля, мм</span>
@@ -420,9 +386,10 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     >
       <p className="admin-page__empty admin-page__empty--inline">
         Попадают в калькулятор через публичные calculation-params. Пока список
-        пуст, калькулятор берёт старые локальные лимиты. Для пола вторая сторона
-        проверяется как высота (len_z). Обычный и параметрический режим нельзя
-        смешивать на одном измерении.
+        пуст, калькулятор берёт старые локальные лимиты. Текст предупреждения
+        задаётся прямо в ограничении (warning_text). Для параметрической высоты
+        нужен <code>step</code> в «Опции расчета». Обычный и параметрический
+        режим нельзя смешивать на одном измерении.
       </p>
 
       {error && (
@@ -454,40 +421,69 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
                 const busy = savingId === row.id || deletingId === row.id;
                 const stepHint =
                   row.mode === "parametric" ? stepFromLimit(row) : null;
+                const open = openLimitIds.has(row.id);
+                const panelId = `size-limit-${row.id}`;
                 return (
                   <div
                     key={row.id}
-                    className="admin-page__replacement-block"
+                    className="admin-page__replacement-block admin-page__collapsible"
                   >
                     <div className="admin-page__composition-head">
                       <h4 className="admin-page__composition-title">
-                        {sizeLimitDimensionLabel(row.dimension)}
-                        <span className="admin-page__count">
-                          {sizeLimitModeLabel(row.mode)}
-                          {stepHint ? ` · ${stepHint} мм` : ""}
-                        </span>
+                        <button
+                          type="button"
+                          className="admin-page__collapsible-toggle"
+                          aria-expanded={open}
+                          aria-controls={panelId}
+                          onClick={() => toggleLimitOpen(row.id)}
+                        >
+                          <span
+                            className={
+                              "admin-page__collapsible-chevron" +
+                              (open
+                                ? " admin-page__collapsible-chevron--open"
+                                : "")
+                            }
+                            aria-hidden
+                          />
+                          {sizeLimitDimensionLabel(row.dimension)}
+                          <span className="admin-page__count">
+                            {sizeLimitModeLabel(row.mode)}
+                            {stepHint ? ` · ${stepHint} мм` : ""}
+                          </span>
+                        </button>
                       </h4>
                     </div>
-                    {renderLimitFields(draft, (patch) => patchDraft(row.id, patch), busy)}
-                    <div className="admin-page__meta-actions">
-                      <button
-                        type="button"
-                        className="admin-page__btn admin-page__btn--inline"
-                        disabled={busy}
-                        onClick={() => handleSave(row)}
-                      >
-                        {savingId === row.id ? "Сохранение…" : "Сохранить"}
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-page__btn admin-page__btn--icon admin-page__btn--danger"
-                        disabled={busy}
-                        aria-label={`Удалить ограничение ${row.id}`}
-                        title="Удалить"
-                        onClick={() => handleDelete(row)}
-                      >
-                        {deletingId === row.id ? "…" : "×"}
-                      </button>
+                    <div
+                      id={panelId}
+                      className="admin-page__collapsible-body"
+                      hidden={!open}
+                    >
+                      {renderLimitFields(
+                        draft,
+                        (patch) => patchDraft(row.id, patch),
+                        busy
+                      )}
+                      <div className="admin-page__meta-actions">
+                        <button
+                          type="button"
+                          className="admin-page__btn admin-page__btn--inline"
+                          disabled={busy}
+                          onClick={() => handleSave(row)}
+                        >
+                          {savingId === row.id ? "Сохранение…" : "Сохранить"}
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-page__btn admin-page__btn--icon admin-page__btn--danger"
+                          disabled={busy}
+                          aria-label={`Удалить ограничение ${row.id}`}
+                          title="Удалить"
+                          onClick={() => handleDelete(row)}
+                        >
+                          {deletingId === row.id ? "…" : "×"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

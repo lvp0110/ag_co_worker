@@ -150,7 +150,7 @@ export default function AppHeader() {
           </NavLink>
           {user?.role === "ADMIN" && (
             <NavLink
-              to="/admin?list=materials"
+              to="/admin?list=constructions"
               className={({ isActive }) =>
                 `app-header__link${
                   isActive || location.pathname.startsWith("/admin")

@@ -12,15 +12,12 @@ import {
   removeFromAdminImageLibrary,
   useAdminImageLibrary,
 } from "../utils/adminImageLibrary.js";
+import {
+  adminImageSrc,
+  clearAdminImageBlobPreview,
+  setAdminImageBlobPreview,
+} from "../utils/adminImageSrc.js";
 import AdminZoomableImage from "./AdminZoomableImage.jsx";
-
-const displayUrl = (url) => {
-  const s = String(url || "").trim();
-  if (!s) return "";
-  const path = s.split("?")[0];
-  if (/\/api\/v2\/public\/image\/?$/i.test(path)) return "";
-  return s;
-};
 
 export default function AdminImagesPanel() {
   const library = useAdminImageLibrary();
@@ -30,16 +27,27 @@ export default function AdminImagesPanel() {
   const [progress, setProgress] = useState("");
   const [error, setError] = useState(null);
   const [ready, setReady] = useState(false);
+  // bump after blob cache write so thumbs re-render
+  const [previewTick, setPreviewTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setError(null);
       try {
-        await ensureConstructionImageTypes();
-        if (!cancelled) setReady(true);
+        const types = await ensureConstructionImageTypes();
+        if (cancelled) return;
+        if (!types.some((row) => row.code === IMAGE_TYPE_PREVIEW)) {
+          throw new Error(
+            "Нет типа «preview». Нужен для загрузки в раздел «Изображения»."
+          );
+        }
+        setReady(true);
       } catch (err) {
-        if (!cancelled) setError(formatRequestError(err));
+        if (!cancelled) {
+          setReady(false);
+          setError(formatRequestError(err));
+        }
       }
     })();
     return () => {
@@ -64,10 +72,13 @@ export default function AdminImagesPanel() {
         if (!uploaded?.file_name) {
           throw new Error(`Upload не вернул file_name для «${file.name}».`);
         }
+        // Превью из файла — public/image с вложенным constr/preview/… сейчас 404.
+        setAdminImageBlobPreview(uploaded.file_name, URL.createObjectURL(file));
         addToAdminImageLibrary({
           ...uploaded,
           title: file.name,
         });
+        setPreviewTick((n) => n + 1);
       }
       setFiles([]);
       setFileKey((n) => n + 1);
@@ -85,9 +96,7 @@ export default function AdminImagesPanel() {
       <div className="admin-page__card-head">
         <h2 className="admin-page__card-title">
           Изображения
-          <span className="admin-page__count">
-            {library.length}
-          </span>
+          <span className="admin-page__count">{library.length}</span>
         </h2>
       </div>
 
@@ -137,9 +146,9 @@ export default function AdminImagesPanel() {
       {!library.length ? (
         <p className="admin-page__empty">Пока нет загруженных картинок.</p>
       ) : (
-        <ul className="admin-page__images-grid">
+        <ul className="admin-page__images-grid" data-preview-tick={previewTick}>
           {library.map((item) => {
-            const src = displayUrl(item.url);
+            const src = adminImageSrc(item);
             return (
               <li key={item.file_name} className="admin-page__images-card">
                 {src ? (
@@ -158,10 +167,16 @@ export default function AdminImagesPanel() {
                 </p>
                 <button
                   type="button"
-                  className="admin-page__btn admin-page__btn--inline"
-                  onClick={() => removeFromAdminImageLibrary(item.file_name)}
+                  className="admin-page__btn admin-page__btn--icon admin-page__btn--danger"
+                  aria-label={`Убрать ${item.title || item.file_name}`}
+                  title="Убрать из раздела"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearAdminImageBlobPreview(item.file_name);
+                    removeFromAdminImageLibrary(item.file_name);
+                  }}
                 >
-                  Убрать из раздела
+                  ×
                 </button>
               </li>
             );

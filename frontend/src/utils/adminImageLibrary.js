@@ -45,10 +45,18 @@ const writeAdminImageLibrary = (items) => {
 export const addToAdminImageLibrary = (row) => {
   const item = asLibraryItem(row);
   if (!item) return readAdminImageLibrary();
-  const next = [
-    item,
-    ...readAdminImageLibrary().filter((x) => x.file_name !== item.file_name),
-  ];
+  const current = readAdminImageLibrary();
+  const prev = current.find((x) => x.file_name === item.file_name);
+  // Не затираем url из upload пустым ответом GET /admin/images.
+  const merged = {
+    ...(prev || {}),
+    ...item,
+    url: item.url || prev?.url || "",
+    mime_type: item.mime_type || prev?.mime_type || "",
+    title: item.title || prev?.title || "",
+    added_at: item.added_at || prev?.added_at || Date.now(),
+  };
+  const next = [merged, ...current.filter((x) => x.file_name !== item.file_name)];
   writeAdminImageLibrary(next);
   return next;
 };
@@ -58,6 +66,21 @@ export const removeFromAdminImageLibrary = (fileName) => {
   const next = readAdminImageLibrary().filter((item) => item.file_name !== name);
   writeAdminImageLibrary(next);
   return next;
+};
+
+/** Подставляет url из раздела «Изображения», если GET /admin/images его не отдал. */
+export const overlayLibraryFields = (row, library = readAdminImageLibrary()) => {
+  if (!row) return null;
+  const fileName = String(row.file_name || "").trim();
+  if (!fileName) return row;
+  const lib = library.find((item) => item.file_name === fileName);
+  if (!lib) return row;
+  return {
+    ...row,
+    url: String(row.url || "").trim() || lib.url,
+    mime_type: String(row.mime_type || "").trim() || lib.mime_type,
+    title: String(row.title || "").trim() || lib.title,
+  };
 };
 
 export const useAdminImageLibrary = () => {

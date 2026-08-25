@@ -4,11 +4,13 @@
  * Контракт:
  *   POST /login           { email, password } → { code, data: User, error }
  *   GET  /auth/session    → { code, data: User } | 404 без cookie
+ *   POST /auth/refresh    cookie refresh_token + X-CSRF-Token → новые cookies
  *   POST /auth/logout     (нужен X-CSRF-Token = cookie csrf_token)
  *
  * Cookies (ставит auth):
- *   access_token  — httpOnly, сессия
- *   csrf_token    — читаемый, для мутаций
+ *   access_token  — httpOnly, короткий
+ *   refresh_token — httpOnly, длинный; apiClient обновляет access при 401
+ *   csrf_token    — читаемый, для мутаций и /auth/refresh
  *
  * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
@@ -103,7 +105,7 @@ export const session = async () => {
     const body = await request(
       "/auth/session",
       { method: "GET" },
-      { skipAuthRetry: true, silent401: true, allowNotFound: true }
+      { silent401: true, allowNotFound: true }
     );
     if (!body?.data) return null;
     const user = mapExternalUser(body.data);

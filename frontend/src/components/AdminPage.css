@@ -296,6 +296,14 @@
   outline-offset: 1px;
 }
 
+textarea.admin-page__input {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .admin-page__input--compact {
   width: 88px;
   min-width: 88px;
@@ -882,7 +890,7 @@
   margin-top: 0;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .admin-page__construction-top .admin-page__construction-images > .admin-page__composition-head {
@@ -897,7 +905,7 @@
 .admin-page__construction-top .admin-page__image-slot {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
 }
 
@@ -1310,14 +1318,36 @@
 }
 
 .admin-page__images-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--admin-border);
   border-radius: 8px;
   background: var(--admin-surface);
+}
+
+.admin-page__images-card .admin-page__images-thumb {
+  width: 100%;
+  height: 140px;
+  margin: 0;
+}
+
+.admin-page__images-card .admin-page__images-item-title {
+  margin: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-page__images-card .admin-page__btn--icon {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
 }
 
 .admin-page__images-card--pick {

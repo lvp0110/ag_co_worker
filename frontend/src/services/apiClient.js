@@ -6,8 +6,9 @@
  *   /admin/*         → auth/calc (:3005) admin materials/constructions
  *   /api/*           → backend (offers) / calc (/api/v1|/api/v2 в dev)
  *
- * credentials: 'include' — cookie access_token / csrf_token.
- * На 401 → window event `auth:unauthorized` (AuthContext открывает LoginModal).
+ * credentials: 'include' — cookie access_token / refresh_token / csrf_token.
+ * На 401 сначала POST /auth/refresh (cookie refresh_token + X-CSRF-Token),
+ * затем повтор исходного запроса. Если refresh не вышел — `auth:unauthorized`.
  * Не добавляйте Authorization header — только cookies.
  */
 
@@ -20,6 +21,42 @@ export const BASE_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE_URL).repla
 const dispatchUnauthorized = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+  }
+};
+
+const readCookie = (name) => {
+  if (typeof document === "undefined") return "";
+  const prefix = `${name}=`;
+  for (const part of document.cookie ? document.cookie.split("; ") : []) {
+    if (part.startsWith(prefix)) {
+      return decodeURIComponent(part.slice(prefix.length));
+    }
+  }
+  return "";
+};
+
+let refreshInFlight = null;
+
+/** POST /auth/refresh. true, если auth выставил новые cookies. */
+const refreshSession = async () => {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const csrf = readCookie("csrf_token");
+    if (!csrf) return false;
+    try {
+      const response = await doFetch("/auth/refresh", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
   }
 };
 
@@ -92,6 +129,9 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
   }
 
   if (response.status === 401) {
+    if (!options.skipAuthRetry && (await refreshSession())) {
+      return fetchWithAuth(path, init, { ...options, skipAuthRetry: true });
+    }
     if (!options.silent401) dispatchUnauthorized();
     const body = await parseResponse(response);
     console.error("[api] 401", init.method || "GET", url, body);

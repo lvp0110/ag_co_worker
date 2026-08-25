@@ -2038,6 +2038,7 @@ function ConstructionCalcParamsPanel({ constructionId }) {
   const [deletingId, setDeletingId] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [drafts, setDrafts] = useState({});
+  const [openParamIds, setOpenParamIds] = useState(() => new Set());
 
   useEffect(() => {
     if (constructionId == null) return undefined;
@@ -2228,6 +2229,15 @@ function ConstructionCalcParamsPanel({ constructionId }) {
     }));
   };
 
+  const toggleParamOpen = (configId) => {
+    setOpenParamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(configId)) next.delete(configId);
+      else next.add(configId);
+      return next;
+    });
+  };
+
   return (
     <AdminCollapsibleSection
       title="Опции расчета"
@@ -2267,94 +2277,121 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                 const isBool = isBoolCalcParam(row);
                 const busy =
                   savingId === row.id || deletingId === row.id;
+                const open = openParamIds.has(row.id);
+                const panelId = `calc-param-${row.id}`;
                 return (
                   <div
                     key={row.id || row.param_id}
-                    className="admin-page__replacement-block"
+                    className="admin-page__replacement-block admin-page__collapsible"
                   >
                     <div className="admin-page__composition-head">
                       <h4 className="admin-page__composition-title">
-                        {constructionParamOptionLabel(row)}
-                        <span className="admin-page__count">
-                          {row.value_type}
-                        </span>
+                        <button
+                          type="button"
+                          className="admin-page__collapsible-toggle"
+                          aria-expanded={open}
+                          aria-controls={panelId}
+                          onClick={() => toggleParamOpen(row.id)}
+                        >
+                          <span
+                            className={
+                              "admin-page__collapsible-chevron" +
+                              (open
+                                ? " admin-page__collapsible-chevron--open"
+                                : "")
+                            }
+                            aria-hidden
+                          />
+                          {constructionParamOptionLabel(row)}
+                          <span className="admin-page__count">
+                            {row.value_type}
+                          </span>
+                        </button>
                       </h4>
                     </div>
-                    <label className="admin-page__field admin-page__field--checkbox">
-                      <span className="admin-page__field-label">
-                        <input
-                          type="checkbox"
-                          checked={draft.is_required !== false}
-                          disabled={busy}
-                          onChange={(e) =>
-                            patchDraft(row.id, {
-                              is_required: e.target.checked,
-                            })
-                          }
-                        />
-                        Обязательный
-                      </span>
-                    </label>
-                    <label className="admin-page__field">
-                      <span className="admin-page__field-label">
-                        Значение по умолчанию
-                      </span>
-                      {isBool ? (
-                        <select
-                          className="admin-page__select admin-page__select--full"
-                          value={draft.default_value_bool ? "true" : "false"}
-                          disabled={busy}
-                          onChange={(e) =>
-                            patchDraft(row.id, {
-                              default_value_bool: e.target.value === "true",
-                            })
-                          }
-                        >
-                          <option value="true">Да</option>
-                          <option value="false">Нет</option>
-                        </select>
-                      ) : (
-                        <input
-                          className="admin-page__input"
-                          type="number"
-                          value={draft.default_value_int}
-                          disabled={busy}
-                          onChange={(e) =>
-                            patchDraft(row.id, {
-                              default_value_int: Number(e.target.value) || 0,
-                            })
-                          }
-                        />
+                    <div
+                      id={panelId}
+                      className="admin-page__collapsible-body"
+                      hidden={!open}
+                    >
+                      <label className="admin-page__field admin-page__field--checkbox">
+                        <span className="admin-page__field-label">
+                          <input
+                            type="checkbox"
+                            checked={draft.is_required !== false}
+                            disabled={busy}
+                            onChange={(e) =>
+                              patchDraft(row.id, {
+                                is_required: e.target.checked,
+                              })
+                            }
+                          />
+                          Обязательный
+                        </span>
+                      </label>
+                      <label className="admin-page__field">
+                        <span className="admin-page__field-label">
+                          Значение по умолчанию
+                        </span>
+                        {isBool ? (
+                          <select
+                            className="admin-page__select admin-page__select--full"
+                            value={draft.default_value_bool ? "true" : "false"}
+                            disabled={busy}
+                            onChange={(e) =>
+                              patchDraft(row.id, {
+                                default_value_bool: e.target.value === "true",
+                              })
+                            }
+                          >
+                            <option value="true">Да</option>
+                            <option value="false">Нет</option>
+                          </select>
+                        ) : (
+                          <input
+                            className="admin-page__input"
+                            type="number"
+                            value={draft.default_value_int}
+                            disabled={busy}
+                            onChange={(e) =>
+                              patchDraft(row.id, {
+                                default_value_int: Number(e.target.value) || 0,
+                              })
+                            }
+                          />
+                        )}
+                      </label>
+                      {isBool ? null : (
+                        <>
+                          <span className="admin-page__field-label">
+                            Варианты
+                          </span>
+                          <CalcParamOptionRows
+                            valueType={row.value_type}
+                            options={draft.options || []}
+                            disabled={busy}
+                            onChange={(next) =>
+                              patchDraft(row.id, { options: next })
+                            }
+                          />
+                        </>
                       )}
-                    </label>
-                    {isBool ? null : (
-                      <>
-                        <span className="admin-page__field-label">Варианты</span>
-                        <CalcParamOptionRows
-                          valueType={row.value_type}
-                          options={draft.options || []}
+                      <div className="admin-page__meta-actions">
+                        <button
+                          type="button"
+                          className="admin-page__btn admin-page__btn--inline"
                           disabled={busy}
-                          onChange={(next) =>
-                            patchDraft(row.id, { options: next })
-                          }
+                          onClick={() => handleSaveRow(row)}
+                        >
+                          {savingId === row.id ? "Сохранение…" : "Сохранить"}
+                        </button>
+                        <DeleteIconButton
+                          deleting={deletingId === row.id}
+                          disabled={busy}
+                          label={constructionParamOptionLabel(row)}
+                          onClick={() => handleDeleteRow(row)}
                         />
-                      </>
-                    )}
-                    <div className="admin-page__meta-actions">
-                      <button
-                        type="button"
-                        className="admin-page__btn admin-page__btn--inline"
-                        disabled={busy}
-                        onClick={() => handleSaveRow(row)}
-                      >
-                        {savingId === row.id ? "Сохранение…" : "Сохранить"}
-                      </button>
-                      <DeleteIconButton
-                        deleting={deletingId === row.id}
-                        disabled={busy}
-                        label={constructionParamOptionLabel(row)}
-                        onClick={() => handleDeleteRow(row)}
-                      />
+                      </div>
                     </div>
                   </div>
                 );
@@ -4861,7 +4898,7 @@ export default function AdminPage() {
       : null;
 
   if (!listKey) {
-    return <Navigate to="/admin?list=materials" replace />;
+    return <Navigate to="/admin?list=constructions" replace />;
   }
 
   return (
@@ -4871,16 +4908,6 @@ export default function AdminPage() {
           <h1 className="admin-page__title">Админка</h1>
           <nav className="admin-page__tabs" aria-label="Списки админки">
             <NavLink
-              to="/admin?list=materials"
-              className={() =>
-                `admin-page__tab${
-                  listKey === "materials" ? " admin-page__tab--active" : ""
-                }`
-              }
-            >
-              Материалы
-            </NavLink>
-            <NavLink
               to="/admin?list=constructions"
               className={() =>
                 `admin-page__tab${
@@ -4889,6 +4916,16 @@ export default function AdminPage() {
               }
             >
               Конструкции
+            </NavLink>
+            <NavLink
+              to="/admin?list=materials"
+              className={() =>
+                `admin-page__tab${
+                  listKey === "materials" ? " admin-page__tab--active" : ""
+                }`
+              }
+            >
+              Материалы
             </NavLink>
             <NavLink
               to="/admin?list=regions"

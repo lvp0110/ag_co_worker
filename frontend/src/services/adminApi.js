@@ -1104,6 +1104,57 @@ const buildCalcParamUpsertBody = (payload) => {
   return body;
 };
 
+const isBoolConstructionParam = (param) =>
+  String(param?.value_type || "").trim() === CONSTRUCTION_PARAM_TYPE_BOOL ||
+  String(param?.code || "").trim() === "dframe";
+
+/**
+ * Тело POST /admin/constructions/{id}/calculation-params
+ * для привязки типа из справочника (step / dframe / …).
+ */
+export const buildCalculationParamAttachPayload = (param, sortOrder = 0) => {
+  const paramId = Number(param?.id ?? param?.param_id);
+  const code = String(param?.code || "").trim();
+  if (isBoolConstructionParam(param)) {
+    return {
+      param_id: paramId,
+      value_type: CONSTRUCTION_PARAM_TYPE_BOOL,
+      is_required: true,
+      sort_order: Number(sortOrder) || 0,
+      default_value_bool: false,
+      options: [
+        { label: "Да", value_bool: true, sort_order: 0 },
+        { label: "Нет", value_bool: false, sort_order: 1 },
+      ],
+    };
+  }
+  const options =
+    code === "step"
+      ? [600, 400, 300].map((value, i) => ({
+          label: `${value} мм`,
+          value_int: value,
+          sort_order: i,
+        }))
+      : [
+          {
+            label: String(param?.name || code || "вариант"),
+            value_int: Number(param?.default_value_int) || 0,
+            sort_order: 0,
+          },
+        ];
+  return {
+    param_id: paramId,
+    value_type:
+      String(param?.value_type || CONSTRUCTION_PARAM_TYPE_INT).trim() ||
+      CONSTRUCTION_PARAM_TYPE_INT,
+    is_required: true,
+    sort_order: Number(sortOrder) || 0,
+    default_value_int:
+      code === "step" ? 600 : Number(options[0]?.value_int) || 0,
+    options,
+  };
+};
+
 /** GET /admin/constructions/params — справочник параметров расчета. */
 export const listAdminConstructionParams = async () => {
   const body = await request("/admin/constructions/params");
@@ -1206,7 +1257,14 @@ export const SIZE_LIMIT_MODES = [
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
 export const isUuid = (value) => UUID_RE.test(String(value || "").trim());
+
+export const isUsableWarningId = (value) => {
+  const id = String(value || "").trim();
+  return isUuid(id) && id.toLowerCase() !== NIL_UUID;
+};
 
 export const sizeLimitDimensionLabel = (code) =>
   SIZE_LIMIT_DIMENSIONS.find((item) => item.code === code)?.label ||
@@ -1264,8 +1322,8 @@ export const normalizeAdminSizeLimit = (row) => {
     normalizeWarningContent(row.warning_content) ||
     normalizeWarningContent(row.warning) ||
     null;
-  const warningId = String(
-    row.warning_content_id ?? warning?.id ?? ""
+  const warningText = String(
+    row.warning_text ?? warning?.text ?? warning?.message ?? ""
   ).trim();
   return {
     id: Number(row.id) || null,
@@ -1277,12 +1335,7 @@ export const normalizeAdminSizeLimit = (row) => {
     min_value: optionalMm(row.min_value),
     max_value: optionalMm(row.max_value),
     sort_order: Number(row.sort_order) || 0,
-    warning_content_id: warningId,
-    warning_content: warning
-      ? { ...warning, id: warning.id || warningId }
-      : warningId
-        ? { id: warningId, code: "", name: "", text: "" }
-        : null,
+    warning_text: warningText,
     conditions: (Array.isArray(row.conditions) ? row.conditions : [])
       .map(normalizeAdminSizeLimitCondition)
       .filter(Boolean),
@@ -1316,9 +1369,9 @@ export const buildSizeLimitUpsertBody = (payload) => {
     mode,
     min_value: optionalMm(payload?.min_value),
     max_value: optionalMm(payload?.max_value),
-    warning_content_id: String(payload?.warning_content_id || "").trim(),
     sort_order: Number(payload?.sort_order) || 0,
     conditions,
+    warning_text: String(payload?.warning_text || "").trim(),
   };
 };
 
@@ -1327,13 +1380,23 @@ export const listAdminConstructionSizeLimits = async (id) => {
   const body = await request(
     `/admin/constructions/${encodeURIComponent(id)}/size-limits`
   );
-  return unwrapNestedList(body, ["size_limits", "items"])
+  const data = body?.data ?? body;
+  const limits = unwrapNestedList(body, ["size_limits", "items"])
     .map(normalizeAdminSizeLimit)
     .filter(Boolean)
     .sort(
       (a, b) =>
         (a.sort_order || 0) - (b.sort_order || 0) || (a.id || 0) - (b.id || 0)
     );
+  const extraWarningRows = [
+    ...(Array.isArray(data?.warnings) ? data.warnings : []),
+    ...(Array.isArray(data?.warning_blocks) ? data.warning_blocks : []),
+    ...(Array.isArray(data?.warning_contents) ? data.warning_contents : []),
+  ];
+  const warnings = extraWarningRows
+    .map(normalizeWarningContent)
+    .filter((row) => isUsableWarningId(row?.id));
+  return { limits, warnings };
 };
 
 /**
@@ -1399,50 +1462,106 @@ export const deleteAdminConstructionSizeLimit = async (
   );
 };
 
+const flattenContentTypes = (rows) => {
+  const out = [];
+  const walk = (row) => {
+    if (!row || typeof row !== "object") return;
+    out.push(row);
+    const nested = row.subTypes || row.subtypes || row.children || [];
+    if (Array.isArray(nested)) nested.forEach(walk);
+  };
+  (Array.isArray(rows) ? rows : []).forEach(walk);
+  return out;
+};
+
 const looksLikeWarningContentType = (row) => {
   const hay = `${row?.code || ""} ${row?.name || ""} ${row?.description || ""}`;
-  return /warn|size.?limit|limit|alert|предупрежд|огранич/i.test(hay);
+  return /warn|size.?limit|limit|alert|предупрежд|огранич|info.?block|блок/i.test(
+    hay
+  );
+};
+
+const listContentByType = async (code) => {
+  const items = [];
+  const paths = [
+    `/content/list/${encodeURIComponent(code)}?status=approved`,
+    `/content/list/${encodeURIComponent(code)}`,
+  ];
+  for (const path of paths) {
+    try {
+      const body = await request(path, {}, { silent401: true, allowNotFound: true });
+      const rows = unwrapNestedList(body, ["contents", "items", "documents"]);
+      for (const row of rows) {
+        const item = normalizeWarningContent(row);
+        if (isUsableWarningId(item?.id)) items.push(item);
+      }
+      if (items.length) return items;
+    } catch {
+      /* тип недоступен */
+    }
+  }
+  return items;
 };
 
 /**
  * GET /content/types + /content/list/{type} — warning-блоки CMS (роль manager).
- * Если роли нет или типов нет — пустой массив, без разлогина.
+ * @returns {{ items: object[], error: string|null }}
  */
 export const listAdminWarningContents = async () => {
   let types = [];
   try {
     const body = await request("/content/types", {}, { silent401: true });
-    types = unwrapList(body);
-  } catch {
-    return [];
+    types = flattenContentTypes(unwrapList(body));
+  } catch (err) {
+    const status = err?.status;
+    if (status === 403) {
+      return {
+        items: [],
+        error:
+          "Нет роли manager: список warning из CMS недоступен. Нужен UUID уже существующего блока.",
+      };
+    }
+    if (status === 401) {
+      return {
+        items: [],
+        error: "Нет сессии для CMS. Войдите снова и повторите.",
+      };
+    }
+    return {
+      items: [],
+      error:
+        err?.message ||
+        "Не удалось загрузить типы контента CMS для warning-блоков.",
+    };
   }
 
   const preferred = types.filter(looksLikeWarningContentType);
-  const toFetch = preferred.slice(0, 8);
-  if (!toFetch.length) return [];
-  const byId = new Map();
-
-  for (const type of toFetch) {
-    const code = String(type?.code || "").trim();
-    if (!code) continue;
-    try {
-      const body = await request(
-        `/content/list/${encodeURIComponent(code)}`,
-        {},
-        { silent401: true, allowNotFound: true }
-      );
-      for (const row of unwrapList(body)) {
-        const item = normalizeWarningContent(row);
-        if (item?.id) byId.set(item.id, item);
-      }
-    } catch {
-      /* тип недоступен — пропускаем */
-    }
+  const toFetch = (preferred.length ? preferred : types)
+    .map((row) => String(row?.code || "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!toFetch.length) {
+    return {
+      items: [],
+      error: "В CMS нет типов контента, из которых можно выбрать warning.",
+    };
   }
 
-  return [...byId.values()].sort((a, b) =>
+  const byId = new Map();
+  for (const code of toFetch) {
+    const rows = await listContentByType(code);
+    for (const item of rows) byId.set(item.id, item);
+  }
+
+  const items = [...byId.values()].sort((a, b) =>
     (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id, "ru")
   );
+  return {
+    items,
+    error: items.length
+      ? null
+      : "В CMS нет warning-блоков. Создайте блок в CMS и вставьте его UUID.",
+  };
 };
 
 /**
