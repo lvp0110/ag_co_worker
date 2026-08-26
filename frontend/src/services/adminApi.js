@@ -78,6 +78,7 @@
 
 import { request } from "./apiClient.js";
 import { getCsrfToken } from "./authApi.js";
+import { resolveAdminPublicImageUrl } from "../utils/adminImageSrc.js";
 
 /** Достаёт массив из типичного конверта { code, data }. */
 const unwrapList = (body) => {
@@ -1911,9 +1912,13 @@ export const normalizeImageType = (row) => {
 /** Ответ POST /admin/images/upload. */
 export const normalizeImageUpload = (row) => {
   if (!row || typeof row !== "object") return null;
+  const fileName = row.file_name == null ? "" : String(row.file_name).trim();
+  const url = row.url == null ? "" : String(row.url).trim();
   return {
-    file_name: row.file_name == null ? "" : String(row.file_name).trim(),
-    url: row.url == null ? "" : String(row.url).trim(),
+    file_name: fileName,
+    // Nested key → /api/v2/public/image/constr%2Fpreview%2F….jpg (не basename).
+    url:
+      resolveAdminPublicImageUrl({ file_name: fileName, url }) || url,
     mime_type: row.mime_type == null ? "" : String(row.mime_type).trim(),
     file_size: Number(row.file_size) || 0,
     width: Number(row.width) || 0,
@@ -1926,14 +1931,17 @@ const fileNameFromImageUrl = (url) => {
   const marker = "/api/v2/public/image/";
   const index = s.indexOf(marker);
   if (index < 0) return "";
-  try {
-    return decodeURIComponent(s.slice(index + marker.length).split("?")[0]).replace(
-      /^\/+/,
-      ""
-    );
-  } catch {
-    return s.slice(index + marker.length).split("?")[0];
+  let key = s.slice(index + marker.length).split("?")[0];
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const next = decodeURIComponent(key);
+      if (next === key) break;
+      key = next;
+    } catch {
+      break;
+    }
   }
+  return key.replace(/^\/+/, "");
 };
 
 /** Элемент GET /admin/images и images[] публичных конструкций. */
@@ -1944,10 +1952,12 @@ export const normalizeEntityImage = (row) => {
       ? normalizeImageType(row.type)
       : null;
   const id = Number(row.id);
-  const url = row.url == null ? "" : String(row.url).trim();
+  const rawUrl = row.url == null ? "" : String(row.url).trim();
   const fileName =
     (row.file_name == null ? "" : String(row.file_name).trim()) ||
-    fileNameFromImageUrl(url);
+    fileNameFromImageUrl(rawUrl);
+  const url =
+    resolveAdminPublicImageUrl({ file_name: fileName, url: rawUrl }) || rawUrl;
   return {
     ...row,
     id: Number.isFinite(id) && id > 0 ? id : null,

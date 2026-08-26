@@ -7,6 +7,7 @@ import {
   getMaterialsListViaCalc,
   getPublicConstruction,
 } from './constructionApi';
+import { resolveAdminPublicImageUrl } from '../utils/adminImageSrc.js';
 import {
   mapPublicConstructionToInfoRecord,
   materialsFromPublicComposition,
@@ -97,6 +98,7 @@ export const getAllIsolationConstr = async () => {
 
 /**
  * URL для UI-иконок и уже готовых admin public/image ссылок.
+ * Nested ключи (constr/preview/…) кодируются одним сегментом (%2F), как на :3005.
  * Legacy Img_constr / zips_ceiling не поддерживаются — конструкции только через админку.
  * @param {string} imageName
  * @returns {string}
@@ -108,27 +110,6 @@ export const getImageUrl = (imageName) => {
   if (!s) return '';
   if (s.startsWith('blob:') || s.startsWith('data:')) return s;
 
-  // Уже same-origin admin public URL.
-  if (s.startsWith('/api/v2/public/image/')) {
-    if (/\/api\/v2\/public\/image\/?$/i.test(s.split('?')[0])) return '';
-    return `${BASE_URL}${s}`;
-  }
-
-  if (s.startsWith('http://') || s.startsWith('https://')) {
-    try {
-      const parsed = new URL(s);
-      if (parsed.pathname.startsWith('/api/v2/public/image/')) {
-        if (/\/api\/v2\/public\/image\/?$/i.test(parsed.pathname)) return '';
-        // Same-origin: Vite/server.js отдают public/image с AUTH MinIO.
-        return `${BASE_URL}${parsed.pathname}${parsed.search}`;
-      }
-    } catch {
-      // fall through
-    }
-    // Внешний CDN — как есть (не construction Img_constr).
-    return s;
-  }
-
   // Legacy construction paths больше не резолвим.
   if (
     s.startsWith('/Img_constr/') ||
@@ -136,6 +117,18 @@ export const getImageUrl = (imageName) => {
     s.startsWith('Img_constr/')
   ) {
     return '';
+  }
+
+  // Admin public/image (в т.ч. absolute localhost:3005) → same-origin с %2F.
+  // Не брать URL.pathname: браузер может раскодировать %2F в `/` и сломать :img.
+  const adminPublic = resolveAdminPublicImageUrl(s);
+  if (adminPublic) {
+    return `${BASE_URL}${adminPublic}`;
+  }
+
+  // Внешний CDN без public/image.
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    return s;
   }
 
   // UI-иконки (calc.svg, section icons) — плоский ключ на public/image.

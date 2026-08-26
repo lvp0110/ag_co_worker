@@ -61,7 +61,6 @@ import { formatRequestError } from "../services/apiClient.js";
 import AdminCollapsibleSection from "./AdminCollapsibleSection.jsx";
 import AdminConstructionImages from "./AdminConstructionImages.jsx";
 import AdminConstructionSizeLimits from "./AdminConstructionSizeLimits.jsx";
-import AdminImagesPanel from "./AdminImagesPanel.jsx";
 import "./AdminPage.css";
 
 const MATERIAL_USAGE_FILTERS = [
@@ -4892,8 +4891,7 @@ export default function AdminPage() {
   const listKey =
     listParam === "constructions" ||
     listParam === "materials" ||
-    listParam === "regions" ||
-    listParam === "images"
+    listParam === "regions"
       ? listParam
       : null;
 
@@ -4937,16 +4935,6 @@ export default function AdminPage() {
             >
               Регионы
             </NavLink>
-            <NavLink
-              to="/admin?list=images"
-              className={() =>
-                `admin-page__tab${
-                  listKey === "images" ? " admin-page__tab--active" : ""
-                }`
-              }
-            >
-              Изображения
-            </NavLink>
           </nav>
         </div>
 
@@ -4954,10 +4942,8 @@ export default function AdminPage() {
           <MaterialsListPanel />
         ) : listKey === "constructions" ? (
           <ConstructionsListPanel />
-        ) : listKey === "regions" ? (
-          <RegionsListPanel />
         ) : (
-          <AdminImagesPanel />
+          <RegionsListPanel />
         )}
       </div>
     </AdminGate>

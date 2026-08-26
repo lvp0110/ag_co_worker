@@ -1,4 +1,4 @@
-/** Session-only blob previews for admin image library (survive HMR, not reload). */
+/** Session-only blob previews after upload in construction card (survive HMR, not reload). */
 const previewByFileName = new Map();
 
 export const PUBLIC_IMAGE_PATH_PREFIX = "/api/v2/public/image/";
@@ -35,29 +35,42 @@ export const getAdminImageBlobPreview = (fileName) => {
 };
 
 /**
- * Public endpoint serves a single flat key (constr_preview_….jpg).
- * Nested upload URLs like constr/preview/x.jpg 404 — keep basename only.
+ * Нормализует storage-ключ файла.
+ * Upload пишет nested ключи constr/preview/CODE_….jpg — basename резать нельзя.
  */
-export const flattenAdminImageKey = (raw) => {
+export const normalizeAdminImageKey = (raw) => {
   const key = String(raw || "")
     .trim()
     .replace(/^\/+/, "");
-  if (!key) return "";
-  if (!key.includes("/")) return key;
-  const parts = key.split("/").filter(Boolean);
-  return parts[parts.length - 1] || "";
+  if (!key || key === ".") return "";
+  return key;
+};
+
+/** Полностью раскодирует path-сегмент (в т.ч. double-encoded %252F → /). */
+const fullyDecodeURIComponent = (value) => {
+  let current = String(value || "");
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const next = decodeURIComponent(current);
+      if (next === current) break;
+      current = next;
+    } catch {
+      break;
+    }
+  }
+  return current;
 };
 
 /**
- * Достаёт ключ файла из ответа upload / GET /admin/images / images[].
- * Только admin public/image или сырой file_name — без legacy Img_constr.
+ * Достаёт storage-ключ из ответа upload / GET /admin/images / images[].
+ * GET entity images отдаёт url, file_name в JSON скрыт (json:"-").
  */
 export const extractAdminImageKey = (image) => {
   if (image == null || image === "") return "";
 
   if (typeof image === "object") {
-    const fromName = String(image.file_name || "").trim();
-    if (fromName) return flattenAdminImageKey(fromName);
+    const fromName = normalizeAdminImageKey(image.file_name);
+    if (fromName) return fromName;
     return extractAdminImageKey(String(image.url || "").trim());
   }
 
@@ -66,38 +79,44 @@ export const extractAdminImageKey = (image) => {
 
   const markerIdx = s.indexOf(PUBLIC_IMAGE_PATH_PREFIX);
   if (markerIdx >= 0) {
-    let key = s.slice(markerIdx + PUBLIC_IMAGE_PATH_PREFIX.length).split("?")[0];
-    try {
-      key = decodeURIComponent(key);
-    } catch {
-      // keep raw slice
-    }
-    return flattenAdminImageKey(key);
+    const raw = s.slice(markerIdx + PUBLIC_IMAGE_PATH_PREFIX.length).split("?")[0];
+    return normalizeAdminImageKey(fullyDecodeURIComponent(raw));
   }
 
   // Чужой absolute URL (не public/image) — не admin-ключ.
   if (/^https?:\/\//i.test(s)) return "";
 
-  // Относительный путь или сырой file_name.
-  return flattenAdminImageKey(s.replace(/^\.\//, ""));
+  return normalizeAdminImageKey(s.replace(/^\.\//, ""));
 };
 
 /**
- * Durable same-origin URL для картинки, загруженной/привязанной через админку.
- * Vite/server.js проксируют /api/v2/public/image → AUTH (:3005 MinIO).
+ * Кодирует ключ в один path-параметр для gin `:img`.
+ * Nested ключи нельзя кодировать один раз: браузер/прокси превращают %2F в `/`,
+ * маршрут public/image/:img не матчится → «404 page not found».
+ * Double-encode: constr%252Fpreview%252F….jpg → gin QueryUnescape → nested key.
+ */
+export const encodeAdminPublicImageParam = (key) => {
+  const normalized = normalizeAdminImageKey(key);
+  if (!normalized) return "";
+  if (normalized.includes("/")) {
+    return encodeURIComponent(encodeURIComponent(normalized));
+  }
+  return encodeURIComponent(normalized);
+};
+
+/**
+ * Durable same-origin URL для админских картинок.
  */
 export const resolveAdminPublicImageUrl = (image) => {
   const key = extractAdminImageKey(image);
   if (!key) return "";
-  // Пустой stub …/public/image/ без файла.
-  if (!key || key === ".") return "";
-  return `${PUBLIC_IMAGE_PATH_PREFIX}${encodeURIComponent(key)}`;
+  return `${PUBLIC_IMAGE_PATH_PREFIX}${encodeAdminPublicImageParam(key)}`;
 };
 
 /**
- * src для превью в админ-потоке изображений.
- * 1) blob сразу после upload (мгновенно, до проверки public)
- * 2) durable /api/v2/public/image/<flat-key> из file_name / url
+ * src для превью слота в карточке конструкции.
+ * 1) blob сразу после upload
+ * 2) durable public/image URL
  */
 export const adminImageSrc = (image) => {
   if (image == null || image === "") return "";
@@ -112,3 +131,6 @@ export const adminImageSrc = (image) => {
   if (blob) return blob;
   return resolveAdminPublicImageUrl(image);
 };
+
+/** @deprecated alias — раньше flatten ломал nested keys */
+export const flattenAdminImageKey = normalizeAdminImageKey;

@@ -2,43 +2,60 @@ import { describe, expect, it } from "vitest";
 import {
   adminImageSrc,
   clearAdminImageBlobPreview,
+  encodeAdminPublicImageParam,
   extractAdminImageKey,
-  flattenAdminImageKey,
+  normalizeAdminImageKey,
   resolveAdminPublicImageUrl,
   setAdminImageBlobPreview,
 } from "./adminImageSrc.js";
 
-describe("flattenAdminImageKey", () => {
-  it("keeps flat keys", () => {
-    expect(flattenAdminImageKey("constr_preview_abc.jpg")).toBe(
+describe("normalizeAdminImageKey", () => {
+  it("keeps flat and nested keys", () => {
+    expect(normalizeAdminImageKey("constr_preview_abc.jpg")).toBe(
       "constr_preview_abc.jpg"
     );
+    expect(normalizeAdminImageKey("constr/preview/a.jpg")).toBe(
+      "constr/preview/a.jpg"
+    );
+  });
+});
+
+describe("encodeAdminPublicImageParam", () => {
+  it("single-encodes flat keys", () => {
+    expect(encodeAdminPublicImageParam("a.jpg")).toBe("a.jpg");
   });
 
-  it("takes basename from nested keys", () => {
-    expect(flattenAdminImageKey("constr/preview/a.jpg")).toBe("a.jpg");
+  it("double-encodes nested keys so %2F survives HTTP path", () => {
+    expect(encodeAdminPublicImageParam("constr/preview/x.jpg")).toBe(
+      "constr%252Fpreview%252Fx.jpg"
+    );
   });
 });
 
 describe("extractAdminImageKey", () => {
-  it("prefers file_name over nested url", () => {
+  it("prefers full nested file_name", () => {
     expect(
       extractAdminImageKey({
-        file_name: "constr_preview_x.jpg",
-        url: "http://localhost:3005/api/v2/public/image/constr/preview/x.jpg",
+        file_name: "constr/preview/x.jpg",
+        url: "http://localhost:3005/api/v2/public/image/constr%2Fpreview%2Fx.jpg",
       })
-    ).toBe("constr_preview_x.jpg");
+    ).toBe("constr/preview/x.jpg");
   });
 
-  it("reads flat key from public url", () => {
+  it("decodes single- and double-encoded public urls", () => {
+    expect(
+      extractAdminImageKey({
+        url: "http://localhost:3005/api/v2/public/image/constr%2Fpreview%2Fx.jpg",
+      })
+    ).toBe("constr/preview/x.jpg");
     expect(
       extractAdminImageKey(
-        "http://localhost:3005/api/v2/public/image/constr_preview_x.jpg"
+        "/api/v2/public/image/constr%252Fpreview%252Fx.jpg"
       )
-    ).toBe("constr_preview_x.jpg");
+    ).toBe("constr/preview/x.jpg");
   });
 
-  it("ignores empty public stub and foreign urls", () => {
+  it("ignores empty stub and foreign urls", () => {
     expect(
       extractAdminImageKey("http://localhost:3005/api/v2/public/image/")
     ).toBe("");
@@ -47,34 +64,39 @@ describe("extractAdminImageKey", () => {
 });
 
 describe("resolveAdminPublicImageUrl", () => {
-  it("builds same-origin public url from file_name", () => {
+  it("builds double-encoded same-origin url for nested keys", () => {
     expect(
       resolveAdminPublicImageUrl({
-        file_name: "constr_preview_x.jpg",
-        url: "http://localhost:3005/api/v2/public/image/constr/preview/x.jpg",
+        file_name: "constr/preview/x.jpg",
       })
-    ).toBe("/api/v2/public/image/constr_preview_x.jpg");
+    ).toBe("/api/v2/public/image/constr%252Fpreview%252Fx.jpg");
   });
 
-  it("flattens nested public url without file_name", () => {
+  it("rebuilds from server single-encoded url", () => {
     expect(
       resolveAdminPublicImageUrl({
-        url: "http://localhost:3005/api/v2/public/image/constr/preview/a.jpg",
+        url: "http://localhost:3005/api/v2/public/image/constr%2Fpreview%2Fa.jpg",
       })
-    ).toBe("/api/v2/public/image/a.jpg");
+    ).toBe("/api/v2/public/image/constr%252Fpreview%252Fa.jpg");
+  });
+
+  it("keeps flat keys", () => {
+    expect(
+      resolveAdminPublicImageUrl({ file_name: "constr_preview_x.jpg" })
+    ).toBe("/api/v2/public/image/constr_preview_x.jpg");
   });
 });
 
 describe("adminImageSrc", () => {
   it("prefers blob preview over remote url", () => {
-    setAdminImageBlobPreview("a.jpg", "blob:http://localhost/1");
+    setAdminImageBlobPreview("constr/preview/a.jpg", "blob:http://localhost/1");
     expect(
       adminImageSrc({
-        file_name: "a.jpg",
-        url: "http://localhost:3005/api/v2/public/image/constr/preview/a.jpg",
+        file_name: "constr/preview/a.jpg",
+        url: "http://localhost:3005/api/v2/public/image/constr%2Fpreview%2Fa.jpg",
       })
     ).toBe("blob:http://localhost/1");
-    clearAdminImageBlobPreview("a.jpg");
+    clearAdminImageBlobPreview("constr/preview/a.jpg");
   });
 
   it("falls back to durable public url", () => {
@@ -84,14 +106,5 @@ describe("adminImageSrc", () => {
         url: "http://localhost:3005/api/v2/public/image/b.jpg",
       })
     ).toBe("/api/v2/public/image/b.jpg");
-  });
-
-  it("ignores empty public image stub urls", () => {
-    expect(
-      adminImageSrc({
-        file_name: "",
-        url: "http://localhost:3005/api/v2/public/image/",
-      })
-    ).toBe("");
   });
 });
