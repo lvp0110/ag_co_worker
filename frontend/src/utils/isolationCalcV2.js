@@ -634,7 +634,7 @@ export const mapPublicConstructionToInfoRecord = (detail) => {
 /**
  * Публичный каталог GET /api/v2/constructions/{category}
  * (те же конструкции, что в админке). title/description/картинки — из API.
- * ItemsBase только для template/size_limit_id, пока лимиты не заведены в админке.
+ * ItemsBase только для template/size_limit_id (каталог / UI catalog_id).
  */
 export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
   if (!Array.isArray(rows)) return [];

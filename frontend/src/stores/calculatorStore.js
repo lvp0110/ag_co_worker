@@ -12,29 +12,20 @@ import { syncConstructionsTitlesFromItems } from "../utils/itemsCatalog.js";
  *   - накопленные конструкции (ConstrToCalc, ConstrToCalcToSent, materialsByConstruction);
  *   - табличное состояние (tableConstrToCalc);
  *   - выбор пользователя в UI (currentSubCategory/Items, openedSubCategories,
- *     template, profileStep (лаги пола), facingProfileStep (облицовка/перегородки),
- *     dFrame, currentConstr, currentFloorSealant,
- *     currentCeilingMats, currentGkla/Wool, unvisible).
+ *     template, currentConstr, unvisible).
  *
  * Эфемерные вещи (текущая форма нового элемента `constR`/`constrSent`/`opening`,
  * лоадеры, модалки) остаются useState в компоненте.
  */
 
 const initialState = {
-  currentGkla: "default",
-  currentWool: "default",
   unvisible: false,
   tableConstrToCalc: null,
   currentSubCategory: 0,
   currentItems: 0,
   openedSubCategories: { F: null, C: null, L: null, W: null },
   template: null,
-  profileStep: 400,
-  facingProfileStep: 600,
-  dFrame: false,
   currentConstr: "",
-  currentFloorSealant: "vibrosil",
-  currentCeilingMats: [],
   ConstrToCalcToSent: [],
   ConstrToCalc: [],
   materialsByConstruction: [],
@@ -97,9 +88,6 @@ export const useCalculatorStore = create(
         ),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        if (!Array.isArray(state.currentCeilingMats)) {
-          state.currentCeilingMats = [];
-        }
         if (!state?.ConstrToCalc?.length) return;
         const synced = syncConstructionsTitlesFromItems(
           state.ConstrToCalc,
@@ -113,7 +101,7 @@ export const useCalculatorStore = create(
 
 /**
  * Хук в стиле useState для поля стора — drop-in замена:
- *   const [currentGkla, setCurrentGkla] = useCalcField("currentGkla");
+ *   const [unvisible, setUnvisible] = useCalcField("unvisible");
  *
  * Подписка только на одно поле — изменение других ключей не ре-рендерит компонент.
  */

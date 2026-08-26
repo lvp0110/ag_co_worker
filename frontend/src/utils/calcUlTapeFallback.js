@@ -274,7 +274,7 @@ export const GKLA_NO_CHOICE_AG_IDS = new Set(["AG.W108"]);
 export const hasGklaChoice = (agId) =>
   Boolean(agId) && !GKLA_NO_CHOICE_AG_IDS.has(String(agId).trim());
 
-/** Значение currentWool → суффикс *_eco_s в шифре расчёта. */
+/** Суффикс *_eco_s в шифре расчёта (минвата Шуманет-ЭКО-С). */
 export const WOOL_ECO_S = "eco_s";
 
 export const WOOL_ECO_S_SUFFIX = `_${WOOL_ECO_S}`;

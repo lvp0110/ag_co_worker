@@ -22,39 +22,6 @@ export const calculateAreaAndPerimeter = (lenX, lenY, lenZ, currentSubCategory) 
   return { area, perimeter };
 };
 
-import {
-  hasEcoSWoolChoice,
-  hasGklaChoice,
-  stripHangerSuffix,
-  stripTapeSuffix,
-} from "./calcUlTapeFallback.js";
-
-/**
- * Получает код конструкции по материалам
- */
-export const getConstructionCode = (
-  currentConstr,
-  currentGkla,
-  currentWool
-) => {
-  const { base: baseWithHanger, tape } = stripTapeSuffix(currentConstr);
-  const { base } = stripHangerSuffix(baseWithHanger);
-  const gkla = hasGklaChoice(base) ? currentGkla : "default";
-  const wool = hasEcoSWoolChoice(base) ? currentWool : "default";
-  let code = base;
-  if (gkla == "default" && wool == "default") {
-    code = base;
-  } else if (gkla == "default") {
-    code = `${base}_${wool}`;
-  } else if (wool == "default") {
-    code = `${base}_${gkla}`;
-  } else {
-    code = `${base}_${gkla}_${wool}`;
-  }
-  code += tape;
-  return code;
-};
-
 /**
  * Базовый шифр для колонки «шифр» в UI (AG.L401), если в расчёт ушёл вариант
  * с суффиксом материалов (AG.L401_2500P). Сопоставление — по каталогу админки.

@@ -684,6 +684,35 @@ button::-moz-focus-inner {
   padding: 10px 12px;
 }
 
+.selected-item-forms__dimensions .radio-option {
+  margin-bottom: 0;
+}
+
+.selected-item-forms__openings-table {
+  margin-top: 4px;
+  width: 100%;
+}
+
+.selected-item-forms__openings-table .data {
+  width: 100%;
+}
+
+.selected-item-forms__openings-table th,
+.selected-item-forms__openings-table td {
+  text-align: center;
+}
+
+.selected-item-forms__openings-table thead tr:first-child th {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.selected-item-forms__openings-delete {
+  height: 30px;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
 .selected-item-forms h4.selected-item-forms__title,
 .selected-item-forms h4.selected-item-forms__group-heading {
   display: block;

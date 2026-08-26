@@ -1,6 +1,6 @@
 import ItemsBase from "./itemsBase.js";
 
-/** Fallback template/size_limit_id, пока лимиты не заведены в админке. */
+/** Fallback template/size_limit_id из ItemsBase (каталог / UI), не лимиты размеров. */
 export { ItemsBase };
 export default ItemsBase;
 

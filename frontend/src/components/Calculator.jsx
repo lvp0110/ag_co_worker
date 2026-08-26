@@ -18,8 +18,6 @@ import {
   validateFloorMaxInput,
   validateConstructionSizeLimits,
   hasApiSizeLimits,
-  normalizeFacingProfileStep,
-  normalizeLagProfileStep,
 } from "../utils/validation";
 import {
   calculateAreaAndPerimeter,
@@ -68,22 +66,13 @@ const Calculator = () => {
 
   // Persistent-поля: живут в zustand-сторе (sessionStorage), переживают
   // переходы по страницам в рамках сессии. См. stores/calculatorStore.js.
-  const [currentGkla, setCurrentGkla] = useCalcField("currentGkla");
-  const [currentWool, setCurrentWool] = useCalcField("currentWool");
   const [unvisible, setUnvisible] = useCalcField("unvisible");
   const [tableConstrToCalc, setTableConstrToCalc] = useCalcField("tableConstrToCalc");
   const [currentSubCategory, setCurrentSubCategory] = useCalcField("currentSubCategory");
   const [currentItems, setCurrentItems] = useCalcField("currentItems");
   const [openedSubCategories, setOpenedSubCategories] = useCalcField("openedSubCategories");
   const [template, setTemplate] = useCalcField("template");
-  const [profileStep, setProfileStep] = useCalcField("profileStep");
-  const [facingProfileStep, setFacingProfileStep] = useCalcField("facingProfileStep");
-  const [dFrame, setDFrame] = useCalcField("dFrame");
   const [currentConstr, setCurrentConstr] = useCalcField("currentConstr");
-  const [currentFloorSealant, setCurrentFloorSealant] =
-    useCalcField("currentFloorSealant");
-  const [currentCeilingMats, setCurrentCeilingMats] =
-    useCalcField("currentCeilingMats");
   const [ConstrToCalcToSent, setConstrToCalcToSent] = useCalcField("ConstrToCalcToSent");
   const [ConstrToCalc, setConstrToCalc] = useCalcField("ConstrToCalc");
   const [materialsByConstruction, setMaterialsByConstruction] = useCalcField(
@@ -295,32 +284,17 @@ const Calculator = () => {
         setCurrentItems(0);
         setTemplate(null);
         setCurrentConstr("");
-        setCurrentFloorSealant("vibrosil");
-        setCurrentCeilingMats([]);
       } else {
         setCurrentItems(item.id);
         setTemplate(item.template);
         setTableConstrToCalc(1);
         setCurrentConstr(item.ag_id);
-        setCurrentFloorSealant("vibrosil");
-        setCurrentCeilingMats([]);
-        setCurrentGkla("default");
-        setCurrentWool("default");
-        if (item.c_id === "W" || item.c_id === "L") {
-          setFacingProfileStep(600);
-        }
         if (item.c_id) {
           setCurrentSubCategory(item.c_id);
         }
       }
     },
-    [
-      currentItems,
-      setCurrentWool,
-      setFacingProfileStep,
-      setCurrentGkla,
-      setCurrentCeilingMats,
-    ]
+    [currentItems]
   );
 
   useEffect(() => {
@@ -333,23 +307,18 @@ const Calculator = () => {
         // Иначе обновление itemsWithImages может затирать выбранный suffix-вариант.
         if (initializedItemIdRef.current !== currentItems) {
           setCurrentConstr(selectedItem.ag_id);
-          setCurrentCeilingMats([]);
           initializedItemIdRef.current = currentItems;
         }
       }
     } else {
       setTemplate(null);
       setCurrentConstr("");
-      setCurrentFloorSealant("vibrosil");
-      setCurrentCeilingMats([]);
       initializedItemIdRef.current = null;
     }
   }, [
     currentItems,
     itemsWithImages,
     setCurrentConstr,
-    setCurrentFloorSealant,
-    setCurrentCeilingMats,
     setTableConstrToCalc,
     setTemplate,
   ]);
@@ -538,16 +507,11 @@ const Calculator = () => {
   const showMakeKpButton = ConstrToCalcToSent.length > 0;
 
   const addConstrToCalc = useCallback(async () => {
-    let calcProfileStep = Number(profileStep) || 600;
-    if (template === 3) {
-      calcProfileStep = normalizeLagProfileStep(profileStep);
-    } else if (currentSubCategory === "W" || currentSubCategory === "L") {
-      calcProfileStep = normalizeFacingProfileStep(facingProfileStep);
-    }
-    const apiStep = paramIntValue(calcApiValues.paramValues, "step", 0);
-    if (apiStep) {
-      calcProfileStep = apiStep;
-    }
+    // step/dframe: из API params; иначе константы (legacy UI выбора удалён).
+    const fallbackStep =
+      currentSubCategory === "W" || currentSubCategory === "L" ? 600 : 400;
+    const calcProfileStep =
+      paramIntValue(calcApiValues.paramValues, "step", 0) || fallbackStep;
 
     const showSizeError = (html, confirmButtonText = "OK") => {
       setModal({
@@ -578,7 +542,6 @@ const Calculator = () => {
         currentSubCategory,
         currentItems,
         template,
-        calcProfileStep,
         itemsWithImages
       );
       if (inputError) {
@@ -616,7 +579,7 @@ const Calculator = () => {
     const apiDframe = paramBoolValue(
       calcApiValues.paramValues,
       "dframe",
-      dFrame
+      false
     );
     const apiCeilShift = paramIntValue(
       calcApiValues.paramValues,
@@ -723,10 +686,7 @@ const Calculator = () => {
       setConstrSent({ ...constSentZero });
       setOpening({ ...openingZero });
       setConstR({ ...constRZero });
-      setDFrame(false);
       setUnvisible(false);
-      setProfileStep(400);
-      setFacingProfileStep(600);
       setCalcApiValues((prev) => {
         const defaultStep = defaultCalcApiValues(calcApiSpec).paramValues?.step;
         if (!defaultStep) return prev;
@@ -738,10 +698,6 @@ const Calculator = () => {
           },
         };
       });
-      setCurrentGkla("default");
-      setCurrentWool("default");
-      setCurrentFloorSealant("vibrosil");
-      setCurrentCeilingMats([]);
     } catch (error) {
       const raw = formatRequestError(error);
       let errorMessage = error?.message || raw;
@@ -766,15 +722,10 @@ const Calculator = () => {
     currentSubCategory,
     currentItems,
     itemsWithImages,
-    profileStep,
-    facingProfileStep,
-    dFrame,
     constrSent,
     template,
     calcApiValues,
     calcApiSpec,
-    setProfileStep,
-    setFacingProfileStep,
   ]);
 
   const recalcConstructionReplacement = useCallback(
@@ -1082,7 +1033,6 @@ const Calculator = () => {
                             selectedItem={selectedItem}
                             constR={constR}
                             setConstR={setConstR}
-                            currentSubCategory={currentSubCategory}
                             unvisible={unvisible}
                             setUnvisible={setUnvisible}
                             opening={opening}

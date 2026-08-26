@@ -3,20 +3,19 @@ import FloorForm from "./forms/FloorForm";
 import CeilingForm from "./forms/CeilingForm";
 import FacingForm from "./forms/FacingForm";
 import SoundboardForm from "./forms/SoundboardForm";
-import ConstructionParameters from "./ConstructionParameters";
+import OpeningsForm from "./OpeningsForm";
 import CalcApiOptions from "./CalcApiOptions";
 import { hasCalcApiOptions, defaultCalcApiValues } from "../utils/isolationCalcV2";
 
 /**
- * Формы выбранного элемента: размеры — старые формы по секции,
- * параметры и доп. материалы — из calculation-params / composition.
- * Замена материалов — в таблице состава, не в этой форме.
+ * Формы выбранного элемента: размеры — формы по секции,
+ * параметры и доп. материалы — из calculation-params / composition,
+ * проёмы (facing) — OpeningsForm.
  */
 const SelectedItemForms = ({
   selectedItem,
   constR,
   setConstR,
-  currentSubCategory,
   unvisible,
   setUnvisible,
   opening,
@@ -124,15 +123,13 @@ const SelectedItemForms = ({
           />
           {apiOptions}
           {unvisible && (
-            <ConstructionParameters
+            <OpeningsForm
               selectedItem={selectedItem}
-              currentSubCategory={currentSubCategory}
               opening={opening}
               setOpening={setOpening}
               openings={constrSent.Openings}
               onAddOpening={onAddOpening}
               onDeleteOpening={onDeleteOpening}
-              openingsOnly
             />
           )}
         </>

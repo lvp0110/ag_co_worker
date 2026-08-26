@@ -14,7 +14,7 @@ const specFromLimits = (size_limits, params = []) =>
   });
 
 describe("validateConstructionSizeLimits", () => {
-  it("returns null when size_limits are empty (legacy fallback)", () => {
+  it("returns null when size_limits are empty (absolute-bounds fallback)", () => {
     expect(
       validateConstructionSizeLimits({ lenX: 10 }, [], { step: { value_int: 600 } })
     ).toBeNull();

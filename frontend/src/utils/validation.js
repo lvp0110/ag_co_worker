@@ -1,26 +1,4 @@
-import SizeLimits from "../data/sizeLimits";
 import { getValidationMessage } from "../constants/validationMessages";
-
-export const FACING_PROFILE_STEPS = [300, 400, 600];
-export const LAG_PROFILE_STEPS = [300, 400];
-export const FACING_TEMPLATES = [
-  6, 50, 75, 100, 101, 50.1, 75.1, 100.1, 101.1, 50.2, 75.2, 100.2, 8.1,
-];
-
-/** Шаг профиля для облицовки/перегородок: 300 | 400 | 600, иначе 600. */
-export const normalizeFacingProfileStep = (value) => {
-  const n = Number(value);
-  return FACING_PROFILE_STEPS.includes(n) ? n : 600;
-};
-
-/** Шаг лаг: 300 | 400, иначе 400. */
-export const normalizeLagProfileStep = (value) => {
-  const n = Number(value);
-  return LAG_PROFILE_STEPS.includes(n) ? n : 400;
-};
-
-export const isFacingTemplate = (template) =>
-  FACING_TEMPLATES.includes(template);
 
 /**
  * Проверяет, является ли конструкция ЗИПС потолком
@@ -31,28 +9,6 @@ export const isZIPSCeiling = (currentSubCategory, template, itemTemplate, itemCI
     (itemCId == "C" && itemTemplate == 4) ||
     (itemAgId && itemAgId.startsWith("AG.Z"))
   );
-};
-
-/**
- * id из sizeLimits: ItemsBase.id, не id публичного каталога.
- */
-export const sizeLimitConstrId = (item, fallbackId) =>
-  item?.size_limit_id ?? item?.id ?? fallbackId;
-
-/**
- * Получить максимальную высоту конструкции из sizeLimits в метрах
- */
-export const getMaxLenZInMeters = (idConstr, step, subCategory) => {
-  const sizeLimit = SizeLimits.find(
-    (el) =>
-      el.id == subCategory &&
-      el.id_constr == idConstr &&
-      el.step == String(step)
-  );
-  if (sizeLimit && sizeLimit.max_lenZ) {
-    return (sizeLimit.max_lenZ / 1000).toFixed(1);
-  }
-  return null;
 };
 
 export const hasApiSizeLimits = (sizeLimits) =>
@@ -118,7 +74,7 @@ const dimensionValueMm = (dimension, constR) => {
 
 /**
  * Валидация размеров по size_limits из calculation-params.
- * Пустой список — null (нужен локальный fallback).
+ * Пустой список — null (тогда Calculator использует абсолютные bounds ниже).
  */
 export const validateConstructionSizeLimits = (
   constR,
@@ -157,69 +113,50 @@ export const getMaxLenZFromSizeLimits = (sizeLimits, step, params = []) => {
 };
 
 /**
- * Валидация входных данных для конструкций
+ * Абсолютные min/max размеров, когда у конструкции нет API size_limits.
+ * Макс. высота по шагу профиля — только через validateConstructionSizeLimits.
  */
-export const validateInput = (constR, currentSubCategory, currentItems, template, profileStep, itemsWithImages) => {
+export const validateInput = (
+  constR,
+  currentSubCategory,
+  currentItems,
+  template,
+  itemsWithImages
+) => {
   const currentItem = itemsWithImages.find((el) => el.id == currentItems);
   const itemTemplate = currentItem?.template;
   const itemAgId = currentItem?.ag_id;
   const itemCId = currentItem?.c_id;
-  const limitsId = sizeLimitConstrId(currentItem, currentItems);
 
-  const isZIPS = isZIPSCeiling(currentSubCategory, template, itemTemplate, itemCId, itemAgId);
-  const stepForLimits =
-    currentSubCategory == "W" || currentSubCategory == "L"
-      ? normalizeFacingProfileStep(profileStep)
-      : profileStep;
-
-  let objectX;
-  let max_constr_size;
+  const isZIPS = isZIPSCeiling(
+    currentSubCategory,
+    template,
+    itemTemplate,
+    itemCId,
+    itemAgId
+  );
 
   if (currentSubCategory == "W") {
-    objectX = SizeLimits.find(
-      (el) => el.id_constr == limitsId && el.step == stepForLimits
-    );
-    if (!objectX) return null;
-    max_constr_size = objectX.max_lenZ;
-
     if (isNaN(+constR.lenX) || +constR.lenX < 100)
       return getValidationMessage("W_LENX_MIN_100");
     else if (+constR.lenX > 50000)
       return getValidationMessage("W_LENX_MAX_50000");
     else if (isNaN(+constR.lenZ) || +constR.lenZ < 100)
       return getValidationMessage("W_LENZ_MIN_100");
-    else if (+constR.lenZ > max_constr_size)
-      return getValidationMessage("W_LENZ_MAX");
   } else if (currentSubCategory == "L" && template != 6) {
-    objectX = SizeLimits.find(
-      (el) => el.id_constr == limitsId && el.step == stepForLimits
-    );
-    if (!objectX) return null;
-    max_constr_size = objectX.max_lenZ;
-
     if (isNaN(+constR.lenX) || +constR.lenX < 100)
       return getValidationMessage("L_NOT6_LENX_MIN_100");
     else if (+constR.lenX > 50000)
       return getValidationMessage("L_NOT6_LENX_MAX_50000");
     else if (isNaN(+constR.lenZ) || +constR.lenZ < 100)
       return getValidationMessage("L_NOT6_LENZ_MIN_100");
-    else if (+constR.lenZ > max_constr_size)
-      return getValidationMessage("L_NOT6_LENZ_MAX");
   } else if (currentSubCategory == "L" && template == 6) {
-    objectX = SizeLimits.find(
-      (el) => el.id_constr == limitsId && el.step == stepForLimits
-    );
-    if (!objectX) return null;
-    max_constr_size = objectX.max_lenZ;
-
     if (isNaN(+constR.lenX) || +constR.lenX < 200)
       return getValidationMessage("L_T6_LENX_MIN_200");
     else if (+constR.lenX > 50000)
       return getValidationMessage("L_T6_LENX_MAX_50000");
     else if (isNaN(+constR.lenZ) || +constR.lenZ < 200)
       return getValidationMessage("L_T6_LENZ_MIN_200");
-    else if (+constR.lenZ > max_constr_size)
-      return getValidationMessage("L_T6_LENZ_MAX");
   } else if (currentSubCategory == "C" && template == 5) {
     if (isNaN(+constR.lenX) || +constR.lenX < 250)
       return getValidationMessage("C_T5_LENX_MIN_250");
@@ -330,15 +267,3 @@ export const validateFloorMaxInput = (constR, currentSubCategory, template) => {
   }
   return null;
 };
-
-
-
-
-
-
-
-
-
-
-
-
