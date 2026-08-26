@@ -51,7 +51,12 @@ const formatSizeLimitMessage = (limit, kind) => {
     kind === "min"
       ? `Минимальный размер конструкции ${limit?.min_value} мм`
       : `Максимальный размер конструкции ${limit?.max_value} мм`;
-  const message = limit?.warning?.message || fallback;
+  const message =
+    (kind === "min"
+      ? limit?.warning_text_min || limit?.warning?.message_min
+      : limit?.warning_text_max || limit?.warning?.message_max) ||
+    limit?.warning?.message ||
+    fallback;
   if (title) return `<span class="p1">${title}</span> <br>${message}`;
   return message;
 };

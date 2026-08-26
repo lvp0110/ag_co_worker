@@ -36,7 +36,8 @@ describe("admin size limits", () => {
       mode: "parametric",
       min_value: null,
       max_value: 4200,
-      warning_text: "Максимум зависит от шага",
+      warning_text_min: "Максимум зависит от шага",
+      warning_text_max: "Максимум зависит от шага",
       conditions: [
         {
           construction_system_param_id: 15,
@@ -47,36 +48,41 @@ describe("admin size limits", () => {
     });
   });
 
-  it("normalizes warning_text from API", () => {
+  it("normalizes warning_text_min and warning_text_max from API", () => {
     const row = normalizeAdminSizeLimit({
       id: 1,
       dimension: "len_x",
       mode: "common",
+      min_value: 100,
       max_value: 50000,
-      warning_text: "В конструкциях шире 15 м нужны деформационные швы",
+      warning_text_min: "Минимальная ширина 100 мм",
+      warning_text_max: "В конструкциях шире 15 м нужны деформационные швы",
     });
-    expect(row.warning_text).toBe(
+    expect(row.warning_text_min).toBe("Минимальная ширина 100 мм");
+    expect(row.warning_text_max).toBe(
       "В конструкциях шире 15 м нужны деформационные швы"
     );
   });
 
-  it("builds common upsert with warning_text", () => {
+  it("builds common upsert with warning_text_min and warning_text_max", () => {
     expect(
       buildSizeLimitUpsertBody({
         dimension: "len_x",
         mode: "common",
-        min_value: "",
+        min_value: 100,
         max_value: 50000,
-        warning_text: "Превышена допустимая ширина",
+        warning_text_min: "Минимум",
+        warning_text_max: "Превышена допустимая ширина",
         sort_order: 0,
         conditions: [{ construction_system_param_id: 15, value_int: 600 }],
       })
     ).toEqual({
       dimension: "len_x",
       mode: "common",
-      min_value: null,
+      min_value: 100,
       max_value: 50000,
-      warning_text: "Превышена допустимая ширина",
+      warning_text_min: "Минимум",
+      warning_text_max: "Превышена допустимая ширина",
       sort_order: 0,
       conditions: [],
     });
@@ -89,12 +95,14 @@ describe("admin size limits", () => {
         mode: "parametric",
         min_value: 100,
         max_value: 4200,
-        warning_text: "Превышена допустимая высота для шага 600 мм",
+        warning_text_min: "Мин высота",
+        warning_text_max: "Превышена допустимая высота для шага 600 мм",
         conditions: [{ construction_system_param_id: 42, value_int: 600 }],
       })
     ).toMatchObject({
       mode: "parametric",
-      warning_text: "Превышена допустимая высота для шага 600 мм",
+      warning_text_min: "Мин высота",
+      warning_text_max: "Превышена допустимая высота для шага 600 мм",
       conditions: [{ construction_system_param_id: 42, value_int: 600 }],
     });
   });
@@ -106,7 +114,7 @@ describe("admin size limits", () => {
         dimension: "len_z",
         mode: "parametric",
         max_value: 4200,
-        warning_text: "макс",
+        warning_text_max: "макс",
         conditions: [
           {
             // catalog param_id=15, config id=42 — в body должен уйти 42

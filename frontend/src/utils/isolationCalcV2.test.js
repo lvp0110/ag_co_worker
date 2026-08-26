@@ -144,9 +144,10 @@ describe("isolationCalcV2", () => {
               min_value: 100,
               max_value: 50000,
               sort_order: 1,
+              warning_text_min: "Минимальная ШИРИНА конструкции 100 мм",
+              warning_text_max: "В конструкциях шире 15 м нужны швы",
               warning: {
                 title: "Введите правильную ширину",
-                text: "Минимальная ШИРИНА конструкции 100 мм",
               },
             },
             {
@@ -154,7 +155,7 @@ describe("isolationCalcV2", () => {
               mode: "parametric",
               max_value: 3000,
               sort_order: 2,
-              warning_text: "Максимальная ВЫСОТА указана в меню шага профиля",
+              warning_text_max: "Максимальная ВЫСОТА указана в меню шага профиля",
               conditions: [
                 { construction_system_param_id: 15, value_int: 600 },
               ],
@@ -179,20 +180,22 @@ describe("isolationCalcV2", () => {
       mode: "common",
       min_value: 100,
       max_value: 50000,
+      warning_text_min: "Минимальная ШИРИНА конструкции 100 мм",
+      warning_text_max: "В конструкциях шире 15 м нужны швы",
       warning: {
         title: "Введите правильную ширину",
-        message: "Минимальная ШИРИНА конструкции 100 мм",
+        message_min: "Минимальная ШИРИНА конструкции 100 мм",
+        message_max: "В конструкциях шире 15 м нужны швы",
       },
     });
     expect(spec.sizeLimits[1]).toMatchObject({
       dimension: "len_z",
       mode: "parametric",
       max_value: 3000,
-      warning_text: "Максимальная ВЫСОТА указана в меню шага профиля",
+      warning_text_max: "Максимальная ВЫСОТА указана в меню шага профиля",
       conditions: [{ construction_system_param_id: 15, value_int: 600 }],
       warning: {
-        title: "",
-        message: "Максимальная ВЫСОТА указана в меню шага профиля",
+        message_max: "Максимальная ВЫСОТА указана в меню шага профиля",
       },
     });
   });
@@ -438,9 +441,7 @@ describe("calcItemsFromPublicConstructions", () => {
       ],
       []
     );
-    expect(items[0].imageUrl).toBe(
-      "https://example.com/api/v2/public/image/b.jpg"
-    );
+    expect(items[0].imageUrl).toBe("/api/v2/public/image/b.jpg");
     expect(items[0].images).toHaveLength(2);
   });
 });
@@ -450,35 +451,45 @@ describe("pickEntityImageUrl", () => {
     expect(pickEntityImageUrl([])).toBe("");
     expect(
       pickEntityImageUrl([
-        { url: "/second", sort_order: 20, is_primary: false },
-        { url: "/first", sort_order: 10, is_primary: false },
-        { url: "/primary", sort_order: 50, is_primary: true },
+        { url: "/api/v2/public/image/second.jpg", sort_order: 20, is_primary: false },
+        { url: "/api/v2/public/image/first.jpg", sort_order: 10, is_primary: false },
+        { url: "/api/v2/public/image/primary.jpg", sort_order: 50, is_primary: true },
       ])
-    ).toBe("/primary");
+    ).toBe("/api/v2/public/image/primary.jpg");
     expect(
       pickEntityImageUrl([
-        { url: "https://example.com/b.jpg", sort_order: 20 },
-        { url: "https://example.com/a.jpg", sort_order: 10 },
+        {
+          file_name: "b.jpg",
+          url: "https://example.com/api/v2/public/image/b.jpg",
+          sort_order: 20,
+        },
+        {
+          file_name: "a.jpg",
+          url: "https://example.com/api/v2/public/image/a.jpg",
+          sort_order: 10,
+        },
       ])
-    ).toBe("https://example.com/a.jpg");
+    ).toBe("/api/v2/public/image/a.jpg");
   });
 
   it("separates preview and cad by image type", () => {
     const images = [
       {
-        url: "/preview.jpg",
+        url: "/api/v2/public/image/preview.jpg",
         sort_order: 20,
         is_primary: true,
         type: { code: "preview" },
       },
       {
-        url: "/cad.png",
+        url: "/api/v2/public/image/cad.png",
         sort_order: 10,
         type: { code: "cad", name: "Чертёж" },
       },
     ];
-    expect(pickEntityImageUrl(images)).toBe("/preview.jpg");
-    expect(pickEntityImageUrl(images, { cad: true })).toBe("/cad.png");
+    expect(pickEntityImageUrl(images)).toBe("/api/v2/public/image/preview.jpg");
+    expect(pickEntityImageUrl(images, { cad: true })).toBe(
+      "/api/v2/public/image/cad.png"
+    );
   });
 });
 
@@ -490,8 +501,12 @@ describe("mapPublicConstructionToInfoRecord", () => {
         name: "Облицовка на каркасе 50 мм",
         physical_params: { Thickness: 70, SoundIndex: 65 },
         images: [
-          { url: "/photo.jpg", is_primary: true, type: { code: "preview" } },
-          { url: "/cad.png", type: { code: "cad" } },
+          {
+            url: "/api/v2/public/image/photo.jpg",
+            is_primary: true,
+            type: { code: "preview" },
+          },
+          { url: "/api/v2/public/image/cad.png", type: { code: "cad" } },
         ],
       },
       composition: {
@@ -504,8 +519,8 @@ describe("mapPublicConstructionToInfoRecord", () => {
     expect(record).toMatchObject({
       Code: "AG.L401",
       Description: "Облицовка на каркасе 50 мм",
-      Img: "/photo.jpg",
-      CadImg: "/cad.png",
+      Img: "/api/v2/public/image/photo.jpg",
+      CadImg: "/api/v2/public/image/cad.png",
       Thickness: 70,
       SoundIndex: 65,
       Specification: "Описание из админки",

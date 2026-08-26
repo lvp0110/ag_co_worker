@@ -28,7 +28,10 @@ describe("validateConstructionSizeLimits", () => {
           dimension: "len_x",
           mode: "common",
           min_value: 100,
-          warning: { title: "Ширина", text: "минимум 100 мм" },
+          max_value: 50000,
+          warning_text_min: "минимум 100 мм",
+          warning_text_max: "максимум 50 м",
+          warning: { title: "Ширина" },
         },
       ],
       [{ code: "step", value_type: "int", default_value_int: 600 }]
@@ -41,6 +44,7 @@ describe("validateConstructionSizeLimits", () => {
     );
     expect(html).toContain("Ширина");
     expect(html).toContain("минимум 100 мм");
+    expect(html).not.toContain("максимум 50 м");
   });
 
   it("applies parametric max height only for matching step", () => {
@@ -50,7 +54,8 @@ describe("validateConstructionSizeLimits", () => {
           dimension: "len_z",
           mode: "parametric",
           max_value: 3000,
-          warning: { title: "Высота", text: "макс 3 м при шаге 600" },
+          warning_text_max: "макс 3 м при шаге 600",
+          warning: { title: "Высота" },
           conditions: [{ code: "step", value_int: 600 }],
         },
       ],
@@ -88,7 +93,8 @@ describe("validateConstructionSizeLimits", () => {
         dimension: "len_z",
         mode: "common",
         max_value: 18000,
-        warning: { title: "Внимание!", text: "не более 18 м" },
+        warning_text_max: "не более 18 м",
+        warning: { title: "Внимание!" },
       },
     ]);
     expect(

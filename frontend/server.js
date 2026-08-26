@@ -6,8 +6,9 @@
  *   1) отдаёт статику из DIST_DIR (vite build, rsync);
  *   2) проксирует /api/* и /health в backend (BACKEND_URL);
  *   3) проксирует /login и /auth/* во внешний auth (AUTH_SERVICE_URL);
- *   4) проксирует /admin/*, /commerce/* и /content/* туда же;
- *   5) SPA-fallback на index.html.
+ *   4) проксирует /admin/*, /commerce/*, /content/* и /api/v2/public/image туда же;
+ *   5) проксирует остальной /api/* и /health в backend (BACKEND_URL);
+ *   6) SPA-fallback на index.html.
  */
 import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -49,7 +50,10 @@ const authProxy = createProxyMiddleware({
       pathname === "/commerce" ||
       pathname.startsWith("/commerce/") ||
       pathname === "/content" ||
-      pathname.startsWith("/content/")
+      pathname.startsWith("/content/") ||
+      // Admin-загруженные файлы в MinIO AUTH — не через backend :filename.
+      pathname === "/api/v2/public/image" ||
+      pathname.startsWith("/api/v2/public/image/")
     ) {
       return true;
     }
@@ -68,10 +72,20 @@ const backendProxy = createProxyMiddleware({
   target: BACKEND_URL,
   changeOrigin: true,
   xfwd: true,
-  pathFilter: (pathname) =>
-    pathname === "/health" ||
-    pathname === "/api" ||
-    pathname.startsWith("/api/"),
+  pathFilter: (pathname) => {
+    // public/image уже ушёл в authProxy.
+    if (
+      pathname === "/api/v2/public/image" ||
+      pathname.startsWith("/api/v2/public/image/")
+    ) {
+      return false;
+    }
+    return (
+      pathname === "/health" ||
+      pathname === "/api" ||
+      pathname.startsWith("/api/")
+    );
+  },
 });
 app.use(backendProxy);
 

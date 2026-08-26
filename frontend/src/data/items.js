@@ -6,7 +6,7 @@ export default ItemsBase;
 
 let itemsWithApiImagesCache = null;
 let itemsWithApiImagesInFlight = null;
-const ITEMS_WITH_IMAGES_CACHE_VERSION = 6;
+const ITEMS_WITH_IMAGES_CACHE_VERSION = 7;
 
 const loadItemsWithApiImages = async () => {
   const { listPublicConstructions } = await import(
@@ -15,20 +15,21 @@ const loadItemsWithApiImages = async () => {
   const { calcItemsFromPublicConstructions } = await import(
     "../utils/isolationCalcV2.js"
   );
-  const { getImageUrl } = await import("../services/api.js");
 
   const rows = await listPublicConstructions();
   const catalog = calcItemsFromPublicConstructions(rows, ItemsBase);
+  // imageUrl / cadImageUrl уже из images[] админки (resolveAdminPublicImageUrl).
   return catalog.map((item) => ({
     ...item,
-    Img: item.imageUrl ? getImageUrl(item.imageUrl) : null,
-    CadImg: item.cadImageUrl ? getImageUrl(item.cadImageUrl) : null,
+    Img: item.imageUrl || null,
+    CadImg: item.cadImageUrl || null,
   }));
 };
 
 /**
  * Каталог калькулятора: GET /api/v2/constructions/sound
  * (публичное чтение тех же конструкций, что в админке).
+ * Картинки — только из admin images[] / public/image, без legacy Img_constr.
  */
 export const getItemsWithApiImages = async () => {
   if (

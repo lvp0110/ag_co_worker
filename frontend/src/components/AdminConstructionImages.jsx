@@ -15,7 +15,7 @@ import {
   readAdminImageLibrary,
   useAdminImageLibrary,
 } from "../utils/adminImageLibrary.js";
-import { adminImageSrc } from "../utils/adminImageSrc.js";
+import { adminImageSrc, resolveAdminPublicImageUrl } from "../utils/adminImageSrc.js";
 import { isCadEntityImage } from "../utils/isolationCalcV2.js";
 import AdminZoomableImage from "./AdminZoomableImage.jsx";
 
@@ -119,7 +119,11 @@ export default function AdminConstructionImages({
             numericId
           );
           if (cancelled) return;
-          setImages(rows);
+          setImages(
+            rows.map((row) =>
+              overlayLibraryFields(row, readAdminImageLibrary())
+            )
+          );
         } else {
           setImages([]);
         }
@@ -199,6 +203,13 @@ export default function AdminConstructionImages({
         sort_order: slot.sortOrder,
         is_primary: slot.primary,
       });
+      const durableUrl =
+        resolveAdminPublicImageUrl({
+          file_name: libraryItem.file_name,
+          url: created?.url || libraryItem.url,
+        }) ||
+        libraryItem.url ||
+        "";
       setImages((prev) => {
         const rest = prev.filter((row) => !matchSlot(row, slot.code));
         return [
@@ -207,7 +218,7 @@ export default function AdminConstructionImages({
             {
               ...(created || {}),
               file_name: libraryItem.file_name,
-              url: created?.url || libraryItem.url,
+              url: durableUrl,
               mime_type: created?.mime_type || libraryItem.mime_type,
               type: created?.type || {
                 id: type.id,

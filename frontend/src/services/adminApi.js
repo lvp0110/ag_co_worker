@@ -1322,9 +1322,15 @@ export const normalizeAdminSizeLimit = (row) => {
     normalizeWarningContent(row.warning_content) ||
     normalizeWarningContent(row.warning) ||
     null;
-  const warningText = String(
+  const legacyText = String(
     row.warning_text ?? warning?.text ?? warning?.message ?? ""
   ).trim();
+  const warningTextMin = String(
+    row.warning_text_min ?? row.min_warning_text ?? ""
+  ).trim() || legacyText;
+  const warningTextMax = String(
+    row.warning_text_max ?? row.max_warning_text ?? ""
+  ).trim() || legacyText;
   return {
     id: Number(row.id) || null,
     construction_system_id: Number(row.construction_system_id) || null,
@@ -1335,7 +1341,8 @@ export const normalizeAdminSizeLimit = (row) => {
     min_value: optionalMm(row.min_value),
     max_value: optionalMm(row.max_value),
     sort_order: Number(row.sort_order) || 0,
-    warning_text: warningText,
+    warning_text_min: warningTextMin,
+    warning_text_max: warningTextMax,
     conditions: (Array.isArray(row.conditions) ? row.conditions : [])
       .map(normalizeAdminSizeLimitCondition)
       .filter(Boolean),
@@ -1371,7 +1378,8 @@ export const buildSizeLimitUpsertBody = (payload) => {
     max_value: optionalMm(payload?.max_value),
     sort_order: Number(payload?.sort_order) || 0,
     conditions,
-    warning_text: String(payload?.warning_text || "").trim(),
+    warning_text_min: String(payload?.warning_text_min || "").trim(),
+    warning_text_max: String(payload?.warning_text_max || "").trim(),
   };
 };
 

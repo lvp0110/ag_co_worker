@@ -105,22 +105,6 @@ const ItemsList = ({ items, onItemSelect, selectedItemId }) => {
                   height="200"
                   data-image-key={`${elem.id}-${imageSrc}`}
                   onError={(e) => {
-                    // Для zips_ceiling пробуем без папки, если первый запрос дал 404
-                    if (
-                      imageSrc &&
-                      imageSrc.includes("zips_ceiling/") &&
-                      !e.target.dataset.retried
-                    ) {
-                      const fileName = imageSrc.split("zips_ceiling/").pop();
-                      if (fileName) {
-                        e.target.dataset.retried = "true";
-                        const fallbackProps = getResponsiveImageProps(fileName, 'item');
-                        e.target.src = fallbackProps.src;
-                        if (fallbackProps.srcSet) e.target.srcSet = fallbackProps.srcSet;
-                        if (fallbackProps.sizes) e.target.sizes = fallbackProps.sizes;
-                        return;
-                      }
-                    }
                     handleImageError(elem, imageSrc);
                   }}
                 />

@@ -15,6 +15,7 @@ import {
 import {
   adminImageSrc,
   clearAdminImageBlobPreview,
+  resolveAdminPublicImageUrl,
   setAdminImageBlobPreview,
 } from "../utils/adminImageSrc.js";
 import AdminZoomableImage from "./AdminZoomableImage.jsx";
@@ -72,10 +73,13 @@ export default function AdminImagesPanel() {
         if (!uploaded?.file_name) {
           throw new Error(`Upload не вернул file_name для «${file.name}».`);
         }
-        // Превью из файла — public/image с вложенным constr/preview/… сейчас 404.
+        // Durable URL из file_name (flat). Nested constr/preview/… не используем.
+        const durableUrl = resolveAdminPublicImageUrl(uploaded);
+        // Blob — мгновенное превью до проверки public; после F5 — durableUrl.
         setAdminImageBlobPreview(uploaded.file_name, URL.createObjectURL(file));
         addToAdminImageLibrary({
           ...uploaded,
+          url: durableUrl || uploaded.url,
           title: file.name,
         });
         setPreviewTick((n) => n + 1);

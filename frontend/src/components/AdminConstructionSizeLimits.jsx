@@ -34,7 +34,8 @@ const draftFromLimit = (limit) => ({
   mode: limit.mode || "common",
   min_value: mmField(limit.min_value),
   max_value: mmField(limit.max_value),
-  warning_text: String(limit.warning_text || "").trim(),
+  warning_text_min: String(limit.warning_text_min || "").trim(),
+  warning_text_max: String(limit.warning_text_max || "").trim(),
   step_value: mmField(stepFromLimit(limit)),
   sort_order: Number(limit.sort_order) || 0,
 });
@@ -78,7 +79,8 @@ const buildPayload = (draft, stepParam) => {
     mode,
     min_value: parseMm(draft.min_value),
     max_value: parseMm(draft.max_value),
-    warning_text: String(draft.warning_text || "").trim(),
+    warning_text_min: String(draft.warning_text_min || "").trim(),
+    warning_text_max: String(draft.warning_text_max || "").trim(),
     sort_order: Number(draft.sort_order) || 0,
     conditions,
   };
@@ -91,8 +93,11 @@ const validateDraft = (draft, stepParam) => {
   if (!parseMm(draft.min_value) && !parseMm(draft.max_value)) {
     return "Укажите минимум и/или максимум в мм.";
   }
-  if (!String(draft.warning_text || "").trim()) {
-    return "Укажите текст предупреждения (warning_text).";
+  if (parseMm(draft.min_value) && !String(draft.warning_text_min || "").trim()) {
+    return "Укажите текст предупреждения для минимума.";
+  }
+  if (parseMm(draft.max_value) && !String(draft.warning_text_max || "").trim()) {
+    return "Укажите текст предупреждения для максимума.";
   }
   if (draft.mode === "parametric") {
     if (!stepConfigId(stepParam)) {
@@ -123,7 +128,8 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     mode: "common",
     min_value: "",
     max_value: "",
-    warning_text: "",
+    warning_text_min: "",
+    warning_text_max: "",
     step_value: "",
     sort_order: 0,
   });
@@ -153,7 +159,10 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
         setAddDraft((prev) => ({
           ...prev,
           sort_order: limits.length,
-          warning_text: prev.warning_text || limits[0]?.warning_text || "",
+          warning_text_min:
+            prev.warning_text_min || limits[0]?.warning_text_min || "",
+          warning_text_max:
+            prev.warning_text_max || limits[0]?.warning_text_max || "",
           step_value:
             prev.step_value ||
             String(findStepParam(params)?.default_value_int || "") ||
@@ -270,20 +279,6 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     }
   };
 
-  const renderWarningField = (draft, onChange, disabled) => (
-    <label className="admin-page__field">
-      <span className="admin-page__field-label">Текст предупреждения</span>
-      <textarea
-        className="admin-page__input"
-        rows={3}
-        value={draft.warning_text}
-        disabled={disabled}
-        placeholder="Например: Превышена допустимая высота для шага 600 мм"
-        onChange={(e) => onChange({ warning_text: e.target.value })}
-      />
-    </label>
-  );
-
   const renderLimitFields = (draft, onChange, disabled) => (
     <>
       <label className="admin-page__field">
@@ -364,6 +359,19 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
         />
       </label>
       <label className="admin-page__field">
+        <span className="admin-page__field-label">
+          Текст предупреждения (минимум)
+        </span>
+        <textarea
+          className="admin-page__input"
+          rows={3}
+          value={draft.warning_text_min}
+          disabled={disabled}
+          placeholder="Например: Минимальная ширина конструкции 100 мм"
+          onChange={(e) => onChange({ warning_text_min: e.target.value })}
+        />
+      </label>
+      <label className="admin-page__field">
         <span className="admin-page__field-label">Максимум, мм</span>
         <input
           className="admin-page__input"
@@ -375,7 +383,19 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
           onChange={(e) => onChange({ max_value: e.target.value })}
         />
       </label>
-      {renderWarningField(draft, onChange, disabled)}
+      <label className="admin-page__field">
+        <span className="admin-page__field-label">
+          Текст предупреждения (максимум)
+        </span>
+        <textarea
+          className="admin-page__input"
+          rows={3}
+          value={draft.warning_text_max}
+          disabled={disabled}
+          placeholder="Например: Превышена допустимая высота для шага 600 мм"
+          onChange={(e) => onChange({ warning_text_max: e.target.value })}
+        />
+      </label>
     </>
   );
 
@@ -385,11 +405,11 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
       count={loading ? "…" : `${rows.length}`}
     >
       <p className="admin-page__empty admin-page__empty--inline">
-        Попадают в калькулятор через публичные calculation-params. Пока список
-        пуст, калькулятор берёт старые локальные лимиты. Текст предупреждения
-        задаётся прямо в ограничении (warning_text). Для параметрической высоты
-        нужен <code>step</code> в «Опции расчета». Обычный и параметрический
-        режим нельзя смешивать на одном измерении.
+        Попадают в калькулятор через публичные calculation-params. Отдельный
+        текст предупреждения для минимума и максимума (warning_text_min /
+        warning_text_max). Для параметрической высоты нужен <code>step</code> в
+        «Опции расчета». Обычный и параметрический режим нельзя смешивать на
+        одном измерении.
       </p>
 
       {error && (

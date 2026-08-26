@@ -961,21 +961,6 @@ const Calculator = () => {
                                   width="200"
                                   height="200"
                                   onError={(e) => {
-                                    if (
-                                      imageSrc &&
-                                      imageSrc.includes("zips_ceiling/") &&
-                                      !e.target.dataset.retried
-                                    ) {
-                                      const fileName = imageSrc.split("zips_ceiling/").pop();
-                                      if (fileName) {
-                                        e.target.dataset.retried = "true";
-                                        const fallbackProps = getResponsiveImageProps(fileName, 'item');
-                                        e.target.src = fallbackProps.src;
-                                        if (fallbackProps.srcSet) e.target.srcSet = fallbackProps.srcSet;
-                                        if (fallbackProps.sizes) e.target.sizes = fallbackProps.sizes;
-                                        return;
-                                      }
-                                    }
                                     if (imageSrc) {
                                       const fallbackUrl = getImageUrl(imageSrc);
                                       const img = new Image();

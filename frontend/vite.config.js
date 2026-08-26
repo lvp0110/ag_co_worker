@@ -101,6 +101,12 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      // Картинки из админки лежат в MinIO AUTH, не на CALC/staging.
+      '/api/v2/public/image': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
       // CMS warning-блоки для size-limits (роль manager).
       '/content': {
         target: authTarget,

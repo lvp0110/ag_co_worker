@@ -77,7 +77,8 @@ export const overlayLibraryFields = (row, library = readAdminImageLibrary()) => 
   if (!lib) return row;
   return {
     ...row,
-    url: String(row.url || "").trim() || lib.url,
+    // Библиотека хранит уже resolved /api/v2/public/image/<flat>.
+    url: String(lib.url || "").trim() || String(row.url || "").trim(),
     mime_type: String(row.mime_type || "").trim() || lib.mime_type,
     title: String(row.title || "").trim() || lib.title,
   };
