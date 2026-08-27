@@ -78,6 +78,12 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      // КП в 1С: POST/PUT/DELETE document, GET documents (без нашего backend).
+      '/integration': {
+        target: authTarget,
+        changeOrigin: true,
+        secure: false,
+      },
       // Admin materials/constructions/commerce API (:3005). Точный /admin — SPA-роут.
       '/admin/materials': {
         target: authTarget,

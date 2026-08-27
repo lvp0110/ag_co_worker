@@ -15,6 +15,13 @@
   margin-bottom: 20px;
 }
 
+.kp-list__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .kp-list__title {
   margin: 0;
   font-size: 22px;
@@ -39,8 +46,23 @@
   cursor: pointer;
 }
 
-.kp-list__new-btn:hover {
+.kp-list__new-btn:hover:not(:disabled) {
   background: #5897b7;
+}
+
+.kp-list__new-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.kp-list__new-btn--ghost {
+  background: transparent;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.kp-list__new-btn--ghost:hover:not(:disabled) {
+  background: #f1f5f9;
 }
 
 .kp-list__results--refreshing {

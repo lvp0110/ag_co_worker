@@ -212,46 +212,38 @@ const ItemInfo = () => {
   const isZIPS = zipsItems && (zipsItems.ceiling || zipsItems.lining);
   const selectedCId = navigationCId || item.c_id || "L";
 
-  let imageSources = [];
-  let cadImageSources = [];
+  let imageSrc = "";
+  let cadImageSrc = "";
 
   if (isZIPS) {
     if (selectedCId === "C" && zipsItems.ceiling) {
-      const ceilingImg =
+      imageSrc =
         zipsItems.ceiling.Img ||
         zipsItems.ceiling.img ||
-        zipsItems.ceilingConstruction?.Img;
-      if (ceilingImg) imageSources.push({ src: ceilingImg, label: "Потолок" });
-
-      const ceilingCadImg =
-        zipsItems.ceiling.CadImg || zipsItems.ceilingConstruction?.CadImg;
-      if (ceilingCadImg) {
-        cadImageSources.push({ src: ceilingCadImg, label: "Потолок" });
-      }
+        zipsItems.ceilingConstruction?.Img ||
+        "";
+      cadImageSrc =
+        zipsItems.ceiling.CadImg ||
+        zipsItems.ceilingConstruction?.CadImg ||
+        "";
     } else if (zipsItems.lining) {
-      const liningImg =
+      imageSrc =
         zipsItems.lining.Img ||
         zipsItems.lining.img ||
-        zipsItems.liningConstruction?.Img;
-      if (liningImg) imageSources.push({ src: liningImg, label: "Облицовка" });
-
-      const liningCadImg = zipsItems.liningConstruction?.CadImg || data.CadImg;
-      if (liningCadImg) {
-        cadImageSources.push({ src: liningCadImg, label: "Облицовка" });
-      }
+        zipsItems.liningConstruction?.Img ||
+        "";
+      cadImageSrc =
+        zipsItems.liningConstruction?.CadImg || data.CadImg || "";
     }
   } else {
-    const imgSrc = item.Img || item.img || data.Img;
-    if (imgSrc) imageSources.push({ src: imgSrc, label: "" });
-
-    if (data.CadImg) cadImageSources.push({ src: data.CadImg, label: "" });
+    imageSrc = item.Img || item.img || data.Img || "";
+    cadImageSrc = data.CadImg || "";
   }
 
-  const currentImage = imageSources[0];
-  const currentCadImage = cadImageSources[0];
-  
-  const imgProps = currentImage ? getResponsiveImageProps(currentImage.src, "item") : null;
-  const cadImgProps = currentCadImage ? getResponsiveImageProps(currentCadImage.src, "item") : null;
+  const imgProps = imageSrc ? getResponsiveImageProps(imageSrc, "item") : null;
+  const cadImgProps = cadImageSrc
+    ? getResponsiveImageProps(cadImageSrc, "item")
+    : null;
 
   return (
     <div className="item-info-container">
@@ -270,63 +262,51 @@ const ItemInfo = () => {
 
         <div className="item-info-layout">
           <div className="item-info-images-column">
-            {/* Слайдер для изображений конструкций */}
-            {imgProps && imgProps.src && currentImage && (
+            {imgProps && imgProps.src && imageSrc ? (
               <div className="item-info-image">
-                <div className="item-info-swiper">
-                  {currentImage.label && (
-                    <div className="item-info-swiper-label">{currentImage.label}</div>
-                  )}
-                  <img
-                    {...getResponsiveImageProps(currentImage.src, "item")}
-                    alt={`${item.title}${currentImage.label ? ` - ${currentImage.label}` : ''}`}
-                    className="item-info-img"
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => {
-                      const fallbackUrl = getImageUrl(currentImage.src);
-                      const img = new Image();
-                      img.onload = () => {
-                        e.target.src = fallbackUrl;
-                      };
-                      img.onerror = () => {
-                        e.target.style.display = "none";
-                      };
-                      img.src = fallbackUrl;
-                    }}
-                  />
-                </div>
+                <img
+                  {...getResponsiveImageProps(imageSrc, "item")}
+                  alt={item.title}
+                  className="item-info-img"
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    const fallbackUrl = getImageUrl(imageSrc);
+                    const img = new Image();
+                    img.onload = () => {
+                      e.target.src = fallbackUrl;
+                    };
+                    img.onerror = () => {
+                      e.target.style.display = "none";
+                    };
+                    img.src = fallbackUrl;
+                  }}
+                />
               </div>
-            )}
+            ) : null}
 
-            {/* Слайдер для чертежей (CAD) */}
-            {cadImgProps && cadImgProps.src && currentCadImage && (
+            {cadImgProps && cadImgProps.src && cadImageSrc ? (
               <div className="item-info-image">
-                <div className="item-info-swiper">
-                  {currentCadImage.label && (
-                    <div className="item-info-swiper-label">{currentCadImage.label}</div>
-                  )}
-                  <img
-                    {...getResponsiveImageProps(currentCadImage.src, "item")}
-                    alt={`${item.title} - CAD${currentCadImage.label ? ` - ${currentCadImage.label}` : ''}`}
-                    className="item-info-img"
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => {
-                      const fallbackUrl = getImageUrl(currentCadImage.src);
-                      const img = new Image();
-                      img.onload = () => {
-                        e.target.src = fallbackUrl;
-                      };
-                      img.onerror = () => {
-                        e.target.style.display = "none";
-                      };
-                      img.src = fallbackUrl;
-                    }}
-                  />
-                </div>
+                <img
+                  {...getResponsiveImageProps(cadImageSrc, "item")}
+                  alt={`${item.title} - CAD`}
+                  className="item-info-img"
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    const fallbackUrl = getImageUrl(cadImageSrc);
+                    const img = new Image();
+                    img.onload = () => {
+                      e.target.src = fallbackUrl;
+                    };
+                    img.onerror = () => {
+                      e.target.style.display = "none";
+                    };
+                    img.src = fallbackUrl;
+                  }}
+                />
               </div>
-            )}
+            ) : null}
 
             {/* Список материалов */}
             {(() => {

@@ -8,7 +8,7 @@ import {
 import "./KpPage.css";
 
 /**
- * Карточка КП — только данные из ответа 1С (document_id, user_email).
+ * Карточка КП — данные из ответа 1С / списка documents.
  */
 const KpPage = () => {
   const { id } = useParams();
@@ -31,10 +31,24 @@ const KpPage = () => {
       return;
     }
 
-    if (navOnec?.data?.document_id) {
+    if (navOnec?.data) {
       const saved = upsertKpDocumentFromOnec(navOnec);
       if (saved) {
         setDoc(saved);
+        setMissing(false);
+        return;
+      }
+      // Список уже нормализован — можно показать напрямую.
+      if (navOnec.data.id || navOnec.data.document_id) {
+        setDoc({
+          id: navOnec.data.id,
+          document_id: navOnec.data.document_id || navOnec.data.id,
+          document_number: navOnec.data.document_number || "",
+          status: navOnec.data.status || "",
+          user_email: navOnec.data.user_email || "",
+          user_name: navOnec.data.user_name || "",
+          created_at: navOnec.data.created_at || null,
+        });
         setMissing(false);
         return;
       }
@@ -48,6 +62,7 @@ const KpPage = () => {
     }
 
     setDoc({
+      id: documentId,
       document_id: documentId,
       user_email: user?.email || "",
       created_at: null,
@@ -102,14 +117,32 @@ const KpPage = () => {
         </div>
 
         <section className="kp-page__contact" aria-label="Данные 1С">
+          {doc.document_number ? (
+            <div className="kp-page__field">
+              <span className="kp-page__label">Номер</span>
+              <p className="kp-page__value">{doc.document_number}</p>
+            </div>
+          ) : null}
           <div className="kp-page__field">
             <span className="kp-page__label">document_id</span>
-            <p className="kp-page__value">{doc.document_id}</p>
+            <p className="kp-page__value">{doc.document_id || doc.id}</p>
           </div>
+          {doc.status ? (
+            <div className="kp-page__field">
+              <span className="kp-page__label">Статус</span>
+              <p className="kp-page__value">{doc.status}</p>
+            </div>
+          ) : null}
           <div className="kp-page__field">
             <span className="kp-page__label">user_email</span>
             <p className="kp-page__value">{displayEmail}</p>
           </div>
+          {doc.user_name ? (
+            <div className="kp-page__field">
+              <span className="kp-page__label">user_name</span>
+              <p className="kp-page__value">{doc.user_name}</p>
+            </div>
+          ) : null}
           {user?.full_name ? (
             <div className="kp-page__field">
               <span className="kp-page__label">Менеджер (сессия)</span>
