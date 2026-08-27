@@ -30,6 +30,12 @@
   margin-bottom: 8px;
 }
 
+.kp-page__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .kp-page__title {
   margin: 4px 0 0 4px;
   font-size: 22px;
@@ -41,6 +47,16 @@
   margin: 24px 4px;
   font-size: 15px;
   color: #6d7277;
+}
+
+.kp-page__error {
+  margin: 8px 4px 16px;
+  padding: 8px 12px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-size: 14px;
 }
 
 .kp-page__value {
@@ -93,6 +109,21 @@
   font-size: 14px;
   cursor: pointer;
   color: #2c2f33;
+}
+
+.kp-page__exit-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.kp-page__exit-btn--secondary {
+  background: #6cabc8;
+  border-color: #6cabc8;
+  color: #fff;
+}
+
+.kp-page__exit-btn--secondary:hover:not(:disabled) {
+  background: #5897b7;
 }
 
 .kp-page__contact {

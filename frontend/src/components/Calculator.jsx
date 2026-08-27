@@ -52,7 +52,10 @@ import {
   selectedReplacementsMap,
 } from "../utils/isolationCalcV2";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useCalcField } from "../stores/calculatorStore.js";
+import {
+  useCalcField,
+  useCalculatorStore,
+} from "../stores/calculatorStore.js";
 import ItemsList from "./ItemsList";
 import SelectedItemForms from "./SelectedItemForms";
 import ConstructionList from "./tables/ConstructionList";
@@ -78,6 +81,7 @@ const Calculator = () => {
   const [materialsByConstruction, setMaterialsByConstruction] = useCalcField(
     "materialsByConstruction"
   );
+  const [activeKpId] = useCalcField("activeKpId");
   const [itemsWithImages, setItemsWithImages] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [mainSections, setMainSections] = useState(fallbackMainSections);
@@ -426,6 +430,7 @@ const Calculator = () => {
 
   /**
    * Сам запрос в 1С и переход на /kp/:document_id.
+   * После успеха — сброс расчёта; activeKpId остаётся для кнопки «К КП».
    */
   const submitKp = useCallback(async () => {
     if (ConstrToCalcToSent.length === 0) return;
@@ -439,14 +444,20 @@ const Calculator = () => {
         calc_params: c.calc_params,
       }));
       const created = await createKpFromCalc({ constructions });
-      const id = created.id;
-      navigate(`/kp/${id}`, {
+      const createdId = created.id;
+      useCalculatorStore.getState().reset();
+      useCalculatorStore.getState().setField("activeKpId", createdId);
+      setConstR({ ...constRZero });
+      setConstrSent({ ...constSentZero });
+      setOpening({ ...openingZero });
+      navigate(`/kp/${createdId}`, {
         state: {
           onec: {
             code: created.code,
             data: created.data,
             error: created.error,
           },
+          loadCalc: false,
         },
       });
     } catch (err) {
@@ -504,7 +515,10 @@ const Calculator = () => {
     submitKp();
   }, [pendingCreateKp, isAuthed, submitKp]);
 
-  const showMakeKpButton = ConstrToCalcToSent.length > 0;
+  const showMakeKpButton =
+    ConstrToCalcToSent.length > 0 && !activeKpId;
+  const showBackToKpButton =
+    Boolean(activeKpId) && ConstrToCalcToSent.length > 0;
 
   const addConstrToCalc = useCallback(async () => {
     // step/dframe: из API params; иначе константы (legacy UI выбора удалён).
@@ -1068,19 +1082,32 @@ const Calculator = () => {
                                   recalcKeyId={recalcKeyId}
                                 />
                               )}
-                            {showMakeKpButton && (
+                            {(showMakeKpButton || showBackToKpButton) && (
                               <div className="tables-and-buttons-footer">
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={handleMakeKP}
-                                  className="counter__button_plus"
-                                  disabled={isSubmittingKp}
-                                >
-                                  {isSubmittingKp
-                                    ? "Создание КП..."
-                                    : "Сделать КП"}
-                                </button>
+                                {showBackToKpButton ? (
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() =>
+                                      navigate(`/kp/${activeKpId}`)
+                                    }
+                                    className="counter__button_plus counter__button_plus--back-kp"
+                                  >
+                                    К КП
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={handleMakeKP}
+                                    className="counter__button_plus"
+                                    disabled={isSubmittingKp}
+                                  >
+                                    {isSubmittingKp
+                                      ? "Создание КП..."
+                                      : "Сделать КП"}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>

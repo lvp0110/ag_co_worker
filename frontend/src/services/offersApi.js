@@ -1,12 +1,19 @@
 import { request } from "./apiClient.js";
 import { upsertKpDocumentFromOnec } from "../stores/kpOnecDocumentsStore.js";
-import { buildOnecDocumentBody } from "../utils/onecDocumentMapper.js";
+import { useCalculatorStore } from "../stores/calculatorStore.js";
+import {
+  buildOnecDocumentBody,
+  mapOnecDetailToCalcState,
+} from "../utils/onecDocumentMapper.js";
+import { buildIsolationCalcRequestFromStored } from "../utils/isolationCalcV2.js";
+import { calculateIsolationByConstruction } from "./constructionApi.js";
 import { getCsrfToken, isCrossOriginAuth, session } from "./authApi.js";
 
 /**
  * КП через 1C integration documents (auth :3005), без нашего backend:
  *   POST /integration/onec/isolation/document  — создать
  *   GET  /integration/onec/isolation/documents — список «Мои КП»
+ *   GET  /integration/onec/isolation/documents/{id} — детали → калькулятор
  *
  * Same-origin: Vite / server.js проксируют /integration → AUTH.
  */
@@ -85,6 +92,28 @@ export const mapOnecDocumentSummary = (raw) => {
   };
 };
 
+const normalizeOnecDocumentDetail = (onec) => {
+  const data = onec?.data && typeof onec.data === "object" ? onec.data : null;
+  if (!data) return null;
+  const id = String(data.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    document_id: String(data.onec_document_id ?? id).trim(),
+    document_number: String(data.onec_document_number ?? "").trim(),
+    status: String(data.status ?? "").trim(),
+    user_email: String(data.user_email ?? "").trim(),
+    user_name: String(data.user_name ?? "").trim(),
+    created_at: data.created_at ?? null,
+    updated_at: data.updated_at ?? null,
+    synced_at: data.synced_at ?? null,
+    constructions: Array.isArray(data.constructions) ? data.constructions : [],
+    materials: Array.isArray(data.materials) ? data.materials : [],
+    last_error_code: String(data.last_error_code ?? "").trim(),
+    last_error_message: String(data.last_error_message ?? "").trim(),
+  };
+};
+
 /**
  * Создание КП: POST /integration/onec/isolation/document
  * @param {{ constructions: Array<{ calc_params: object }> }} args
@@ -160,4 +189,82 @@ export const fetchMyKpDocuments = async () => {
     throw err;
   }
   return rows.map(mapOnecDocumentSummary).filter(Boolean);
+};
+
+/**
+ * GET /integration/onec/isolation/documents/{id}
+ */
+export const fetchKpDocumentDetail = async (documentId) => {
+  const id = String(documentId || "").trim();
+  if (!id) {
+    const err = new Error("Не указан id документа КП");
+    err.status = 400;
+    throw err;
+  }
+  const path = `${ONEC_DOCUMENTS_PATH}/${encodeURIComponent(id)}`;
+  let onec;
+  try {
+    onec = await request(path, { method: "GET" });
+  } catch (err) {
+    if (err?.status === 404 || err?.status === 401) {
+      const e = new Error(
+        err?.status === 404
+          ? "Документ КП не найден"
+          : "Нет сессии — войдите снова"
+      );
+      e.body = err?.body;
+      e.status = err?.status;
+      e.url = err?.url;
+      throw e;
+    }
+    throw err;
+  }
+  logOnecResponse(`GET ${path}`, onec);
+  const detail = normalizeOnecDocumentDetail(onec);
+  if (!detail) {
+    const err = new Error(onec?.error || "Пустой ответ detail КП");
+    err.body = onec;
+    throw err;
+  }
+  return detail;
+};
+
+/**
+ * Загрузить конструкции КП в калькулятор + пересчитать материалы.
+ * @param {string} documentId — локальный id из списка / create
+ */
+export const loadKpDocumentIntoCalculator = async (documentId) => {
+  const detail = await fetchKpDocumentDetail(documentId);
+  const { constrToCalc, constrToCalcToSent } = mapOnecDetailToCalcState(detail);
+  console.log(
+    `[kp] load into calc → id=${detail.id} constr=${constrToCalc.length}`
+  );
+
+  const materialsByConstruction = [];
+  for (let i = 0; i < constrToCalcToSent.length; i++) {
+    const sent = constrToCalcToSent[i];
+    const key_id = constrToCalc[i]?.key_id;
+    try {
+      const requestItem = buildIsolationCalcRequestFromStored(sent);
+      const result = await calculateIsolationByConstruction([requestItem]);
+      materialsByConstruction.push({
+        key_id,
+        data: result?.data ?? [],
+      });
+    } catch (err) {
+      console.warn(`[kp] recalc materials failed for ${sent?.Code}:`, err);
+      materialsByConstruction.push({ key_id, data: [] });
+    }
+  }
+
+  useCalculatorStore.getState().loadKpEditState({
+    constrToCalc,
+    constrToCalcToSent,
+    materialsByConstruction,
+    tableConstrToCalc: constrToCalc.length ? {} : null,
+    activeKpId: detail.id,
+  });
+
+  upsertKpDocumentFromOnec({ data: detail });
+  return detail;
 };

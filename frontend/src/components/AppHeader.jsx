@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getImageUrl } from "../services/api.js";
+import { useCalculatorStore } from "../stores/calculatorStore.js";
 import "./AppHeader.css";
 
 const navLinkClass = ({ isActive }) =>
@@ -72,6 +73,8 @@ export default function AppHeader() {
   const priceIconSrc = getImageUrl("price.svg");
   const location = useLocation();
   const { user, status, openLoginModal, logout } = useAuth();
+  const activeKpId = useCalculatorStore((s) => s.activeKpId);
+  const kpPath = activeKpId ? `/kp/${activeKpId}` : "/kp/list";
   const kpNavActive =
     location.pathname === "/kp/list" ||
     (location.pathname.startsWith("/kp/") && location.pathname !== "/kp/list");
@@ -126,15 +129,17 @@ export default function AppHeader() {
           </NavLink>
           {user && (
             <NavLink
-              to="/kp/list"
+              to={kpPath}
               className={`app-header__link${kpNavActive ? " app-header__link--active" : ""}`}
-              title="Мои КП"
-              aria-label="Мои КП"
+              title={activeKpId ? "Открытое КП" : "Мои КП"}
+              aria-label={activeKpId ? "Открытое КП" : "Мои КП"}
             >
               <HeaderIcon>
                 <MaskedNavIcon src={kpIconSrc} />
               </HeaderIcon>
-              <span className="app-header__label">Мои КП</span>
+              <span className="app-header__label">
+                {activeKpId ? "Открытое КП" : "Мои КП"}
+              </span>
             </NavLink>
           )}
           <NavLink

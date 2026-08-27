@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { fetchMyKpDocuments } from "../services/offersApi.js";
+import { useCalculatorStore } from "../stores/calculatorStore.js";
 import {
   listKpDocuments,
   replaceKpDocumentsFromList,
@@ -42,9 +43,16 @@ function displayTitle(d) {
 export default function KpList() {
   const navigate = useNavigate();
   const { isAuthed, status } = useAuth();
+  const activeKpId = useCalculatorStore((s) => s.activeKpId);
   const [docs, setDocs] = useState(() => listKpDocuments());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Пока КП открыто — список недоступен (закрытие только кнопкой «К списку»).
+  useEffect(() => {
+    if (!activeKpId) return;
+    navigate(`/kp/${activeKpId}`, { replace: true });
+  }, [activeKpId, navigate]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -63,6 +71,7 @@ export default function KpList() {
   }, []);
 
   useEffect(() => {
+    if (activeKpId) return;
     if (status === "loading") return;
     if (!isAuthed) return;
     // Уже грузили в этой вкладке — только показать кэш (возврат с /kp/:id).
@@ -71,13 +80,23 @@ export default function KpList() {
       return;
     }
     refresh();
-  }, [isAuthed, status, refresh]);
+  }, [isAuthed, status, refresh, activeKpId]);
 
   const openDoc = (d) => {
     const routeId = d.id || d.document_id;
     if (!routeId) return;
-    navigate(`/kp/${routeId}`, { state: { onec: { data: d } } });
+    navigate(`/kp/${routeId}`, {
+      state: { onec: { data: d }, loadCalc: true },
+    });
   };
+
+  if (activeKpId) {
+    return (
+      <div className="kp-list">
+        <p className="kp-list__empty">Возврат к открытому КП…</p>
+      </div>
+    );
+  }
 
   if (status === "loading") {
     return (

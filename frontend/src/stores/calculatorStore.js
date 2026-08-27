@@ -29,6 +29,8 @@ const initialState = {
   ConstrToCalcToSent: [],
   ConstrToCalc: [],
   materialsByConstruction: [],
+  /** Id открытого КП (`/kp/:id`); кнопка «К КП» в калькуляторе. */
+  activeKpId: null,
 };
 
 export const useCalculatorStore = create(
@@ -42,11 +44,11 @@ export const useCalculatorStore = create(
           [key]: typeof v === "function" ? v(state[key]) : v,
         })),
 
-      /** Полный сброс состояния (например при выходе из КП в список). */
-      reset: () => set(initialState),
+      /** Полный сброс (закрытие КП / после создания). */
+      reset: () => set({ ...initialState }),
 
       /**
-       * Подстановка состава КП в калькулятор (режим редактирования).
+       * Подстановка состава КП в калькулятор.
        * Если есть конструкции — таблица всегда открыта (tableConstrToCalc ≠ null).
        */
       loadKpEditState: ({
@@ -54,6 +56,7 @@ export const useCalculatorStore = create(
         constrToCalcToSent,
         materialsByConstruction,
         tableConstrToCalc,
+        activeKpId,
       }) =>
         set((state) => {
           const sent = constrToCalcToSent ?? [];
@@ -75,6 +78,9 @@ export const useCalculatorStore = create(
             ConstrToCalcToSent: sent,
             materialsByConstruction: materialsByConstruction ?? [],
             tableConstrToCalc: table,
+            ...(activeKpId !== undefined
+              ? { activeKpId: activeKpId ? String(activeKpId) : null }
+              : {}),
           };
         }),
     }),
