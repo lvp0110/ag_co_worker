@@ -39,7 +39,7 @@ import {
   getConstructionCalculationParams,
   getPublicConstruction,
 } from "../services/constructionApi";
-import { createKpFromCalc } from "../services/offersApi";
+import { createKpFromCalc, updateKpFromCalc } from "../services/offersApi";
 import { formatRequestError } from "../services/apiClient";
 import { buildCreateOfferPayload } from "../utils/offerMapper";
 import {
@@ -86,6 +86,7 @@ const Calculator = () => {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [mainSections, setMainSections] = useState(fallbackMainSections);
   const [isSubmittingKp, setIsSubmittingKp] = useState(false);
+  const [isSavingKp, setIsSavingKp] = useState(false);
   // Если юзер нажал «Сделать КП» будучи анонимом — запоминаем намерение и
   // продолжаем автоматически после успешного логина.
   const [pendingCreateKp, setPendingCreateKp] = useState(false);
@@ -480,6 +481,45 @@ const Calculator = () => {
     }
   }, [ConstrToCalcToSent, ConstrToCalc, navigate]);
 
+  /** Сохранить изменения в открытое КП (PUT или recreate при sync_error). */
+  const saveKp = useCallback(async () => {
+    if (!activeKpId || ConstrToCalcToSent.length === 0) return;
+    setIsSavingKp(true);
+    try {
+      const payload = buildCreateOfferPayload({
+        constrToCalcToSent: ConstrToCalcToSent,
+        constrToCalc: ConstrToCalc,
+      });
+      const constructions = payload.offerDraft.constructions.map((c) => ({
+        calc_params: c.calc_params,
+      }));
+      const saved = await updateKpFromCalc({
+        documentId: activeKpId,
+        constructions,
+      });
+      const nextId = saved.id || activeKpId;
+      useCalculatorStore.getState().setField("activeKpId", nextId);
+      navigate(`/kp/${nextId}`, { state: { loadCalc: false } });
+    } catch (err) {
+      const details = formatRequestError(err);
+      console.error("[kp] update failed:", err?.url, err?.status, err?.body, err);
+      setModal({
+        isOpen: true,
+        title: "Ошибка",
+        html: `Не удалось сохранить КП.<br><br><pre style="text-align:left;white-space:pre-wrap;font-size:12px;max-height:40vh;overflow:auto;margin:0">${details
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</pre>`,
+        icon: "error",
+        imageUrl: null,
+        confirmButtonText: "OK",
+        confirmButtonColor: "#6cabc8",
+      });
+    } finally {
+      setIsSavingKp(false);
+    }
+  }, [activeKpId, ConstrToCalcToSent, ConstrToCalc, navigate]);
+
   /**
    * «Сделать КП»: либо сразу создаёт оффер (если авторизован), либо открывает
    * LoginModal и ставит флаг pendingCreateKp — после успешного логина useEffect
@@ -519,6 +559,61 @@ const Calculator = () => {
     ConstrToCalcToSent.length > 0 && !activeKpId;
   const showBackToKpButton =
     Boolean(activeKpId) && ConstrToCalcToSent.length > 0;
+  /** Таблица КП/расчёта: при открытом КП видна даже без выбора позиции каталога. */
+  const showResultsTable =
+    tableConstrToCalc != null && ConstrToCalc.length > 0;
+
+  const renderResultsTable = () => (
+    <div className="tables-and-buttons-container">
+      <div className="tables-and-buttons-header">
+        <h3 className="tables-and-buttons-title">Список конструкций</h3>
+      </div>
+      <ConstructionList
+        constructions={ConstrToCalc}
+        constrToCalcToSent={ConstrToCalcToSent}
+        onDelete={delConstrFromList}
+        materialsByConstruction={materialsByConstruction}
+        legacyTableWithMaterials
+        onReplacementChange={recalcConstructionReplacement}
+        recalcKeyId={recalcKeyId}
+      />
+      {(showMakeKpButton || showBackToKpButton) && (
+        <div className="tables-and-buttons-footer">
+          {showBackToKpButton ? (
+            <>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={saveKp}
+                className="counter__button_plus"
+                disabled={isSavingKp}
+              >
+                {isSavingKp ? "Сохранение..." : "Сохранить КП"}
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => navigate(`/kp/${activeKpId}`)}
+                className="counter__button_plus counter__button_plus--back-kp"
+              >
+                К КП
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleMakeKP}
+              className="counter__button_plus"
+              disabled={isSubmittingKp}
+            >
+              {isSubmittingKp ? "Создание КП..." : "Сделать КП"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   const addConstrToCalc = useCallback(async () => {
     // step/dframe: из API params; иначе константы (legacy UI выбора удалён).
@@ -1058,59 +1153,7 @@ const Calculator = () => {
                             </button>
                           </div>
 
-                          <div className="tables-and-buttons-container">
-                            {currentItems != 0 && (
-                              <div className="tables-and-buttons-header">
-                                <h3 className="tables-and-buttons-title">
-                                  Список конструкций
-                                </h3>
-                              </div>
-                            )}
-                            {tableConstrToCalc != null &&
-                              ConstrToCalc.length > 0 && (
-                                <ConstructionList
-                                  constructions={ConstrToCalc}
-                                  constrToCalcToSent={ConstrToCalcToSent}
-                                  onDelete={delConstrFromList}
-                                  materialsByConstruction={
-                                    materialsByConstruction
-                                  }
-                                  legacyTableWithMaterials
-                                  onReplacementChange={
-                                    recalcConstructionReplacement
-                                  }
-                                  recalcKeyId={recalcKeyId}
-                                />
-                              )}
-                            {(showMakeKpButton || showBackToKpButton) && (
-                              <div className="tables-and-buttons-footer">
-                                {showBackToKpButton ? (
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() =>
-                                      navigate(`/kp/${activeKpId}`)
-                                    }
-                                    className="counter__button_plus counter__button_plus--back-kp"
-                                  >
-                                    К КП
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={handleMakeKP}
-                                    className="counter__button_plus"
-                                    disabled={isSubmittingKp}
-                                  >
-                                    {isSubmittingKp
-                                      ? "Создание КП..."
-                                      : "Сделать КП"}
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          {showResultsTable ? renderResultsTable() : null}
                         </div>
                       </div>
                     );
@@ -1118,6 +1161,22 @@ const Calculator = () => {
               </div>
             );
           })}
+
+          {/* Открытое КП: таблица видна без выбора позиции каталога */}
+          {showResultsTable && currentItems == 0 ? (
+            <div
+              className="selected-item-container"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="selected-item-panel">
+                <p className="calculator-kp-edit-hint">
+                  Открытое КП — измените состав ниже или выберите конструкцию
+                  выше, чтобы добавить новую. Затем «Сохранить КП».
+                </p>
+                {renderResultsTable()}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
       <Modal

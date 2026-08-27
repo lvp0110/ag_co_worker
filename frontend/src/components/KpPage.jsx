@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { loadKpDocumentIntoCalculator } from "../services/offersApi.js";
+import {
+  deleteKpDocument,
+  fetchKpDocumentDetail,
+  loadKpDocumentIntoCalculator,
+} from "../services/offersApi.js";
+import { formatRequestError } from "../services/apiClient.js";
 import { useCalculatorStore } from "../stores/calculatorStore.js";
 import {
   getKpDocument,
@@ -35,10 +40,18 @@ function resolveDocFromNav(documentId, navOnec, userEmail) {
   };
 }
 
+function formatDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("ru-RU");
+  } catch {
+    return String(iso);
+  }
+}
+
 /**
- * Карточка КП.
- * Из списка (loadCalc=true) — подгружает конструкции в калькулятор.
- * «К списку» — сбрасывает калькулятор.
+ * Карточка КП: GET detail (конструкции/материалы), редактирование в калькуляторе,
+ * удаление (если ещё не в 1С). «К списку» закрывает сессию КП.
  */
 const KpPage = () => {
   const { id } = useParams();
@@ -55,47 +68,44 @@ const KpPage = () => {
     return resolveDocFromNav(documentId, navOnec, user?.email);
   }, [documentId, navOnec, user?.email]);
 
-  const [detailDoc, setDetailDoc] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingCalc, setLoadingCalc] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
 
-  const doc = detailDoc || baseDoc;
+  const doc = detail || baseDoc;
 
   useEffect(() => {
     if (authStatus === "loading" || !isAuthed || !documentId) return;
 
-    // После create / возврат с калькулятора — только activeKpId, без reload.
-    if (!shouldLoadCalc) {
-      useCalculatorStore.getState().setField("activeKpId", documentId);
-      return;
-    }
-
     let cancelled = false;
     const run = async () => {
-      // отложить setState за микротаск — не sync внутри effect body
       await Promise.resolve();
       if (cancelled) return;
-      setLoadingCalc(true);
+      setLoadingDetail(true);
       setLoadError("");
+      useCalculatorStore.getState().setField("activeKpId", documentId);
       try {
-        const detail = await loadKpDocumentIntoCalculator(documentId);
+        const fetched = await fetchKpDocumentDetail(documentId);
         if (cancelled) return;
-        setDetailDoc({
-          id: detail.id,
-          document_id: detail.document_id,
-          document_number: detail.document_number,
-          status: detail.status,
-          user_email: detail.user_email,
-          user_name: detail.user_name,
-          created_at: detail.created_at,
-        });
+        setDetail(fetched);
+        upsertKpDocumentFromOnec({ data: fetched });
+
+        if (shouldLoadCalc) {
+          setLoadingCalc(true);
+          await loadKpDocumentIntoCalculator(documentId, fetched);
+        }
       } catch (err) {
         if (cancelled) return;
-        console.error("[kp] load into calc failed:", err);
-        setLoadError(err?.message || "Не удалось загрузить конструкции КП");
-        useCalculatorStore.getState().setField("activeKpId", documentId);
+        console.error("[kp] detail/load failed:", err);
+        setLoadError(err?.message || "Не удалось загрузить КП");
       } finally {
-        if (!cancelled) setLoadingCalc(false);
+        if (!cancelled) {
+          setLoadingDetail(false);
+          setLoadingCalc(false);
+        }
       }
     };
     void run();
@@ -110,13 +120,57 @@ const KpPage = () => {
     return user?.email || "—";
   }, [doc?.user_email, user?.email]);
 
+  const constructions = detail?.constructions || [];
+  const materials = detail?.materials || [];
+
   const handleExit = () => {
     useCalculatorStore.getState().reset();
     navigate("/kp/list");
   };
 
-  const goToCalc = () => {
-    navigate("/calc");
+  const goToCalc = async () => {
+    setActionError("");
+    // Если в калькуляторе уже есть данные этого КП — просто перейти.
+    const store = useCalculatorStore.getState();
+    if (
+      store.activeKpId === documentId &&
+      Array.isArray(store.ConstrToCalcToSent) &&
+      store.ConstrToCalcToSent.length > 0
+    ) {
+      navigate("/calc");
+      return;
+    }
+    setLoadingCalc(true);
+    try {
+      await loadKpDocumentIntoCalculator(documentId, detail || undefined);
+      navigate("/calc");
+    } catch (err) {
+      setActionError(err?.message || "Не удалось открыть в калькуляторе");
+    } finally {
+      setLoadingCalc(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (
+      !window.confirm(
+        "Удалить это КП? По swagger удаление возможно только если документ ещё не успешно сохранён в 1С."
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setActionError("");
+    try {
+      await deleteKpDocument(documentId);
+      useCalculatorStore.getState().reset();
+      navigate("/kp/list");
+    } catch (err) {
+      console.error("[kp] delete failed:", err);
+      setActionError(formatRequestError(err));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (authStatus === "loading") {
@@ -156,9 +210,17 @@ const KpPage = () => {
               type="button"
               className="kp-page__exit-btn kp-page__exit-btn--secondary"
               onClick={goToCalc}
-              disabled={loadingCalc}
+              disabled={loadingCalc || loadingDetail}
             >
-              В калькулятор
+              {loadingCalc ? "Загрузка…" : "Редактировать"}
+            </button>
+            <button
+              type="button"
+              className="kp-page__exit-btn kp-page__exit-btn--danger"
+              onClick={handleDelete}
+              disabled={deleting || loadingDetail}
+            >
+              {deleting ? "Удаление…" : "Удалить"}
             </button>
             <button
               type="button"
@@ -170,12 +232,15 @@ const KpPage = () => {
           </div>
         </div>
 
-        {loadingCalc ? (
-          <p className="kp-page__status">Загрузка конструкций в калькулятор…</p>
+        {loadingDetail ? (
+          <p className="kp-page__status">Загрузка данных КП…</p>
         ) : null}
         {loadError ? <p className="kp-page__error">{loadError}</p> : null}
+        {actionError ? (
+          <pre className="kp-page__error kp-page__error--pre">{actionError}</pre>
+        ) : null}
 
-        <section className="kp-page__contact" aria-label="Данные 1С">
+        <section className="kp-page__contact" aria-label="Данные документа">
           {doc.document_number ? (
             <div className="kp-page__field">
               <span className="kp-page__label">Номер</span>
@@ -183,15 +248,17 @@ const KpPage = () => {
             </div>
           ) : null}
           <div className="kp-page__field">
-            <span className="kp-page__label">document_id</span>
-            <p className="kp-page__value">{doc.document_id || doc.id}</p>
+            <span className="kp-page__label">id</span>
+            <p className="kp-page__value">{doc.id}</p>
           </div>
-          {doc.status ? (
-            <div className="kp-page__field">
-              <span className="kp-page__label">Статус</span>
-              <p className="kp-page__value">{doc.status}</p>
-            </div>
-          ) : null}
+          <div className="kp-page__field">
+            <span className="kp-page__label">document_id (1С)</span>
+            <p className="kp-page__value">{doc.document_id || "—"}</p>
+          </div>
+          <div className="kp-page__field">
+            <span className="kp-page__label">Статус</span>
+            <p className="kp-page__value">{doc.status || "—"}</p>
+          </div>
           <div className="kp-page__field">
             <span className="kp-page__label">user_email</span>
             <p className="kp-page__value">{displayEmail}</p>
@@ -202,12 +269,102 @@ const KpPage = () => {
               <p className="kp-page__value">{doc.user_name}</p>
             </div>
           ) : null}
-          {user?.full_name ? (
+          <div className="kp-page__field">
+            <span className="kp-page__label">Создано</span>
+            <p className="kp-page__value">{formatDate(doc.created_at)}</p>
+          </div>
+          <div className="kp-page__field">
+            <span className="kp-page__label">Обновлено</span>
+            <p className="kp-page__value">{formatDate(doc.updated_at)}</p>
+          </div>
+          <div className="kp-page__field">
+            <span className="kp-page__label">Синхронизация</span>
+            <p className="kp-page__value">{formatDate(doc.synced_at)}</p>
+          </div>
+          {doc.last_error_message ? (
             <div className="kp-page__field">
-              <span className="kp-page__label">Менеджер (сессия)</span>
-              <p className="kp-page__value">{user.full_name}</p>
+              <span className="kp-page__label">Ошибка 1С</span>
+              <p className="kp-page__value">
+                {[doc.last_error_code, doc.last_error_message]
+                  .filter(Boolean)
+                  .join(": ")}
+              </p>
             </div>
           ) : null}
+        </section>
+
+        <section className="kp-page__block" aria-label="Конструкции">
+          <h2 className="kp-page__subtitle">
+            Конструкции ({constructions.length})
+          </h2>
+          {constructions.length === 0 ? (
+            <p className="kp-page__muted">Нет конструкций в ответе detail.</p>
+          ) : (
+            <div className="kp-page__table-wrap">
+              <table className="kp-page__table">
+                <thead>
+                  <tr>
+                    <th>code</th>
+                    <th>len_x</th>
+                    <th>len_y</th>
+                    <th>len_z</th>
+                    <th>area</th>
+                    <th>perimeter</th>
+                    <th>step</th>
+                    <th>d_frame</th>
+                    <th>проёмы</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {constructions.map((c, i) => (
+                    <tr key={c.id || `${c.code}-${i}`}>
+                      <td>{c.code || "—"}</td>
+                      <td>{c.len_x ?? "—"}</td>
+                      <td>{c.len_y ?? "—"}</td>
+                      <td>{c.len_z ?? "—"}</td>
+                      <td>{c.area ?? "—"}</td>
+                      <td>{c.perimeter ?? "—"}</td>
+                      <td>{c.step ?? "—"}</td>
+                      <td>{c.d_frame ? "да" : "нет"}</td>
+                      <td>
+                        {Array.isArray(c.openings) ? c.openings.length : 0}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="kp-page__block" aria-label="Материалы">
+          <h2 className="kp-page__subtitle">
+            Материалы ({materials.length})
+          </h2>
+          {materials.length === 0 ? (
+            <p className="kp-page__muted">Нет материалов в ответе detail.</p>
+          ) : (
+            <div className="kp-page__table-wrap">
+              <table className="kp-page__table">
+                <thead>
+                  <tr>
+                    <th>code</th>
+                    <th>quantity</th>
+                    <th>units</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {materials.map((m, i) => (
+                    <tr key={`${m.code}-${i}`}>
+                      <td>{m.code || "—"}</td>
+                      <td>{m.quantity ?? "—"}</td>
+                      <td>{m.units || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </div>
     </div>

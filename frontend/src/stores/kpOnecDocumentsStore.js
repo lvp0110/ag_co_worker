@@ -69,26 +69,49 @@ export const getKpDocument = (documentId) => {
   );
 };
 
-/** Добавляет/обновляет документ из ответа create 1С. */
+/** Добавляет/обновляет документ из ответа 1С. Не затирает onec_document_id пустым. */
 export const upsertKpDocumentFromOnec = (onec) => {
   const data = onec?.data && typeof onec.data === "object" ? onec.data : {};
   const id = String(data.id ?? onec?.id ?? "").trim();
+  const incomingOnec = String(
+    data.onec_document_id ??
+      (data.document_id && String(data.document_id).trim() !== id
+        ? data.document_id
+        : "") ??
+      ""
+  ).trim();
   const document_id = String(data.document_id ?? id).trim();
-  if (!id && !document_id) return null;
-  const key = id || document_id;
-  const existing = readAll().find((d) => docKey(d) === key);
+  if (!id && !document_id && !incomingOnec) return null;
+  const key = id || document_id || incomingOnec;
+  const existing =
+    readAll().find((d) => docKey(d) === key) ||
+    readAll().find(
+      (d) =>
+        (id && String(d.id) === id) ||
+        (document_id && String(d.document_id) === document_id) ||
+        (incomingOnec && String(d.onec_document_id) === incomingOnec)
+    );
+  const onec_document_id =
+    incomingOnec || String(existing?.onec_document_id ?? "").trim();
   const next = {
-    id: id || document_id,
-    document_id: document_id || id,
-    document_number: String(data.document_number ?? existing?.document_number ?? "").trim(),
+    id: id || existing?.id || document_id || onec_document_id,
+    document_id: onec_document_id || document_id || id,
+    onec_document_id: onec_document_id || undefined,
+    document_number: String(
+      data.document_number ?? existing?.document_number ?? ""
+    ).trim(),
     status: String(data.status ?? existing?.status ?? "").trim(),
-    user_email: String(data.user_email ?? "").trim(),
+    user_email: String(data.user_email ?? existing?.user_email ?? "").trim(),
     user_name: String(data.user_name ?? existing?.user_name ?? "").trim(),
     created_at: existing?.created_at ?? new Date().toISOString(),
   };
-  const rest = readAll().filter((d) => docKey(d) !== key);
+  const rest = readAll().filter(
+    (d) =>
+      docKey(d) !== docKey(next) &&
+      String(d.id) !== String(next.id) &&
+      !(next.onec_document_id && d.onec_document_id === next.onec_document_id)
+  );
   writeAll([next, ...rest]);
-  // Новый КП — при следующем открытии списка лучше перечитать с сервера.
   invalidateKpListCache();
   return next;
 };

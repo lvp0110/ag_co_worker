@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { fetchMyKpDocuments } from "../services/offersApi.js";
+import { fetchMyKpDocuments, deleteKpDocument } from "../services/offersApi.js";
 import { useCalculatorStore } from "../stores/calculatorStore.js";
 import {
   listKpDocuments,
@@ -88,6 +88,25 @@ export default function KpList() {
     navigate(`/kp/${routeId}`, {
       state: { onec: { data: d }, loadCalc: true },
     });
+  };
+
+  const handleDelete = async (d) => {
+    const routeId = d.id || d.document_id;
+    if (!routeId) return;
+    if (
+      !window.confirm(
+        "Удалить это КП? Удаление возможно только если документ ещё не успешно сохранён в 1С."
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteKpDocument(routeId);
+      await refresh();
+    } catch (err) {
+      console.error("[kp] list delete failed:", err);
+      setError(err?.message || "Не удалось удалить КП");
+    }
   };
 
   if (activeKpId) {
@@ -199,6 +218,13 @@ export default function KpList() {
                   >
                     Открыть
                   </button>
+                  <button
+                    type="button"
+                    className="kp-list__action-btn kp-list__action-btn--danger"
+                    onClick={() => handleDelete(d)}
+                  >
+                    Удалить
+                  </button>
                 </div>
               </article>
             ))}
@@ -236,6 +262,13 @@ export default function KpList() {
                       onClick={() => openDoc(d)}
                     >
                       Открыть
+                    </button>
+                    <button
+                      type="button"
+                      className="kp-list__action-btn kp-list__action-btn--danger"
+                      onClick={() => handleDelete(d)}
+                    >
+                      Удалить
                     </button>
                   </td>
                 </tr>

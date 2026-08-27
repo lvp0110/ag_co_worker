@@ -18,6 +18,14 @@
   flex-direction: column;
 }
 
+.calculator-kp-edit-hint {
+  margin: 0 0 12px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: #64748b;
+  font-family: "Montserrat", sans-serif;
+}
+
 .content-item {
   width: 340px;
   margin: auto;
@@ -446,6 +454,15 @@ h4 {
 
 .tables-and-buttons-footer {
   margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tables-and-buttons-footer .counter__button_plus--back-kp {
+  background: #334155;
+  filter: none;
+  box-shadow: none;
 }
 
 .tables-and-buttons-footer .add_design_button {

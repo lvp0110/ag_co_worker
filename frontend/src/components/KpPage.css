@@ -126,6 +126,73 @@
   background: #5897b7;
 }
 
+.kp-page__exit-btn--danger {
+  background: #fff;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.kp-page__exit-btn--danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.kp-page__subtitle {
+  margin: 24px 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.kp-page__block {
+  margin-top: 8px;
+}
+
+.kp-page__muted {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.kp-page__error--pre {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-height: 30vh;
+  overflow: auto;
+}
+
+.kp-page__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.kp-page__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.kp-page__table th,
+.kp-page__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.kp-page__table th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+}
+
+.kp-page__table tr:last-child td {
+  border-bottom: none;
+}
+
 .kp-page__contact {
   width: 100%;
   margin-top: 8px;
