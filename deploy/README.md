@@ -1,6 +1,6 @@
 # Deploy ag_co_worker — Linux-сервер
 
-Кратко: один Linux-сервер, приложение как два Node-процесса под **systemd**, TLS и маршрутизация по домену — на **хостовом nginx**. Деплой — SSH из локального Makefile. **Локальной БД нет** — КП в 1С, auth/calc — во внешнем сервисе.
+Кратко: один Linux-сервер, приложение как **один** Node-процесс под systemd, TLS и маршрутизация по домену — на **хостовом nginx**. Деплой — SSH из локального Makefile. Своего backend и БД у проекта нет: auth, расчёт, админ-API и выгрузка КП в 1С живут во внешнем сервисе ConstrTodo.
 
 ## Архитектура
 
@@ -14,17 +14,16 @@
    ↓
 [frontend]  systemd: ag-co-worker-frontend.service
             node server.js  (bind 127.0.0.1:3008)
-   ├─ express.static(frontend/dist)   ← статика (rsync сюда)
-   └─ /api/*, /health  →  http://127.0.0.1:3006
+   ├─ express.static(frontend/dist)                     ← статика (rsync сюда)
+   ├─ /login, /auth/*, /api/*, /integration/*,
+   │  /admin/* (API), /content/*, /commerce/*  →  UPSTREAM_URL
+   ├─ /health, /__front_health                          ← живость самого процесса
+   └─ SPA-fallback на index.html
    ↓
-[backend]   systemd: ag-co-worker-backend.service
-            node dist/index.js  (bind 127.0.0.1:3006)
-   └─ Node/Express (прокси calc + POST /api/offers → 1С)
-   ↓
-[внешний сервис :3005]  auth / calc / 1С
+[ConstrTodo :3005]  auth / calc / админ-API / 1С
 ```
 
-Наружу виден **только** nginx на 80/443. Backend и frontend слушают loopback. Юниты: `deploy/systemd/ag-co-worker-backend.service`, `deploy/systemd/ag-co-worker-frontend.service`. Секреты: `$DEPLOY_DIR/.env.prod` — `EnvironmentFile` у backend; frontend получает `PORT` / `BACKEND_URL` / auth из unit + shared env.
+Наружу виден **только** nginx на 80/443, процесс приложения слушает loopback. Юнит: `deploy/systemd/ag-co-worker-frontend.service`; `PORT` и `DIST_DIR` заданы в нём, адрес upstream и остальное — в `$DEPLOY_DIR/.env.prod` (`EnvironmentFile`).
 
 ---
 
@@ -43,7 +42,7 @@ sudo apt install -y nginx
 # certbot (для Let's Encrypt)
 sudo apt install -y certbot python3-certbot-nginx
 
-# Firewall — открываем только 80/443; 3006/3008 снаружи закрыты
+# Firewall — открываем только 80/443; 3008 снаружи закрыт
 sudo ufw allow 80,443/tcp
 sudo ufw --force enable
 ```
@@ -86,7 +85,8 @@ cp deploy/.env.deploy.example deploy/.env.deploy
 # На сервере после первого git clone:
 cd /srv/ag_co_worker
 cp deploy/.env.prod.example .env.prod
-# Заполнить CORS_ORIGIN, AUTH_SERVICE_URL, CALC_SERVICE_URL, ONEC_SERVICE_URL.
+# Заполнить UPSTREAM_URL (адрес ConstrTodo). Историческое имя AUTH_SERVICE_URL
+# тоже читается — server.js берёт UPSTREAM_URL || AUTH_SERVICE_URL.
 chmod 600 .env.prod
 ```
 
@@ -99,7 +99,7 @@ make deploy-bootstrap   # локально
 Скрипт:
 1. Клонирует репо в `$DEPLOY_DIR`.
 2. Проверяет, что `.env.prod`, nginx и конфиг на месте.
-3. Ставит systemd-юниты из `deploy/systemd/` и поднимает backend + frontend.
+3. Ставит systemd-юнит из `deploy/systemd/`, доставляет prod-deps фронта и поднимает сервис.
 4. Дёргает `https://<domain>/health`.
 
 Сразу после bootstrap — залить фронт:
@@ -113,12 +113,11 @@ make deploy-frontend
 
 | Ситуация | Команда | Что произойдёт |
 |----------|---------|----------------|
-| Изменился код backend | `make deploy-backend` | git fetch + checkout backend → на сервере `npm ci && npm run build` → `systemctl restart ag-co-worker-backend` (frontend не трогается). |
-| Изменился frontend (статика) | `make deploy-frontend` | Локально `vite build` → `rsync` dist на сервер. Frontend-юнит не перезапускается — `server.js` читает обновлённый `dist` на лету. |
-| Изменился `server.js` / prod-deps фронта | `REBUILD=1 make deploy-frontend` | Плюсом переустановка frontend prod-deps на сервере и `systemctl restart ag-co-worker-frontend`. |
-| Откат backend на прошлую ревизию | `REV=<commit> make deploy-backend` | Тот же скрипт, но `git checkout $REV` вместо `origin/main`. |
+| Изменился фронт (статика) | `make deploy-frontend` | Локально `vite build` → `rsync` dist на сервер. Юнит не перезапускается — `server.js` читает обновлённый `dist` на лету. |
+| Изменился `server.js` / prod-deps фронта | `REBUILD=1 make deploy-frontend` | Плюсом переустановка prod-deps на сервере и `systemctl restart ag-co-worker-frontend`. |
+| Сменился адрес upstream | правка `.env.prod` на сервере + `ssh $DEPLOY_HOST 'sudo systemctl restart ag-co-worker-frontend'` | `UPSTREAM_URL` читается при старте процесса. |
 | Правка nginx конфига на сервере | `make deploy-nginx-sync && make deploy-nginx-reload` | Залить шаблон из репо на сервер, валидировать `nginx -t`, перечитать. |
-| Посмотреть статус прод-стека | `make deploy-status` | `systemctl status` юнитов + `curl /health`. |
+| Посмотреть статус прода | `make deploy-status` | `systemctl status` юнита, порт 3008, доступность upstream и `curl /health` через домен. |
 
 ---
 
@@ -129,22 +128,32 @@ make deploy-frontend
 make deploy-status
 
 # Логи приложения
-ssh $DEPLOY_HOST "journalctl -u ag-co-worker-backend -n 200 -f"
 ssh $DEPLOY_HOST "journalctl -u ag-co-worker-frontend -n 200 -f"
 
 # Логи nginx
 ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.error.log"
 ssh $DEPLOY_HOST "sudo tail -f /var/log/nginx/ag_co_worker.access.log"
 
-# Проверка изоляции (оба должны быть "connection refused" снаружи)
-nc -vz ag.example.com 3006
+# Проверка изоляции (снаружи должно быть "connection refused")
 nc -vz ag.example.com 3008
+
+# Доступен ли upstream с сервера
+ssh $DEPLOY_HOST "set -a; . /srv/ag_co_worker/.env.prod; set +a; \
+  curl -s -o /dev/null -w '%{http_code}\n' \"\${UPSTREAM_URL%/}/auth/session\""
 ```
+
+Типичные случаи:
+
+- **502 от nginx** — процесс лежит: `journalctl -u ag-co-worker-frontend`.
+- **Логин отдаёт 403 с пустым телом** — upstream отбил запрос по `Origin`. `server.js` снимает этот заголовок перед проксированием; если правили прокси, проверьте, что `proxyReq.removeHeader("origin")` на месте.
+- **Вместо JSON приходит HTML** — путь не попал в `pathFilter` и ушёл в SPA-fallback. Добавьте префикс в `frontend/server.js` (и в `frontend/vite.config.js`, чтобы dev и prod не разъезжались).
+- **Логин или расчёт не работают целиком** — проверьте `UPSTREAM_URL` в `.env.prod`: `127.0.0.1:3005` на этой машине может быть занят чужим контейнером. Быстрая проверка — `make deploy-status`, шаг «upstream».
 
 ## Что НЕ делают скрипты
 
 - Не создают и не пишут TLS-сертификаты (их ставит certbot отдельно).
 - Не пишут в `.env.prod` — он под контролем оператора.
+- Не останавливают юниты, которых больше нет в репозитории. После удаления Node-бэкенда старый юнит надо погасить руками: `ssh $DEPLOY_HOST 'sudo systemctl disable --now ag-co-worker-backend'` — иначе он продолжит слушать 3006.
 
 `deploy-nginx-sync.sh` синхронизирует шаблон `deploy/nginx/ag_co_worker.conf` на сервер и валидирует `nginx -t`; `deploy-nginx-reload.sh` перечитывает конфиг — это разделение позволяет CI прогнать sync без reload, увидеть ошибку и не убить трафик.
 
@@ -156,18 +165,17 @@ Workflow [.github/workflows/prod-deploy.yml](../.github/workflows/prod-deploy.ym
 
 ### Триггеры
 
-- **push в `main`** — полный rollout (backend → nginx [если менялся] → frontend → smoke + Telegram).
+- **push в `main`** — rollout (nginx [если менялся] → frontend → smoke + Telegram).
 - **workflow_dispatch** (`Actions → Prod deploy → Run workflow`) — те же шаги, плюс ручной вход:
-  - `rev` — необязательная ревизия (тег, ветка или SHA), которая попадёт в `DEPLOY_REV` и будет передана в `deploy-backend.sh`. **Используется для отката**: `Run workflow → rev = <previous-sha>`.
+  - `rev` — необязательная ревизия (тег, ветка или SHA), которая попадёт в `DEPLOY_REV`. **Используется для отката**: `Run workflow → rev = <previous-sha>`.
 
 ### Условия запуска шагов (на `push` в `main`)
 
 | Шаг | Когда запускается |
 |-----|---------------------|
-| `deploy-backend.sh` | если менялись `backend/**` |
 | `deploy-nginx-sync.sh` + `deploy-nginx-reload.sh` | если менялись `deploy/nginx/**` |
 | `deploy-frontend.sh` | если менялись `frontend/**` |
-| `REBUILD=1` для frontend | если менялся `frontend/server.js` (или prod-deps фронта) |
+| `REBUILD=1` для frontend | если менялись `frontend/server.js`, `frontend/package.json` или unit-файл |
 | `deploy-status.sh` | всегда (smoke test) |
 
 На `workflow_dispatch` все rollout-шаги запускаются принудительно (use case — force redeploy или откат через `rev`).
@@ -203,7 +211,7 @@ deploy ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/*, \
 ```
 Для `make deploy-nginx-reload` достаточно последних двух строк (они уже могли быть).
 
-Для установки/перезапуска юнитов при bootstrap и деплое deploy-пользователю также нужен NOPASSWD на `systemctl` для `ag-co-worker-backend` / `ag-co-worker-frontend` (и копирование unit-файлов в `/etc/systemd/system/` при bootstrap).
+Для установки/перезапуска юнита при bootstrap и деплое deploy-пользователю также нужен NOPASSWD на `systemctl` для `ag-co-worker-frontend` (и копирование unit-файла в `/etc/systemd/system/` при bootstrap).
 
 ### Откат
 
@@ -216,6 +224,6 @@ gh workflow run prod-deploy.yml -f rev=<previous-sha>
 
 ### Что workflow НЕ делает
 
-- Не собирает backend в CI — `npm ci && npm run build` идут **на сервере**, как и при ручном `make deploy-backend`. Источник правды — git checkout на сервере.
 - Не управляет certbot/Let's Encrypt — systemd-timer на сервере.
 - Не трогает `.env.prod` — никогда.
+- Не собирает и не деплоит никакой backend: серверная часть живёт в отдельном проекте (ConstrTodo), этот пайплайн катит только статику и прокси.

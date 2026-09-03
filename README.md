@@ -1,6 +1,8 @@
 # ag_co_worker
 
-Калькулятор акустических конструкций с генерацией коммерческих предложений (КП). Монорепо: React-фронт + Node/Express-бэк (тонкий прокси calc + создание КП в 1С). **Локальной БД нет** — auth, calc и 1С живут во внешнем сервисе (`:3005`).
+Калькулятор акустических конструкций с генерацией коммерческих предложений (КП) и админкой справочников. **Только фронт**: React + Vite, в проде — статика за тонким Node-прокси.
+
+**Своего backend и БД нет** — auth, расчёт, админ-API и выгрузка КП в 1С живут во внешнем сервисе ConstrTodo (`:3005`).
 
 ---
 
@@ -8,13 +10,14 @@
 
 | Слой | Технологии |
 |------|------------|
-| Frontend | React 19, Vite, React Router 7, zustand; в prod — `node server.js` (express + http-proxy-middleware) |
-| Backend | Node.js, Express, TypeScript (прокси calc + `POST /api/offers` → 1С) |
-| Auth | Внешний сервис (`AUTH_SERVICE_URL`): cookie `access_token` + CSRF |
-| КП | 1С (`ONEC_SERVICE_URL`); список/карточка на клиенте — `sessionStorage` из ответов 1С |
-| API-документация | OpenAPI + Swagger UI (`@asteasolutions/zod-to-openapi`) |
-| Внешний сервис | `:3005` — auth, calc, 1С (локально `localhost:3005`, staging `dev3.constrtodo.ru:3005`) |
-| Prod | host nginx + systemd (`ag-co-worker-backend` / `ag-co-worker-frontend`) |
+| Frontend | React 19, Vite, React Router 7, zustand |
+| Prod-сервер | `node server.js` (express + http-proxy-middleware): статика + прокси в upstream |
+| Auth | ConstrTodo: `POST /login`, `GET /auth/session`, `POST /auth/refresh`, `POST /auth/logout`; cookie `access_token` (httpOnly) + `csrf_token` |
+| Расчёт | ConstrTodo v2: `POST /api/v2/calculations/isolation/by-construction`; параметры и состав конструкций — из БД, редактируются в админке |
+| КП | ConstrTodo → 1С: `/integration/onec/isolation/document(s)`; список и карточка читаются с сервера, `sessionStorage` — кэш на вкладку |
+| Админка | `/admin` — конструкции, материалы, регионы, картинки (`/admin/*`, `/content/*`, `/commerce/*`) |
+| Внешний сервис | `:3005` — всё перечисленное в одном сервисе (локально `localhost:3005`, staging `dev3.constrtodo.ru:3005`) |
+| Prod | host nginx + systemd (`ag-co-worker-frontend`) |
 
 ---
 
@@ -23,32 +26,28 @@
 - **Node.js** ≥ 20
 - **npm** ≥ 10
 - **make** (предустановлен на macOS/Linux)
-- Внешний сервис auth/calc/1С на `:3005` (для локальной разработки)
+- Внешний ConstrTodo на `:3005` (для локальной разработки)
 
 ---
 
 ## Быстрый старт
 
 ```bash
-# 1) Первая инициализация: зависимости + .env
-make setup
-
-# 2) Запустить backend + frontend (Ctrl-C остановит оба)
-make dev
+make setup && make dev
 ```
-
-Нужен внешний сервис auth/calc/1С на `:3005`.
 
 После `make dev`:
 
 | Сервис | URL |
 |--------|-----|
 | Frontend | [http://localhost:5175](http://localhost:5175) |
-| Backend API | [http://localhost:3007](http://localhost:3007) |
-| Swagger UI | [http://localhost:3007/api/docs](http://localhost:3007/api/docs) |
-| Auth / calc / 1С | `http://localhost:3005` (внешний сервис) |
+| ConstrTodo (внешний) | `http://localhost:3005` |
 
-`Ctrl-C` в терминале `make dev` останавливает backend и frontend.
+Если локального `:3005` нет — положите в `frontend/.env.development.local`:
+
+```bash
+UPSTREAM_TARGET=https://dev3.constrtodo.ru:3005
+```
 
 ---
 
@@ -57,38 +56,50 @@ make dev
 | Команда | Описание |
 |---------|----------|
 | `make help` | Список всех команд |
-| `make setup` | Первая инициализация: install + env |
-| `make install` | Установить зависимости (backend + frontend) |
+| `make setup` | Первая инициализация: установка зависимостей |
+| `make install` | Установить зависимости |
 | `make reinstall` | Чистая переустановка зависимостей (на случай сбоев npm / ENOTEMPTY) |
-| `make env` | Создать `backend/.env` из `.env.example`, если отсутствует |
-| `make backend` | Запустить только backend (tsx watch) |
-| `make frontend` | Запустить только frontend (vite dev) |
-| `make dev` | Запустить backend + frontend |
-| `make stop` | Убить зависшие backend/frontend процессы |
-| `make build` | Production-сборка: `tsc` (backend) + `vite build` (frontend) |
-| `make clean` | Удалить `node_modules` и `dist` в backend и frontend |
-| `make status` | Что где крутится (процессы + порты) |
+| `make dev` / `make frontend` | Запустить vite dev на :5175 |
+| `make stop` | Убить зависший vite |
+| `make build` | Production-сборка (`vite build` → `frontend/dist/`) |
+| `make clean` | Удалить `node_modules` и `dist` |
+| `make status` | Занятость портов 3005 / 5175 |
 
-Prod-деплой: `make deploy-backend`, `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
+Prod-деплой: `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
 
-Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3008` (frontend `node server.js`) → `127.0.0.1:3006` (backend `node dist/index.js`). Юниты — `deploy/systemd/*.service`, секреты — `$DEPLOY_DIR/.env.prod`.
+Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3008` (`node server.js`) → ConstrTodo на `dev3.constrtodo.ru:3005`. Юнит — `deploy/systemd/ag-co-worker-frontend.service`, адрес upstream и секреты — `$DEPLOY_DIR/.env.prod`.
 
 ---
 
-## API
+## Как фронт ходит в API
 
-- Swagger UI: [http://localhost:3007/api/docs](http://localhost:3007/api/docs)
-- OpenAPI JSON: [http://localhost:3007/api/openapi.json](http://localhost:3007/api/openapi.json)
+Своих ручек у проекта нет. Фронт использует **относительные** пути, а проксирует их:
 
-Основные группы ручек:
+- в dev — vite ([frontend/vite.config.js](frontend/vite.config.js));
+- в проде — [frontend/server.js](frontend/server.js).
 
-| Группа | Пути |
-|--------|------|
-| **Offers** | `POST /api/offers` — создание КП в 1С (`POST /integration/onec/isolation/document`), ответ `{ code, data: { document_id, user_email }, error, id }` |
-| **Calc (proxy)** | Прозрачно проксируют на внешний calc-сервис: `POST /api/v1/calcIsolation/byProduct`, `GET /api/v1/AllIsolationConstr`, `GET /api/v1/IsolationConstrMaterials/{code}`, `GET /api/v1/constr/{filename}`, `GET /api/v2/isolationConstructions/props/{code}` |
-| **Health** | `GET /health` |
+Набор путей одинаков в обоих режимах: `/login`, `/auth/*`, `/api/*`, `/integration/*`, `/admin/*`, `/content/*`, `/commerce/*`. Добавляете новый серверный путь — вписывайте в оба файла.
 
-Аутентификация — во внешнем сервисе (`AUTH_SERVICE_URL`): фронт ходит на `POST /login`, `GET /auth/session`, `POST /auth/logout`, а backend в `requireAuth` валидирует ту же cookie `access_token` через `GET /auth/session` (без локального User). Свои токены backend не выдаёт. Номер КП = `document_id` из 1С (URL `/kp/:document_id`). Список и карточка КП строятся на клиенте из ответов 1С (`sessionStorage` — `kpOnecDocumentsStore`). Все запросы с фронта идут с `credentials: 'include'`; на 401 клиент эмитит `auth:unauthorized` и открывает `LoginModal`.
+| Что | Путь в upstream |
+|-----|-----------------|
+| Логин / сессия / refresh / логаут | `POST /login`, `GET /auth/session`, `POST /auth/refresh`, `POST /auth/logout` |
+| Расчёт конструкции (основной) | `POST /api/v2/calculations/isolation/by-construction` |
+| Публичный каталог и параметры | `GET /api/v2/constructions/{category}`, `.../{code}`, `.../{code}/calculation-params` |
+| Legacy-расчёт и каталог v1 | `POST /api/v1/calcIsolation/byProduct`, `GET /api/v1/AllIsolationConstr`, `GET /api/v1/IsolationConstrMaterials/{code}` |
+| Прайс | `GET /api/v2/data` |
+| Картинки конструкций | `GET /api/v2/public/image/{filename}` |
+| КП | `POST`/`PUT /integration/onec/isolation/document`, `GET /integration/onec/isolation/documents`, `.../documents/{id}`, `.../documents/{id}/retry`, `DELETE .../documents/{id}` |
+| Админка | `/admin/materials/*`, `/admin/constructions/*`, `/admin/commerce/*`, `/admin/images/*`, `/content/*`, `/commerce/*` |
+
+`/health` и `/__front_health` отдаёт сам `server.js` — это живость фронт-процесса, а не upstream.
+
+Все запросы идут с `credentials: 'include'`; мутации требуют заголовка `X-CSRF-Token` со значением из читаемой cookie `csrf_token`. На 401 клиент один раз пробует `POST /auth/refresh`, при неудаче открывает окно логина.
+
+### Расчёт: v2 и legacy v1
+
+Основной путь — v2 `by-construction`: параметры конструкции, ограничения размеров, группы замены и опциональные материалы приходят из БД и редактируются в админке.
+
+`POST /api/v1/calcIsolation/byProduct` остался только третьим фолбэком материалов на странице «Инфо» (`api.js:loadInfoPageMaterialsList`): состав из админки → `IsolationConstrMaterials` → v1-расчёт → v2-props. Размеры там типовые, поэтому количества ориентировочные. Подмены артикулов под шифры, которых v1 не знает (`*_ul_tape`, `*_eco_s`, герметик «Ультракустик»), лежат в [utils/constructionCiphers.js](frontend/src/utils/constructionCiphers.js) и работают только на этом пути.
 
 ---
 
@@ -96,32 +107,22 @@ Prod-деплой: `make deploy-backend`, `make deploy-frontend`, `make deploy-b
 
 ```
 ag_co_worker/
-├── backend/                        ← Node/Express (прокси + offers → 1С)
+├── frontend/                       ← весь код проекта
 │   ├── src/
-│   │   ├── config/env.ts
-│   │   ├── docs/                   ← Zod + Swagger
-│   │   ├── middleware/requireAuth.ts
-│   │   ├── routes/                 ← offers, calc (proxy)
-│   │   ├── services/               ← calcService, externalAuth, onecIntegration
-│   │   └── index.ts
-│   ├── .env.example
-│   └── package.json
-├── frontend/                       ← React + Vite
-│   ├── src/
-│   │   ├── components/             ← Calculator, KpPage, KpList, LoginModal, AppHeader, …
+│   │   ├── components/             ← Calculator, KpList, KpPage, AdminPage, PricePage, …
 │   │   ├── context/AuthContext.jsx
-│   │   ├── services/               ← apiClient, authApi, offersApi, constructionApi, priceApi
-│   │   ├── stores/                 ← calculatorStore, kpOnecDocumentsStore, …
-│   │   ├── utils/offerMapper.js
+│   │   ├── services/               ← apiClient, authApi, offersApi, constructionApi, adminApi, priceApi
+│   │   ├── stores/                 ← calculatorStore, kpOnecDocumentsStore
+│   │   ├── utils/                  ← isolationCalcV2, constructionCiphers, onecDocumentMapper, offerMapper
 │   │   └── ...
-│   ├── server.js                   ← prod: статика + proxy /api,/health
+│   ├── server.js                   ← prod: статика + прокси в upstream + /health
+│   ├── vite.config.js              ← dev-прокси (тот же набор путей)
 │   ├── public/
-│   ├── index.html
-│   ├── vite.config.js
 │   └── package.json
 ├── deploy/                         ← SSH-деплой, nginx, systemd, bootstrap
-│   └── systemd/                    ← ag-co-worker-backend/frontend.service
-├── Makefile                        ← все команды разработки и деплоя
+│   ├── systemd/                    ← ag-co-worker-frontend.service
+│   └── nginx/                      ← ag_co_worker.conf (шаблон server block)
+├── Makefile                        ← команды разработки и деплоя
 └── .github/workflows/              ← GitHub Pages + prod-deploy
 ```
 
@@ -129,46 +130,28 @@ ag_co_worker/
 
 ## Переменные окружения
 
-Backend — `backend/.env` (создаётся из `.env.example` через `make env`):
+Dev (опционально, `frontend/.env.development.local` — шаблон в [frontend/.env.example](frontend/.env.example)):
 
 | Переменная | Дефолт | Описание |
 |------------|--------|----------|
-| `NODE_ENV` | `development` | — |
-| `PORT` | `3007` | Порт backend-API (в prod на сервере — `3006`) |
-| `CORS_ORIGIN` | `http://localhost:5175,http://localhost:5176` | Список origin'ов через запятую (для `credentials: true`). По умолчанию разрешены оба стандартных порта Vite |
-| `AUTH_SERVICE_URL` | `http://localhost:3005` | База внешнего auth-сервиса — `requireAuth` валидирует сессию через его `GET /auth/session` |
-| `CALC_SERVICE_URL` | `http://localhost:3005` | База внешнего сервиса расчёта |
-| `CALC_SERVICE_TIMEOUT_MS` | `60000` | Таймаут запроса к calc-сервису (прайс `/api/v2/data` часто >15s) |
-| `ONEC_SERVICE_URL` | значение `AUTH_SERVICE_URL` | База сервиса выгрузки КП в 1С (`/integration/onec/isolation/document`) |
-| `ONEC_TIMEOUT_MS` | `60000` | Таймаут выгрузки в 1С (ручка сама считает материалы) |
-| `ONEC_EXPORT_ENABLED` | `true` | `false` — полностью отключить выгрузку в 1С |
+| `UPSTREAM_TARGET` | `http://localhost:3005` | Куда dev-прокси отправляет все API-пути |
+| `VITE_API_URL` | `""` (same-origin) | Override базы API. Нужен только для сборок без прокси (GitHub Pages) |
 
-Frontend (опционально — через `frontend/.env.local`):
+Prod (`$DEPLOY_DIR/.env.prod` на сервере, шаблон — [deploy/.env.prod.example](deploy/.env.prod.example)):
 
-| Переменная | Дефолт | Описание |
-|------------|--------|----------|
-| `VITE_API_URL` | `""` (same-origin) | Override базы API. В dev Vite проксирует `/api` → backend, `/login`+`/auth` → `:3005`. В prod — relative URL через `server.js` |
+| Переменная | Описание |
+|------------|----------|
+| `UPSTREAM_URL` | База ConstrTodo, в проде `https://dev3.constrtodo.ru:3005`. Историческое имя `AUTH_SERVICE_URL` тоже читается |
+| `NODE_ENV` | `production` |
 
-В prod на сервере секреты живут в `$DEPLOY_DIR/.env.prod` (EnvironmentFile backend; frontend — PORT/BACKEND_URL/AUTH из unit + shared env). См. [deploy/README.md](deploy/README.md).
+`PORT` и `DIST_DIR` задаёт systemd-юнит.
 
 ---
 
 ## Запуск без Make
 
-На случай если `make` недоступен:
-
 ```bash
-# 1) Установить зависимости
-cd backend && npm install && cd ..
-cd frontend && npm install && cd ..
-
-# 2) Создать backend/.env
-cp backend/.env.example backend/.env
-
-# 3) Запустить backend и frontend в отдельных терминалах
-#    (нужен внешний сервис auth/calc/1С на :3005)
-cd backend && npm run dev          # терминал 1
-cd frontend && npm run dev         # терминал 2
+cd frontend && npm install && npm run dev
 ```
 
 ---
@@ -179,9 +162,7 @@ cd frontend && npm run dev         # терминал 2
 make build
 ```
 
-Генерирует:
-- `backend/dist/` — скомпилированный TypeScript (запуск: `cd backend && npm start` → `node dist/index.js`).
-- `frontend/dist/` — статический фронт (в prod раздаётся `frontend/server.js`).
+Генерирует `frontend/dist/` — статику, которую в проде раздаёт `frontend/server.js`.
 
 ---
 
@@ -195,43 +176,43 @@ make build
    Workflow при деплое сам пытается переключить источник на `gh-pages`.
 2. После первого успешного деплоя ссылка: https://lvp0110.github.io/ag_co_worker/
 
-**Важно:** на Pages нет прокси `/api` и `/login`. Сборка Pages по умолчанию ходит на `https://dev3.constrtodo.ru:3005` (`VITE_API_URL`) и использует HashRouter (`/#/calc`). Override — repo Variable `VITE_API_URL`; на API нужен CORS для `https://lvp0110.github.io`. Логин с github.io требует cookie `SameSite=None` на auth. Полноценный прод-стек — см. [deploy/README.md](deploy/README.md).
+**Важно:** на Pages прокси нет вообще. Сборка ходит на `https://dev3.constrtodo.ru:3005` напрямую (`VITE_API_URL`) и использует HashRouter (`/#/calc`). Значит запросы cross-origin, и чтобы работали логин, каталог, админка и КП, на стороне ConstrTodo нужны CORS для `https://lvp0110.github.io` и cookies `SameSite=None; Secure`. Полноценный контур — systemd, см. [deploy/README.md](deploy/README.md).
 
 ---
 
 ## Частые проблемы
 
 **Внешний сервис на :3005 недоступен**
-`make setup` / `make dev` сами его не поднимают. Auth, calc и создание КП требуют работающий сервис на `AUTH_SERVICE_URL` / `CALC_SERVICE_URL` / `ONEC_SERVICE_URL` (по умолчанию `http://localhost:3005`).
+`make dev` его не поднимает. Логин, каталог, расчёт и КП требуют работающий ConstrTodo на `UPSTREAM_TARGET` (по умолчанию `http://localhost:3005`).
 
-**CORS-ошибка `Access-Control-Allow-Origin has a value 'http://localhost:5175' that is not equal to the supplied origin`**
-Vite при занятом 5173 автоинкрементит порт до 5174+, а backend CORS пропускает только указанные origin'ы.
-- По умолчанию разрешены оба: `http://localhost:5175,http://localhost:5176`.
-- Если Vite поднялся ещё выше (5175+) — добавьте порт в `backend/.env`: `CORS_ORIGIN=http://localhost:5175,http://localhost:5176,http://localhost:5177` и перезапустите backend.
-- Альтернатива — освободить 5175 (`make stop`) и перезапустить фронт.
+**«Расчёт не вернул материалы для выбранного варианта конструкции»**
+v2-расчёт читает состав из таблиц `construction_materials` / `construction_optional_materials`. Если они пустые (частый случай на свежем дампе), сервис отвечает `200` с пустым списком, и калькулятор показывает эту ошибку. Проверить можно прямым запросом к `:3005` — состав наполняется через админку или миграцией данных.
 
-**401 Unauthorized после логина при запросах с фронта**
-Проверьте, что:
-- backend `.env` имеет `CORS_ORIGIN` с правильным origin'ом фронта (см. выше);
-- браузер не блокирует cookies третьей стороны (для localhost обычно ок);
-- внешний auth на `:3005` отвечает на `GET /auth/session`.
+**401 Unauthorized при запросах с фронта**
+Убедитесь, что запросы идут по относительным путям (тогда cookies same-origin), что upstream отвечает на `GET /auth/session`, и что вход выполнен в этой же вкладке. Абсолютный URL на `:3005` из кода фронта ломает cookies — так делает только сборка Pages, и ей нужны CORS + `SameSite=None`.
 
-**Ошибка валидации при создании КП**
-Обычно означает, что payload не совпадает со схемой `CreateKpFromCalcRequestSchema`. Ответ backend содержит `issues[]` с путями — по ним видно, какое именно поле не прошло.
+**Создание КП падает с 404**
+ConstrTodo отвечает 404 при отсутствии session-cookie — нужно перелогиниться. `offersApi` перед выгрузкой сам проверяет сессию и даёт понятный текст.
+
+**КП сохранился, но в списке `sync_error`**
+Документ создан локально в ConstrTodo, а синхронизация с 1С не прошла — текст в `last_error_message`. Типичная причина на стенде: не заданы креды 1С (`ONEC_ENDPOINT` / `ONEC_USERNAME` / `ONEC_PASSWORD` на стороне ConstrTodo). Повторить синхронизацию — `POST /integration/onec/isolation/documents/{id}/retry`.
+
+**JSON-ответ вдруг пришёл как HTML**
+Значит путь не попал в `pathFilter` прокси и уехал в SPA-fallback. Добавьте префикс в `frontend/server.js` и `frontend/vite.config.js`.
 
 **Список КП пуст после перезагрузки вкладки**
-Ожидаемо: история КП хранится в `sessionStorage` (`kpOnecDocumentsStore`) из ответов 1С при создании. Без GET list в 1С история не переживает закрытие вкладки.
+Список читается с сервера (`GET /integration/onec/isolation/documents`); `sessionStorage` — только кэш. Если список пуст, значит на сервере нет документов этого пользователя.
 
-**Зависшие dev-процессы после Ctrl-C**
+**Зависший dev-процесс после Ctrl-C**
 ```bash
-make stop      # убивает tsx watch и vite
-make status    # показывает что ещё крутится
+make stop
+make status
 ```
 
 **`npm error ENOTEMPTY` при `make install` / `make setup`**
-Полусломанный `node_modules` после прерванного предыдущего install. Чистая переустановка:
+Полусломанный `node_modules` после прерванного install:
 ```bash
-make reinstall    # rm -rf node_modules + package-lock.json в backend/ и frontend/, затем npm install заново
+make reinstall
 ```
 
 ---
