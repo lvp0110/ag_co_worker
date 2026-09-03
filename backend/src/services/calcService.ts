@@ -100,6 +100,12 @@ const fetchMaterialsFromCalcService = async (
  * `CeilingMats` (AG.Ct_eco / AG.Cs_mat / AG.Cu_mem) — опциональные аддоны
  * для C501–503 / L401–405: считаем основную конструкцию и каждый аддон
  * с теми же размерами, материалы склеиваем. Legacy: `CeilingMat` (строка).
+ *
+ * ВНИМАНИЕ: эта ветка МЁРТВАЯ — фронт `CeilingMats`/`CeilingMat` больше не
+ * отправляет. В v2 (`POST /api/v2/calculations/isolation/by-construction`)
+ * аддоны передаются как `selected_optional_materials` и подставляются
+ * сервером по данным админки. Не «починять» и не расширять: код уйдёт вместе
+ * с этим backend'ом.
  */
 const calculateOne = async (params: CalcParams): Promise<CalcMaterial[]> => {
   const cached = getCachedCalcMaterials(params);

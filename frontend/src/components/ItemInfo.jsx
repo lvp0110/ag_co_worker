@@ -8,7 +8,7 @@ import {
   loadInfoPageMaterialsList,
 } from "../services/api";
 import { getResponsiveImageProps } from "../utils/responsiveImages";
-import { constructionDisplayCipher } from "../utils/calcUlTapeFallback";
+import { constructionDisplayCipher } from "../utils/constructionCiphers";
 import "./Calculator.css";
 
 const ItemInfo = () => {

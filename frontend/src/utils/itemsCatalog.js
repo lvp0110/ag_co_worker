@@ -6,7 +6,7 @@ import {
   AG_CT_ECO_CIPHER,
   isAgCsMatCipher,
   isAgCtEcoCipher,
-} from "./calcUlTapeFallback.js";
+} from "./constructionCiphers.js";
 /** Map ag_id → item (для resolveDisplayCipher; дубликаты ag_id не мешают шифру). */
 let itemsAgIdKeyMapCache = null;
 

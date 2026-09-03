@@ -1,5 +1,19 @@
 /**
- * API сервис для расчета конструкций
+ * API-сервис расчёта конструкций.
+ *
+ * Основной путь — v2: `calculateIsolationByConstruction`
+ * (`POST /api/v2/calculations/isolation/by-construction`). Его использует
+ * калькулятор и пересчёт при загрузке КП; параметры, замены и опциональные
+ * материалы сервер берёт из данных админки.
+ *
+ * LEGACY (v1): `calculateConstruction` + `getMaterialsListViaCalc`
+ * (`POST /api/v1/calcIsolation/byProduct`) остались ТОЛЬКО как третий фолбэк
+ * материалов на странице «Инфо» (см. `api.js:loadInfoPageMaterialsList`).
+ * Размеры там фиктивные, количества ориентировочные. Вся пост-обработка
+ * (`*_ul_tape`, `*_eco_s`, герметик) применяется только на этом пути.
+ * Удалять v1 можно только после того, как состав конструкций будет заполнен в
+ * БД (`construction_materials`, `construction_optional_materials`) — иначе
+ * «Инфо» останется без материалов.
  */
 
 import { BASE_URL, request } from "./apiClient";
@@ -17,7 +31,7 @@ import {
   mapVibrosilSealantToUltracoustic,
   mapVibrostekMaterialsToUlTape,
   ulTapeFallbackCalcCodes,
-} from "../utils/calcUlTapeFallback.js";
+} from "../utils/constructionCiphers.js";
 
 export const calculateConstruction = async (constrList) => {
   if (!constrList || constrList.length === 0) {
@@ -158,7 +172,10 @@ export const buildMinimalCalcPayloadForMaterialsList = (code) => {
 };
 
 /**
- * Список материалов через POST /api/v1/calcIsolation/byProduct (когда v2/props недоступен или пустой).
+ * LEGACY-фолбэк «Инфо»: список материалов через
+ * POST /api/v1/calcIsolation/byProduct, когда состав из админки и
+ * IsolationConstrMaterials пустые. Размеры — типовые из
+ * `buildMinimalCalcPayloadForMaterialsList`, поэтому количества ориентировочные.
  */
 export const getMaterialsListViaCalc = async (code) => {
   const payload = buildMinimalCalcPayloadForMaterialsList(code);
