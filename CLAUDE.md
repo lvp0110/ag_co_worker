@@ -23,7 +23,7 @@ README покрывает сценарии разработчика деталь
 
 Локально — только `make setup` / `make dev` (host Node, без контейнеров).
 
-**Prod-деплой** (SSH + Makefile): `make deploy-backend`, `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-reload`. SOP — в [deploy/README.md](deploy/README.md).
+**Prod-деплой** (SSH + Docker Compose): `make deploy-backend`, `make deploy-frontend`, `make deploy-all`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`. SOP — в [deploy/README.md](deploy/README.md).
 
 **Тесты**: только vitest в frontend (`cd frontend && npm test`) — точечно покрывает `priceSearch.js`. Backend без тестов. Полная проверка: `tsc --noEmit` в `backend/`, `npm run build` в `frontend/`, E2E — `curl` по ручкам после `make dev`.
 
@@ -74,15 +74,19 @@ README покрывает сценарии разработчика деталь
 - [backend/src/docs/schemas.ts](backend/src/docs/schemas.ts) — `CalcMaterialSchema` / `CalcParamsSchema` — `.passthrough()`.
 - `CreateKpFromCalcRequestSchema` / `CreateKpFromCalcResponseSchema` — единственный контракт `/api/offers`.
 
-### Prod-деплой: host Node + systemd + host nginx
+### Prod-деплой: Docker Compose + host nginx
 
-`Интернет :443 → host nginx → 127.0.0.1:3008 [frontend: node server.js] → 127.0.0.1:3006 [backend: node dist/index.js] → внешний auth/calc/1С`.
+Прод — `isocalc.constrtodo.ru` на `51.250.51.86` (hostname `webtest`), общая машина с `constr-todo-web` / `hr-todo-web` / `ag_sound_calc` / `cad-*`. Все проекты там в Docker, исходники в `/home/leonidl/<project>`.
 
-- Юниты: `deploy/systemd/ag-co-worker-backend.service`, `deploy/systemd/ag-co-worker-frontend.service`.
-- Секреты: `$DEPLOY_DIR/.env.prod` — `EnvironmentFile` у backend; frontend берёт `PORT` / `BACKEND_URL` / auth из unit + shared env.
-- `make deploy-backend` — на сервере `npm ci && npm run build`, затем `systemctl restart` backend.
-- `make deploy-frontend` — локальный vite build + rsync `dist`; `REBUILD=1` — переустановка prod-deps фронта + restart frontend unit (когда менялся `server.js`).
-- Backend и frontend слушают только loopback. TLS только у nginx. Postgres в стеке нет.
+`Интернет :443 → host nginx → 127.0.0.1:3007 [frontend-контейнер :3008] → backend:3006 (только compose-сеть) → внешний auth/calc/1С на dev3.constrtodo.ru:3005`.
+
+- Стек: [docker-compose.prod.yml](docker-compose.prod.yml) + [backend/Dockerfile](backend/Dockerfile) + [frontend/Dockerfile](frontend/Dockerfile).
+- Сборка идёт **на сервере внутри образов** (Node 22). Хостовой Node — 18, он для сборки не годится и не используется; локальный Node для деплоя тоже не нужен.
+- Секреты: `$DEPLOY_DIR/.env.prod` — `env_file` у обоих сервисов.
+- `make deploy-backend` / `make deploy-frontend` — `git checkout` нужной части + `docker compose up -d --build <service>`.
+- Порты: host `3007` свободен (3000–3006 заняты соседями); backend host-порта не имеет, поэтому занятый на хосте 3006 (`cad-api`) не мешает.
+- TLS — общий wildcard `*.constrtodo.ru` в `/home/leonidl/certs`, certbot не нужен. Postgres в стеке нет.
+- Деплой контейнеров sudo не требует (`leonidl` в группе `docker`); sudo нужен только для nginx server block — это ручной шаг, в CI выключен (переменная `NGINX_AUTOSYNC`).
 
 ## Ключевые файлы для ориентации
 
@@ -99,4 +103,6 @@ README покрывает сценарии разработчика деталь
 
 - CORS_ORIGIN — список через запятую; если Vite автоинкрементил порт до 5175+ — дописать, backend перезапустить.
 - В prod-сборке фронта не используй env `VITE_API_URL` для прокси-пути: правильный default уже `""`.
-- В проде наружу слушает только host nginx; приложение — `127.0.0.1:3008` (frontend) и `127.0.0.1:3006` (backend). Логи сервисов — `journalctl -u ag-co-worker-backend` / `ag-co-worker-frontend`.
+- В проде наружу слушает только host nginx; фронт-контейнер — `127.0.0.1:3007`, backend host-порта не имеет вовсе. Логи — `make deploy-logs` (`SERVICE=backend`, `FOLLOW=1`).
+- `HOST` в `.env.prod` задавать НЕЛЬЗЯ: пустой `HOST` → bind `0.0.0.0` внутри контейнера, а с `127.0.0.1` backend станет недоступен фронту.
+- `AUTH_SERVICE_URL` в проде — `https://dev3.constrtodo.ru:3005`, не `127.0.0.1:3005`: на webtest этот порт занят контейнером hr-todo-web.

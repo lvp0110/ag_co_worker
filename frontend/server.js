@@ -42,30 +42,7 @@ const authProxy = createProxyMiddleware({
   target: AUTH_URL,
   changeOrigin: true,
   xfwd: true,
-  pathFilter: (pathname, req) => {
-    if (
-      pathname === "/login" ||
-      pathname === "/auth" ||
-      pathname.startsWith("/auth/") ||
-      pathname === "/integration" ||
-      pathname.startsWith("/integration/") ||
-      pathname === "/commerce" ||
-      pathname.startsWith("/commerce/") ||
-      pathname === "/content" ||
-      pathname.startsWith("/content/") ||
-      // Admin-загруженные файлы в MinIO AUTH — не через backend :filename.
-      pathname === "/api/v2/public/image" ||
-      pathname.startsWith("/api/v2/public/image/")
-    ) {
-      return true;
-    }
-    // `/admin` — SPA; `/admin/...` API, но HTML-навигация (карточка материала) — SPA.
-    if (pathname.startsWith("/admin/")) {
-      const accept = String(req?.headers?.accept || "");
-      if (accept.includes("text/html")) return false;
-      return true;
-    }
-    return false;
+
   },
 });
 app.use(authProxy);

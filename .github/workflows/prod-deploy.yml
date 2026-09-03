@@ -1,5 +1,14 @@
 name: Prod deploy
 
+# Прод: Docker Compose на webtest (51.250.51.86) → https://isocalc.constrtodo.ru
+#
+# CI работает как «удалённая dev-машина»: ssh-ится на прод и дёргает те же
+# deploy/*.sh, что и `make deploy-*` локально. Node в runner'е не нужен —
+# и vite, и tsc собираются внутри Docker-образов на сервере.
+#
+# Первый запуск (git clone + первый up) делается ОДИН раз вручную:
+#   make deploy-bootstrap
+
 on:
   push:
     branches: [main]
@@ -14,8 +23,8 @@ on:
 permissions:
   contents: read
 
-# Сериализуем параллельные деплои — два rollback-а или push + ручной dispatch
-# не должны драться за systemctl и rsync.
+# Сериализуем параллельные деплои — push + ручной dispatch не должны драться
+# за docker compose и git checkout в одном каталоге.
 concurrency:
   group: prod-deploy
   cancel-in-progress: false
@@ -32,17 +41,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
 
       # ─── SSH setup ──────────────────────────────────────────────────────
       - name: Configure SSH
@@ -65,7 +63,7 @@ jobs:
           DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
           DEPLOY_CERT_DIR: ${{ secrets.DEPLOY_CERT_DIR }}
         run: |
-          # DEPLOY_REV из override (если workflow_dispatch с rev) или origin/main.
+          # DEPLOY_REV из override (workflow_dispatch с rev) или origin/main.
           REV="${DEPLOY_REV_OVERRIDE:-origin/main}"
           cat > deploy/.env.deploy <<EOF
           DEPLOY_HOST=$DEPLOY_HOST
@@ -103,13 +101,10 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              - 'deploy/systemd/ag-co-worker-backend.service'
+              - 'docker-compose.prod.yml'
             frontend:
               - 'frontend/**'
-            frontend_server:
-              - 'frontend/server.js'
-              - 'frontend/package.json'
-              - 'deploy/systemd/ag-co-worker-frontend.service'
+              - 'docker-compose.prod.yml'
             nginx:
               - 'deploy/nginx/**'
 
@@ -119,19 +114,16 @@ jobs:
         env:
           BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
-          FRONTEND_SERVER_CHANGED: ${{ steps.filter.outputs.frontend_server }}
           NGINX_CHANGED: ${{ steps.filter.outputs.nginx }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "should_backend=true"           >> "$GITHUB_OUTPUT"
-            echo "should_frontend=true"          >> "$GITHUB_OUTPUT"
-            echo "should_frontend_rebuild=true"  >> "$GITHUB_OUTPUT"
-            echo "should_nginx=true"             >> "$GITHUB_OUTPUT"
+            echo "should_backend=true"  >> "$GITHUB_OUTPUT"
+            echo "should_frontend=true" >> "$GITHUB_OUTPUT"
+            echo "should_nginx=true"    >> "$GITHUB_OUTPUT"
           else
-            echo "should_backend=$BACKEND_CHANGED"                       >> "$GITHUB_OUTPUT"
-            echo "should_frontend=$FRONTEND_CHANGED"                     >> "$GITHUB_OUTPUT"
-            echo "should_frontend_rebuild=$FRONTEND_SERVER_CHANGED"      >> "$GITHUB_OUTPUT"
-            echo "should_nginx=$NGINX_CHANGED"                           >> "$GITHUB_OUTPUT"
+            echo "should_backend=$BACKEND_CHANGED"   >> "$GITHUB_OUTPUT"
+            echo "should_frontend=$FRONTEND_CHANGED" >> "$GITHUB_OUTPUT"
+            echo "should_nginx=$NGINX_CHANGED"       >> "$GITHUB_OUTPUT"
           fi
 
       # ─── Rollout ────────────────────────────────────────────────────────
@@ -139,18 +131,25 @@ jobs:
         if: steps.decide.outputs.should_backend == 'true'
         run: bash deploy/deploy-backend.sh
 
-      - name: Sync nginx config
-        if: steps.decide.outputs.should_nginx == 'true'
-        run: bash deploy/deploy-nginx-sync.sh
+      # nginx-синк требует NOPASSWD-sudo на сервере (cp/ln/nginx -t/reload).
+      # На webtest его нет, поэтому шаг ВЫКЛЮЧЕН по умолчанию и включается
+      # переменной репозитория NGINX_AUTOSYNC=true (Settings → Variables),
+      # когда sudoers будет настроен. Иначе — просто предупреждение в лог.
+      - name: Sync + reload nginx
+        if: steps.decide.outputs.should_nginx == 'true' && vars.NGINX_AUTOSYNC == 'true'
+        run: |
+          bash deploy/deploy-nginx-sync.sh
+          bash deploy/deploy-nginx-reload.sh
 
-      - name: Reload nginx
-        if: steps.decide.outputs.should_nginx == 'true'
-        run: bash deploy/deploy-nginx-reload.sh
+      - name: Warn — nginx changed but autosync is off
+        if: steps.decide.outputs.should_nginx == 'true' && vars.NGINX_AUTOSYNC != 'true'
+        run: |
+          echo "::warning::deploy/nginx/** изменился, но NGINX_AUTOSYNC != true — конфиг НЕ применён."
+          echo "Примените вручную:  make deploy-nginx-sync && make deploy-nginx-reload"
+          echo "(нужен NOPASSWD-sudo на сервере, см. deploy/README.md)"
 
       - name: Rollout frontend
         if: steps.decide.outputs.should_frontend == 'true'
-        env:
-          REBUILD: ${{ steps.decide.outputs.should_frontend_rebuild == 'true' && '1' || '0' }}
         run: bash deploy/deploy-frontend.sh
 
       - name: Smoke test
@@ -168,8 +167,8 @@ jobs:
           MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
           MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
           MSG+="<b>Backend:</b> ${{ steps.decide.outputs.should_backend == 'true' && 'выкачен' || 'без изменений' }}"$'\n'
-          MSG+="<b>Frontend:</b> ${{ steps.decide.outputs.should_frontend == 'true' && (steps.decide.outputs.should_frontend_rebuild == 'true' && 'выкачен (restart server.js)' || 'выкачен') || 'без изменений' }}"$'\n'
-          MSG+="<b>Nginx:</b> ${{ steps.decide.outputs.should_nginx == 'true' && 'перечитан' || 'без изменений' }}"$'\n'
+          MSG+="<b>Frontend:</b> ${{ steps.decide.outputs.should_frontend == 'true' && 'выкачен' || 'без изменений' }}"$'\n'
+          MSG+="<b>Nginx:</b> ${{ steps.decide.outputs.should_nginx == 'true' && (vars.NGINX_AUTOSYNC == 'true' && 'перечитан' || 'изменён, НУЖНО применить вручную') || 'без изменений' }}"$'\n'
           MSG+="<a href=\"https://${DEPLOY_DOMAIN}\">https://${DEPLOY_DOMAIN}</a>"
           curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             -d chat_id="${TG_CHAT}" \
@@ -186,6 +185,7 @@ jobs:
           MSG=$'❌ <b>Деплой ag_co_worker провален</b>\n'
           MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
           MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
+          MSG+=$'Откат: Actions → Prod deploy → Run workflow → rev = &lt;предыдущий SHA&gt;\n'
           MSG+="<a href=\"https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\">Логи Run #${GITHUB_RUN_NUMBER}</a>"
           curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             -d chat_id="${TG_CHAT}" \

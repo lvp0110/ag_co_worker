@@ -1,0 +1,70 @@
+# Прод-стек ag_co_worker на webtest (51.250.51.86), домен isocalc.constrtodo.ru.
+#
+#   Интернет :443 → host nginx → 127.0.0.1:3007 → [frontend] → [backend:3006]
+#                                                                    ↓
+#                                            внешний auth/calc/1С (dev3.constrtodo.ru:3005)
+#
+# Наружу публикуется ТОЛЬКО frontend и только на loopback — TLS у хостового nginx.
+# Backend вообще не имеет host-порта: он живёт в compose-сети (поэтому занятый
+# на хосте 3006 у cad-api нам не мешает).
+#
+# Секреты и внешние URL — в .env.prod рядом с этим файлом (chmod 600, не в git).
+# Запуск:  docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: ag_co_worker-backend:latest
+    container_name: ag_co_worker-backend
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: "3006"
+      # HOST не задаём — нужен bind на 0.0.0.0 внутри контейнера.
+    expose:
+      - "3006"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    image: ag_co_worker-frontend:latest
+    container_name: ag_co_worker-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    env_file:
+      # Нужен только AUTH_SERVICE_URL (server.js проксирует /login и /auth/*).
+      # PORT из .env.prod перебивается ниже — environment приоритетнее env_file.
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: "3008"
+      BACKEND_URL: http://backend:3006
+      DIST_DIR: /app/dist
+    ports:
+      # Только loopback: снаружи ходит host nginx.
+      - "127.0.0.1:3007:3008"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3008/__front_health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
