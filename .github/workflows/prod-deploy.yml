@@ -101,9 +101,6 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            backend:
-              - 'backend/**'
-              - 'deploy/systemd/ag-co-worker-backend.service'
             frontend:
               - 'frontend/**'
             frontend_server:
@@ -117,28 +114,21 @@ jobs:
       - name: Decide what to deploy
         id: decide
         env:
-          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
           FRONTEND_SERVER_CHANGED: ${{ steps.filter.outputs.frontend_server }}
           NGINX_CHANGED: ${{ steps.filter.outputs.nginx }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "should_backend=true"           >> "$GITHUB_OUTPUT"
             echo "should_frontend=true"          >> "$GITHUB_OUTPUT"
             echo "should_frontend_rebuild=true"  >> "$GITHUB_OUTPUT"
             echo "should_nginx=true"             >> "$GITHUB_OUTPUT"
           else
-            echo "should_backend=$BACKEND_CHANGED"                       >> "$GITHUB_OUTPUT"
             echo "should_frontend=$FRONTEND_CHANGED"                     >> "$GITHUB_OUTPUT"
             echo "should_frontend_rebuild=$FRONTEND_SERVER_CHANGED"      >> "$GITHUB_OUTPUT"
             echo "should_nginx=$NGINX_CHANGED"                           >> "$GITHUB_OUTPUT"
           fi
 
       # ─── Rollout ────────────────────────────────────────────────────────
-      - name: Rollout backend
-        if: steps.decide.outputs.should_backend == 'true'
-        run: bash deploy/deploy-backend.sh
-
       - name: Sync nginx config
         if: steps.decide.outputs.should_nginx == 'true'
         run: bash deploy/deploy-nginx-sync.sh
@@ -167,7 +157,6 @@ jobs:
           MSG=$'✅ <b>Деплой ag_co_worker успешно завершён</b>\n'
           MSG+="<b>Коммит:</b> <code>${GITHUB_SHA:0:7}</code>"$'\n'
           MSG+="<b>Автор:</b> ${GITHUB_ACTOR}"$'\n'
-          MSG+="<b>Backend:</b> ${{ steps.decide.outputs.should_backend == 'true' && 'выкачен' || 'без изменений' }}"$'\n'
           MSG+="<b>Frontend:</b> ${{ steps.decide.outputs.should_frontend == 'true' && (steps.decide.outputs.should_frontend_rebuild == 'true' && 'выкачен (restart server.js)' || 'выкачен') || 'без изменений' }}"$'\n'
           MSG+="<b>Nginx:</b> ${{ steps.decide.outputs.should_nginx == 'true' && 'перечитан' || 'без изменений' }}"$'\n'
           MSG+="<a href=\"https://${DEPLOY_DOMAIN}\">https://${DEPLOY_DOMAIN}</a>"

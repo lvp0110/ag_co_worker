@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Первый запуск на чистой машине (без Docker).
+# В стеке один сервис — frontend: статика + прокси в ConstrTodo (UPSTREAM_URL).
 # Предварительные требования (вручную):
 #   1. Node.js ≥ 20 (node + npm в PATH для user deploy).
 #   2. nginx + certbot, сертификат в /etc/letsencrypt/live/<domain>/.
@@ -41,34 +42,27 @@ remote '
 '
 ok "предусловия выполнены"
 
-info "ставим systemd unit-ы"
-# Подставляем реальный DEPLOY_DIR в unit-файлы (шаблоны содержат /srv/ag_co_worker).
+info "ставим systemd unit"
+# Подставляем реальный DEPLOY_DIR в unit-файл (шаблон содержит /srv/ag_co_worker).
 ssh_exec "
   set -e
-  sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-backend.service' \
-    | sudo tee /etc/systemd/system/$BACKEND_UNIT.service >/dev/null
   sed 's|/srv/ag_co_worker|$DEPLOY_DIR|g' '$DEPLOY_DIR/deploy/systemd/ag-co-worker-frontend.service' \
     | sudo tee /etc/systemd/system/$FRONTEND_UNIT.service >/dev/null
   sudo systemctl daemon-reload
 "
 
-info "сборка backend"
-remote "cd backend && npm ci && npm run build"
-
 info "prod-deps frontend (server.js)"
 remote "mkdir -p frontend/dist && cd frontend && npm ci --omit=dev"
 
-info "включаем и запускаем сервисы"
-svc "enable --now $BACKEND_UNIT"
+info "включаем и запускаем сервис"
 svc "enable --now $FRONTEND_UNIT"
 sleep 3
-svc "is-active $BACKEND_UNIT"
 svc "is-active $FRONTEND_UNIT"
 
 if [ -n "$DEPLOY_DOMAIN" ]; then
   info "smoke-check https://$DEPLOY_DOMAIN/health"
   curl -fs --retry 5 --retry-delay 2 "https://$DEPLOY_DOMAIN/health" \
-    || warn "health не отвечает — смотрите nginx и journalctl -u $BACKEND_UNIT / $FRONTEND_UNIT"
+    || warn "health не отвечает — смотрите nginx и journalctl -u $FRONTEND_UNIT"
 fi
 
 ok "bootstrap завершён. Дальше: make deploy-frontend (вылить статику)."

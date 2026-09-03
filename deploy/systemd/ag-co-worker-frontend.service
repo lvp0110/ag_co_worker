@@ -1,7 +1,6 @@
 [Unit]
-Description=ag_co_worker frontend (static + /api proxy)
-After=network.target ag-co-worker-backend.service
-Wants=ag-co-worker-backend.service
+Description=ag_co_worker frontend (static + proxy to ConstrTodo)
+After=network.target
 
 [Service]
 Type=simple
@@ -9,9 +8,8 @@ WorkingDirectory=/srv/ag_co_worker/frontend
 EnvironmentFile=-/srv/ag_co_worker/.env.prod
 Environment=NODE_ENV=production
 Environment=PORT=3008
-Environment=BACKEND_URL=http://127.0.0.1:3006
 Environment=DIST_DIR=/srv/ag_co_worker/frontend/dist
-# AUTH_SERVICE_URL берётся из .env.prod, если задан.
+# UPSTREAM_URL (или историческое AUTH_SERVICE_URL) берётся из .env.prod.
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=3

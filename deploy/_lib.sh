@@ -23,7 +23,7 @@ DEPLOY_DOMAIN="${DEPLOY_DOMAIN:-}"
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_REV="${DEPLOY_REV:-origin/main}"
 
-BACKEND_UNIT="${BACKEND_UNIT:-ag-co-worker-backend}"
+# Единственный сервис проекта: статика + прокси в ConstrTodo.
 FRONTEND_UNIT="${FRONTEND_UNIT:-ag-co-worker-frontend}"
 
 # Используем одну shared-сессию ssh вместо многоразовых коннектов — быстрее и

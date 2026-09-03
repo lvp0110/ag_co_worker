@@ -16,8 +16,8 @@ REBUILD="${REBUILD:-0}"
 
 info "vite build (локально)"
 cd "$REPO_ROOT/frontend"
-# VITE_API_URL="" → в проде apiClient.js бьёт по относительному /api/*
-# (nginx → frontend server.js → backend).
+# VITE_API_URL="" → в проде apiClient.js бьёт по относительным путям, а
+# server.js проксирует их в ConstrTodo (nginx → server.js → UPSTREAM_URL).
 VITE_API_URL="" npm run build
 cd "$REPO_ROOT"
 
