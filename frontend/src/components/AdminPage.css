@@ -987,6 +987,68 @@ textarea.admin-page__input {
   grid-column: 1 / -1;
 }
 
+.admin-page__field--regions {
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.admin-page__field--regions legend.admin-page__field-label {
+  padding: 0;
+  float: none;
+}
+
+.admin-page__hint {
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.admin-page__region-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.admin-page__region-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.admin-page__region-check input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.admin-page__region-check-label {
+  display: block;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: auto;
+  justify-content: flex-start;
+}
+
+.admin-page__region-check--all {
+  flex: 0 0 100%;
+}
+
+.admin-page__region-check--all .admin-page__region-check-label {
+  font-weight: 600;
+}
+
 .admin-page__textarea {
   display: block;
   width: 100%;

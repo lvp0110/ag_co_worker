@@ -9,6 +9,7 @@ import {
   extractCalcProducts,
   hasCalcApiOptions,
   materialOptionLabel,
+  normalizeCalcProduct,
   parseCalcApiSpec,
   pickEntityImageUrl,
   replacementGroupForProductCode,
@@ -226,6 +227,65 @@ describe("isolationCalcV2", () => {
       ],
     });
     expect(products).toEqual([{ Code: "1088665", Name: "ГКЛА", Quantity: 4 }]);
+  });
+
+  it("extracts priced products from by-construction/{region} response", () => {
+    const products = extractCalcProducts({
+      code: 200,
+      data: {
+        region: { id: 1, code: "msk", name: "Москва" },
+        total_price: 1200,
+        currency_code: "RUB",
+        items: [
+          {
+            index: 0,
+            code: "AG.L401",
+            products: [
+              {
+                code: "1088665",
+                name: "ГКЛА",
+                quantity: 4,
+                units: "шт",
+                has_price: true,
+                unit_price: 300,
+                unit_m2_price: 0,
+                total_price: 1200,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(products).toEqual([
+      {
+        Code: "1088665",
+        Name: "ГКЛА",
+        Quantity: 4,
+        Units: "шт",
+        KpPricePerUnit: 300,
+      },
+    ]);
+  });
+
+  it("maps snake_case priced product onto calculator material fields", () => {
+    expect(
+      normalizeCalcProduct({
+        code: "1185.1101",
+        name: "Вибростек",
+        quantity: 2,
+        units: "м.п.",
+        has_price: true,
+        unit_price: 85.5,
+        unit_m2_price: 12.3,
+      })
+    ).toEqual({
+      Code: "1185.1101",
+      Name: "Вибростек",
+      Quantity: 2,
+      Units: "м.п.",
+      KpPricePerM2: 12.3,
+      KpPricePerUnit: 85.5,
+    });
   });
 
   it("keeps add_ceil_shift at 200 when the option is off and clamps values below 200", () => {

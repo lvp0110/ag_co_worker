@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Modal from "./Modal";
 import "./Calculator.css";
@@ -51,6 +51,8 @@ import {
   parseCalcApiSpec,
   selectedReplacementsMap,
 } from "../utils/isolationCalcV2";
+import { catalogToRegionSelectOptions } from "../constants/regionSelectOptions.js";
+import { setPriceRegion, usePriceData } from "../services/priceApi";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
   useCalcField,
@@ -81,7 +83,37 @@ const Calculator = () => {
   const [materialsByConstruction, setMaterialsByConstruction] = useCalcField(
     "materialsByConstruction"
   );
+  const [calcRegion, setCalcRegion] = useCalcField("calcRegion");
   const [activeKpId] = useCalcField("activeKpId");
+  const regionFilterOpen = useCalculatorStore((s) => s.regionFilterOpen);
+  const setRegionFilterOpen = useCalculatorStore((s) => s.setRegionFilterOpen);
+  const {
+    regionCatalog,
+    selectedRegion,
+    loading: priceLoading,
+    loaded: priceLoaded,
+    error: priceError,
+  } = usePriceData();
+  const regionOptions = useMemo(
+    () => catalogToRegionSelectOptions(regionCatalog),
+    [regionCatalog]
+  );
+  const regionLoading = priceLoading || (!priceLoaded && !priceError);
+  const effectiveCalcRegion = useMemo(() => {
+    if (
+      calcRegion &&
+      regionOptions.some((option) => option.value === calcRegion)
+    ) {
+      return calcRegion;
+    }
+    if (
+      selectedRegion &&
+      regionOptions.some((option) => option.value === selectedRegion)
+    ) {
+      return selectedRegion;
+    }
+    return regionOptions[0]?.value ?? "";
+  }, [calcRegion, regionOptions, selectedRegion]);
   const [itemsWithImages, setItemsWithImages] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [mainSections, setMainSections] = useState(fallbackMainSections);
@@ -106,10 +138,11 @@ const Calculator = () => {
   });
 
   useEffect(() => {
+    if (!effectiveCalcRegion) return undefined;
     let cancelled = false;
     const loadItemsWithImages = async () => {
       try {
-        const enrichedItems = await getItemsWithApiImages();
+        const enrichedItems = await getItemsWithApiImages(effectiveCalcRegion);
         if (!cancelled) setItemsWithImages(enrichedItems);
       } catch {
         if (!cancelled) setItemsWithImages([]);
@@ -118,11 +151,12 @@ const Calculator = () => {
       }
     };
 
+    setCatalogLoading(true);
     loadItemsWithImages();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [effectiveCalcRegion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +173,17 @@ const Calculator = () => {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!effectiveCalcRegion || effectiveCalcRegion === calcRegion) return;
+    setCalcRegion(effectiveCalcRegion);
+  }, [effectiveCalcRegion, calcRegion, setCalcRegion]);
+
+  useEffect(() => {
+    return () => {
+      useCalculatorStore.getState().setRegionFilterOpen(false);
     };
   }, []);
 
@@ -359,8 +404,8 @@ const Calculator = () => {
     (async () => {
       try {
         const [paramsBody, detailBody] = await Promise.all([
-          getConstructionCalculationParams(code),
-          getPublicConstruction(code),
+          getConstructionCalculationParams(code, undefined, effectiveCalcRegion),
+          getPublicConstruction(code, undefined, effectiveCalcRegion),
         ]);
         if (cancelled) return;
         const spec = parseCalcApiSpec({
@@ -382,7 +427,7 @@ const Calculator = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentItems, itemsWithImages]);
+  }, [currentItems, itemsWithImages, effectiveCalcRegion]);
 
   const delFromOpenings = (index) => {
     const newOpenings = [...constrSent.Openings];
@@ -559,12 +604,18 @@ const Calculator = () => {
     ConstrToCalcToSent.length > 0 && !activeKpId;
   const showBackToKpButton =
     Boolean(activeKpId) && ConstrToCalcToSent.length > 0;
-  /** Таблица КП/расчёта: при открытом КП видна даже без выбора позиции каталога. */
+  /** Таблица расчёта — только внутри выбранного раздела, рядом с формой. */
   const showResultsTable =
     tableConstrToCalc != null && ConstrToCalc.length > 0;
 
   const renderResultsTable = () => (
     <div className="tables-and-buttons-container">
+      {activeKpId ? (
+        <p className="calculator-kp-edit-hint">
+          Открытое КП — измените состав ниже или выберите конструкцию
+          выше, чтобы добавить новую. Затем «Сохранить КП».
+        </p>
+      ) : null}
       <div className="tables-and-buttons-header">
         <h3 className="tables-and-buttons-title">Список конструкций</h3>
       </div>
@@ -774,7 +825,10 @@ const Calculator = () => {
     const deep = JSON.parse(JSON.stringify(newConstrSent));
 
     try {
-      const result = await calculateIsolationByConstruction([requestItem]);
+      const result = await calculateIsolationByConstruction(
+        [requestItem],
+        effectiveCalcRegion
+      );
       const data = result?.data ?? [];
 
       if (data.length === 0) {
@@ -835,6 +889,7 @@ const Calculator = () => {
     template,
     calcApiValues,
     calcApiSpec,
+    effectiveCalcRegion,
   ]);
 
   const recalcConstructionReplacement = useCallback(
@@ -859,7 +914,10 @@ const Calculator = () => {
         const requestItem = buildIsolationCalcRequestFromStored(sent, {
           selectedReplacements: nextReplacements,
         });
-        const result = await calculateIsolationByConstruction([requestItem]);
+        const result = await calculateIsolationByConstruction(
+          [requestItem],
+          effectiveCalcRegion
+        );
         const data = result?.data ?? [];
         if (data.length === 0) {
           throw new Error(
@@ -898,10 +956,81 @@ const Calculator = () => {
     [
       ConstrToCalc,
       ConstrToCalcToSent,
+      effectiveCalcRegion,
       setConstrToCalcToSent,
       setMaterialsByConstruction,
     ]
   );
+
+  const handleCalcRegionChange = useCallback(
+    async (nextRegion) => {
+      const region = String(nextRegion || "").trim();
+      if (!region || region === effectiveCalcRegion) return;
+      setCalcRegion(region);
+      setPriceRegion(region);
+      if (ConstrToCalcToSent.length === 0) return;
+
+      for (let index = 0; index < ConstrToCalcToSent.length; index += 1) {
+        const sent = ConstrToCalcToSent[index];
+        const keyId = ConstrToCalc[index]?.key_id;
+        if (!sent || keyId == null) continue;
+        setRecalcKeyId(keyId);
+        try {
+          const requestItem = buildIsolationCalcRequestFromStored(sent);
+          const result = await calculateIsolationByConstruction(
+            [requestItem],
+            region
+          );
+          const data = result?.data ?? [];
+          if (data.length === 0) {
+            throw new Error(
+              "Расчёт не вернул материалы для выбранного варианта конструкции."
+            );
+          }
+          setMaterialsByConstruction((prev) =>
+            prev.map((row) => (row.key_id === keyId ? { ...row, data } : row))
+          );
+        } catch (error) {
+          const raw = formatRequestError(error);
+          setModal({
+            isOpen: true,
+            title: "Ошибка",
+            html: `Не удалось пересчитать материалы для региона.<br><br>${error?.message || raw}`,
+            icon: "error",
+            imageUrl: null,
+            confirmButtonText: "OK",
+            confirmButtonColor: "#6cabc8",
+          });
+          break;
+        } finally {
+          setRecalcKeyId(null);
+        }
+      }
+    },
+    [
+      ConstrToCalc,
+      ConstrToCalcToSent,
+      effectiveCalcRegion,
+      setCalcRegion,
+      setMaterialsByConstruction,
+    ]
+  );
+
+  useEffect(() => {
+    if (catalogLoading || !currentItems) return;
+    const stillInCatalog = itemsWithImages.some(
+      (item) => item.id == currentItems
+    );
+    if (stillInCatalog) return;
+    setCurrentItems(0);
+    setCurrentConstr("");
+  }, [
+    catalogLoading,
+    currentItems,
+    itemsWithImages,
+    setCurrentConstr,
+    setCurrentItems,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -974,6 +1103,43 @@ const Calculator = () => {
   return (
     <div className="calculator-page">
       <div className="content-calc">
+        <div
+          id="calculator-region-filter"
+          className={`calculator-region-filter${
+            regionFilterOpen ? " is-open" : ""
+          }`}
+          hidden={!regionFilterOpen}
+        >
+          <label
+            className="calculator-region-filter__label"
+            htmlFor="calc-region-filter"
+          >
+            Регион
+          </label>
+          <select
+            id="calc-region-filter"
+            className="calculator-region-filter__select"
+            value={effectiveCalcRegion}
+            disabled={regionLoading || regionOptions.length === 0}
+            onChange={(e) => {
+              handleCalcRegionChange(e.target.value);
+              setRegionFilterOpen(false);
+            }}
+            aria-label="Фильтр конструкций по региону"
+          >
+            {regionLoading && regionOptions.length === 0 ? (
+              <option value="">Загрузка регионов...</option>
+            ) : regionOptions.length === 0 ? (
+              <option value="">Регионы не найдены</option>
+            ) : (
+              regionOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
         <div className="main-content">
           {mainSections.map((section) => {
             const subCategories = getSubCategoriesForSection(section.id);
@@ -1100,7 +1266,7 @@ const Calculator = () => {
                       >
                         {catalogLoading
                           ? "Загрузка каталога..."
-                          : "Нет элементов в этой подкатегории"}
+                          : "Нет конструкций в этом регионе"}
                       </div>
                     )}
                   </div>
@@ -1137,6 +1303,10 @@ const Calculator = () => {
                             calcApiSpec={calcApiSpec}
                             calcApiValues={calcApiValues}
                             onCalcApiValuesChange={setCalcApiValues}
+                            calcRegion={effectiveCalcRegion}
+                            regionOptions={regionOptions}
+                            onCalcRegionChange={handleCalcRegionChange}
+                            regionLoading={regionLoading}
                           />
 
                           <div className="selected-item-calc-action">
@@ -1161,22 +1331,6 @@ const Calculator = () => {
               </div>
             );
           })}
-
-          {/* Открытое КП: таблица видна без выбора позиции каталога */}
-          {showResultsTable && currentItems == 0 ? (
-            <div
-              className="selected-item-container"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="selected-item-panel">
-                <p className="calculator-kp-edit-hint">
-                  Открытое КП — измените состав ниже или выберите конструкцию
-                  выше, чтобы добавить новую. Затем «Сохранить КП».
-                </p>
-                {renderResultsTable()}
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
       <Modal

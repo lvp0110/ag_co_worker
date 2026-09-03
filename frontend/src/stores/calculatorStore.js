@@ -11,6 +11,7 @@ import { syncConstructionsTitlesFromItems } from "../utils/itemsCatalog.js";
  * Хранятся только поля, которые имеет смысл переживать навигацию:
  *   - накопленные конструкции (ConstrToCalc, ConstrToCalcToSent, materialsByConstruction);
  *   - табличное состояние (tableConstrToCalc);
+ *   - регион цен (calcRegion);
  *   - выбор пользователя в UI (currentSubCategory/Items, openedSubCategories,
  *     template, currentConstr, unvisible).
  *
@@ -29,6 +30,8 @@ const initialState = {
   ConstrToCalcToSent: [],
   ConstrToCalc: [],
   materialsByConstruction: [],
+  /** Код региона цен для POST .../by-construction/{regionCode}. */
+  calcRegion: "",
   /** Id открытого КП (`/kp/:id`); кнопка «К КП» в калькуляторе. */
   activeKpId: null,
 };
@@ -38,14 +41,21 @@ export const useCalculatorStore = create(
     (set) => ({
       ...initialState,
 
+      /** Раскрыт ли селект региона на /calc. Не в initialState — не пишется в sessionStorage. */
+      regionFilterOpen: false,
+      toggleRegionFilterOpen: () =>
+        set((state) => ({ regionFilterOpen: !state.regionFilterOpen })),
+      setRegionFilterOpen: (open) => set({ regionFilterOpen: Boolean(open) }),
+
       /** Универсальный setter: принимает значение или (prev) => next — как useState. */
       setField: (key, v) =>
         set((state) => ({
           [key]: typeof v === "function" ? v(state[key]) : v,
         })),
 
-      /** Полный сброс (закрытие КП / после создания). */
-      reset: () => set({ ...initialState }),
+      /** Полный сброс (закрытие КП / после создания). Регион цен оставляем. */
+      reset: () =>
+        set((state) => ({ ...initialState, calcRegion: state.calcRegion })),
 
       /**
        * Подстановка состава КП в калькулятор.

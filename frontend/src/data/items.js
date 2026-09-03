@@ -5,10 +5,13 @@ export { ItemsBase };
 export default ItemsBase;
 
 let itemsWithApiImagesCache = null;
-let itemsWithApiImagesInFlight = null;
-const ITEMS_WITH_IMAGES_CACHE_VERSION = 7;
+let itemsWithApiImagesInFlight = new Map();
+const ITEMS_WITH_IMAGES_CACHE_VERSION = 8;
 
-const loadItemsWithApiImages = async () => {
+const cacheKeyForRegion = (region) =>
+  `${ITEMS_WITH_IMAGES_CACHE_VERSION}:${region || "_"}`;
+
+const loadItemsWithApiImages = async (regionCode) => {
   const { listPublicConstructions } = await import(
     "../services/constructionApi.js"
   );
@@ -16,7 +19,11 @@ const loadItemsWithApiImages = async () => {
     "../utils/isolationCalcV2.js"
   );
 
-  const rows = await listPublicConstructions();
+  const rows = await listPublicConstructions(
+    undefined,
+    "",
+    regionCode
+  );
   const catalog = calcItemsFromPublicConstructions(rows, ItemsBase);
   // imageUrl / cadImageUrl уже из images[] админки (resolveAdminPublicImageUrl).
   return catalog.map((item) => ({
@@ -27,29 +34,37 @@ const loadItemsWithApiImages = async () => {
 };
 
 /**
- * Каталог калькулятора: GET /api/v2/constructions/sound
- * (публичное чтение тех же конструкций, что в админке).
+ * Каталог калькулятора: GET /api/v2/constructions/sound/{regionCode}
+ * (публичное чтение конструкций, доступных в выбранном регионе цен).
  * Картинки — только из admin images[] / public/image, без legacy Img_constr.
  */
-export const getItemsWithApiImages = async () => {
+export const getItemsWithApiImages = async (regionCode) => {
+  const { resolveConstructionRegionCode } = await import(
+    "../services/constructionApi.js"
+  );
+  const region = resolveConstructionRegionCode(regionCode);
+  const cacheKey = cacheKeyForRegion(region);
+
   if (
     itemsWithApiImagesCache &&
-    itemsWithApiImagesCache.version === ITEMS_WITH_IMAGES_CACHE_VERSION
+    itemsWithApiImagesCache.key === cacheKey
   ) {
     return itemsWithApiImagesCache.items;
   }
-  if (!itemsWithApiImagesInFlight) {
-    itemsWithApiImagesInFlight = loadItemsWithApiImages()
-      .then((items) => {
-        itemsWithApiImagesCache = {
-          version: ITEMS_WITH_IMAGES_CACHE_VERSION,
-          items,
-        };
-        return items;
-      })
-      .finally(() => {
-        itemsWithApiImagesInFlight = null;
-      });
+
+  if (itemsWithApiImagesInFlight.has(cacheKey)) {
+    return itemsWithApiImagesInFlight.get(cacheKey);
   }
-  return itemsWithApiImagesInFlight;
+
+  const pending = loadItemsWithApiImages(region)
+    .then((items) => {
+      itemsWithApiImagesCache = { key: cacheKey, items };
+      return items;
+    })
+    .finally(() => {
+      itemsWithApiImagesInFlight.delete(cacheKey);
+    });
+
+  itemsWithApiImagesInFlight.set(cacheKey, pending);
+  return pending;
 };

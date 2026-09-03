@@ -3,6 +3,8 @@
  */
 
 import { BASE_URL, request } from "./apiClient";
+import { getPriceState } from "./priceApi.js";
+import { useCalculatorStore } from "../stores/calculatorStore.js";
 import {
   SOUND_CONSTRUCTION_CATEGORY,
   extractCalcProducts,
@@ -173,36 +175,58 @@ export const getMaterialsListViaCalc = async (code) => {
   return null;
 };
 
-/** GET /api/v2/constructions/{category} — публичный каталог. */
+/** Код региона для GET /api/v2/constructions/{category}/{regionCode}/... */
+export const resolveConstructionRegionCode = (regionCode) => {
+  const fromArg = String(regionCode ?? "").trim();
+  if (fromArg) return fromArg;
+  const fromStore = String(
+    useCalculatorStore.getState().calcRegion || ""
+  ).trim();
+  if (fromStore) return fromStore;
+  return String(getPriceState().selectedRegion || "").trim();
+};
+
+/**
+ * GET /api/v2/constructions/{category}/{regionCode}
+ * swagger: categoryCode + regionCode в path, type — query.
+ */
 export const listPublicConstructions = async (
   categoryCode = SOUND_CONSTRUCTION_CATEGORY,
-  typeCode = ""
+  typeCode = "",
+  regionCode
 ) => {
+  const region = resolveConstructionRegionCode(regionCode);
+  if (!region) return [];
   const params = new URLSearchParams();
   if (typeCode) params.set("type", typeCode);
   const qs = params.toString();
-  const path = `/api/v2/constructions/${encodeURIComponent(
-    categoryCode || SOUND_CONSTRUCTION_CATEGORY
-  )}${qs ? `?${qs}` : ""}`;
-  const body = await request(path, {}, { silent401: true, allowNotFound: true });
+  const path = `${constructionPath(categoryCode, region)}${qs ? `?${qs}` : ""}`;
+  const body = await request(path, {}, { silent401: true });
   const data = unwrapApiData(body);
   return Array.isArray(data) ? data : [];
 };
 
-const constructionPath = (categoryCode, code, suffix = "") => {
+const constructionPath = (categoryCode, regionCode, code = "", suffix = "") => {
   const category = encodeURIComponent(categoryCode || SOUND_CONSTRUCTION_CATEGORY);
+  const region = encodeURIComponent(regionCode);
+  if (!code) return `/api/v2/constructions/${category}/${region}`;
   const constr = encodeURIComponent(code);
-  return `/api/v2/constructions/${category}/${constr}${suffix}`;
+  return `/api/v2/constructions/${category}/${region}/${constr}${suffix}`;
 };
 
-/** GET /api/v2/constructions/{category}/{code}/calculation-params — params + size_limits. */
+/** GET /api/v2/constructions/{category}/{region}/{code}/calculation-params */
 export const getConstructionCalculationParams = async (
   code,
-  categoryCode = SOUND_CONSTRUCTION_CATEGORY
+  categoryCode = SOUND_CONSTRUCTION_CATEGORY,
+  regionCode
 ) => {
   if (!code) return { construction_code: "", params: [], size_limits: [] };
+  const region = resolveConstructionRegionCode(regionCode);
+  if (!region) {
+    return { construction_code: code, params: [], size_limits: [] };
+  }
   const body = await request(
-    constructionPath(categoryCode, code, "/calculation-params"),
+    constructionPath(categoryCode, region, code, "/calculation-params"),
     {},
     { allowNotFound: true, silent401: true }
   );
@@ -217,18 +241,21 @@ export const getConstructionCalculationParams = async (
 
 const publicConstructionCache = new Map();
 
-/** GET /api/v2/constructions/{category}/{code} — состав и группы замены. */
+/** GET /api/v2/constructions/{category}/{region}/{code} — состав и группы замены. */
 export const getPublicConstruction = async (
   code,
-  categoryCode = SOUND_CONSTRUCTION_CATEGORY
+  categoryCode = SOUND_CONSTRUCTION_CATEGORY,
+  regionCode
 ) => {
   if (!code) return null;
-  const key = `${categoryCode}:${code}`;
+  const region = resolveConstructionRegionCode(regionCode);
+  if (!region) return null;
+  const key = `${categoryCode}:${region}:${code}`;
   if (publicConstructionCache.has(key)) {
     return publicConstructionCache.get(key);
   }
   const body = await request(
-    constructionPath(categoryCode, code),
+    constructionPath(categoryCode, region, code),
     {},
     { allowNotFound: true, silent401: true }
   );
@@ -238,12 +265,18 @@ export const getPublicConstruction = async (
 };
 
 /**
- * POST /api/v2/calculations/isolation/by-construction
+ * POST /api/v2/calculations/isolation/by-construction/{regionCode}
+ * без regionCode — тот же путь без региона (материалы без цен).
  * @param {object[]} items IsolationCalculationRequestItem[]
+ * @param {string} [regionCode]
  */
-export const calculateIsolationByConstruction = async (items) => {
+export const calculateIsolationByConstruction = async (items, regionCode) => {
   if (!items || items.length === 0) return { data: [] };
-  const body = await request("/api/v2/calculations/isolation/by-construction", {
+  const region = String(regionCode ?? "").trim();
+  const path = region
+    ? `/api/v2/calculations/isolation/by-construction/${encodeURIComponent(region)}`
+    : "/api/v2/calculations/isolation/by-construction";
+  const body = await request(path, {
     method: "POST",
     body: items,
   });

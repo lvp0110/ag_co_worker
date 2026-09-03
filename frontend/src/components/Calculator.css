@@ -18,6 +18,64 @@
   flex-direction: column;
 }
 
+.calculator-region-filter {
+  flex: 0 0 auto;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 0;
+  box-sizing: border-box;
+}
+
+.calculator-region-filter.is-open {
+  display: flex;
+}
+
+.calculator-region-filter[hidden] {
+  display: none !important;
+}
+
+.calculator-region-filter__label {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0;
+  color: #4b5563;
+  font-family: "Montserrat", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: auto;
+  justify-content: flex-start;
+}
+
+.calculator-region-filter__select {
+  display: block;
+  width: auto;
+  min-width: 200px;
+  max-width: min(320px, calc(100% - 80px));
+  height: auto;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 1px solid #dfe5eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: none;
+  color: #1f2933;
+  font-family: "Montserrat", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.calculator-region-filter__select:disabled {
+  opacity: 0.7;
+}
+
+.calculator-region-filter__select:focus {
+  outline: 2px solid #6cabc8;
+  outline-offset: 1px;
+}
+
 .calculator-kp-edit-hint {
   margin: 0 0 12px;
   padding: 0 4px;
@@ -99,7 +157,9 @@
   overflow: hidden;
   box-sizing: border-box;
   --calc-section-count: 4;
-  --calc-viewport-block: calc(100dvh - var(--app-header-inner-height));
+  --calc-viewport-block: calc(
+    100dvh - var(--app-header-inner-height) - 3.25rem
+  );
   --calc-section-overhead: 11.5rem;
 }
 
@@ -785,6 +845,31 @@ button::-moz-focus-inner {
   box-sizing: border-box;
   min-height: 44px;
   padding: 10px 12px;
+}
+
+.selected-item-forms__region-select {
+  display: block;
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-family: "Montserrat", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2933;
+  border: 1px solid #dfe5eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.selected-item-forms__region-select:disabled {
+  opacity: 0.7;
+}
+
+.selected-item-forms__region-select:focus {
+  outline: 2px solid #6cabc8;
+  outline-offset: 1px;
 }
 
 .selected-item-forms__stack .tbl-in {

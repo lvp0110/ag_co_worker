@@ -13,14 +13,13 @@ import { BASE_URL } from "./apiClient";
 
 /**
  * Прайс: GET /commerce/price-list/{regionCode}
- * Регионы: GET /commerce/regions, иначе GET /admin/commerce/regions
- * (как в админке). Если оба недоступны — ключи из REGION_SELECT_OPTIONS.
+ * Регионы: GET /admin/commerce/regions (swagger: admin commerce).
+ * Если справочник недоступен — ключи из REGION_SELECT_OPTIONS.
  *
  * Список регионов — справочник админки (code + name, включая дочерние).
  * Для дочерних регионов прайс берётся у базового и умножается на
  * price_coefficient: в material_prices своих строк у derived нет.
  */
-const COMMERCE_REGIONS_URL = `${BASE_URL}/commerce/regions`;
 const ADMIN_COMMERCE_REGIONS_URL = `${BASE_URL}/admin/commerce/regions`;
 const commercePriceListUrl = (regionCode) =>
   `${BASE_URL}/commerce/price-list/${encodeURIComponent(regionCode)}`;
@@ -137,17 +136,14 @@ const catalogFromBody = (body) =>
   toActiveCatalog(unwrapList(body).map(normalizePriceRegion).filter(Boolean));
 
 /**
- * Справочник регионов как в админке.
- * Сначала GET /commerce/regions (любой залогиненный), затем admin.
+ * Справочник регионов: GET /admin/commerce/regions.
  */
 const fetchCommerceRegionCatalog = async () => {
-  for (const url of [COMMERCE_REGIONS_URL, ADMIN_COMMERCE_REGIONS_URL]) {
-    try {
-      const rows = catalogFromBody(await fetchJson(url));
-      if (rows.length) return rows;
-    } catch {
-      // следующий источник
-    }
+  try {
+    const rows = catalogFromBody(await fetchJson(ADMIN_COMMERCE_REGIONS_URL));
+    if (rows.length) return rows;
+  } catch {
+    // нет сессии/роли admin — fallback REGION_SELECT_OPTIONS
   }
   return null;
 };
