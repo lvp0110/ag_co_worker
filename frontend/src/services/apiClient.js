@@ -223,6 +223,11 @@ const doFetch = async (path, init) => {
 const resolveUrl = (path) =>
   path.startsWith("http") ? path : `${BASE_URL}${path}`;
 
+const isCrossOriginAuthGap = (status) =>
+  isCrossOriginAuth() &&
+  (status === 401 || status === 403) &&
+  !readStoredAuthTokens().access_token;
+
 const fetchWithAuth = async (path, init = {}, options = {}) => {
   const url = resolveUrl(path);
   const response = await doFetch(path, init);
@@ -240,7 +245,9 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
       if (!isCrossOriginAuth()) dispatchUnauthorized();
     }
     const body = await parseResponse(response);
-    console.error("[api] 401", init.method || "GET", url, body);
+    if (!isCrossOriginAuthGap(401)) {
+      console.error("[api] 401", init.method || "GET", url, body);
+    }
     throw new ApiError(
       (body && typeof body === "object" && (body.error || body.message)) ||
         "Unauthorized",
@@ -253,6 +260,13 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
 
 /** Текст ошибки с URL, статусом и телом ответа — для модалки / копирования. */
 export const formatRequestError = (err) => {
+  if (
+    isCrossOriginAuth() &&
+    (err?.status === 401 || err?.status === 403) &&
+    !readStoredAuthTokens().access_token
+  ) {
+    return "";
+  }
   const lines = [];
   if (err?.message) lines.push(String(err.message));
   if (err?.url) lines.push(`URL: ${err.url}`);
@@ -280,7 +294,9 @@ export const request = async (path, init = {}, options = {}) => {
     const message =
       (body && typeof body === "object" && (body.error || body.message)) ||
       `HTTP ${response.status} ${response.statusText}`;
-    console.error("[api]", init.method || "GET", url, response.status, body);
+    if (!isCrossOriginAuthGap(response.status)) {
+      console.error("[api]", init.method || "GET", url, response.status, body);
+    }
     throw new ApiError(message, { status: response.status, body, url });
   }
 
