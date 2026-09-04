@@ -2,8 +2,9 @@
  * Клиент внешнего auth-сервиса (same-origin через Vite/nginx proxy).
  *
  * Контракт:
- *   POST /login           { email, password } → { code, data: User, error }
- *   GET  /auth/session    → { code, data: User } | 404 без cookie
+ *   POST /login           { email, password } → { code, data: UserCredentials, error }
+ *     UserCredentials.user = UserFullInfo (role_type, email, …)
+ *   GET  /auth/session    → { code, data: UserFullInfo } | 404 без cookie
  *   POST /auth/refresh    cookie refresh_token + X-CSRF-Token → новые cookies
  *   POST /auth/logout     (нужен X-CSRF-Token = cookie csrf_token)
  *
@@ -14,7 +15,8 @@
  *
  * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
- * Не вызывайте auth по абсолютному URL с другого origin — cookies не сохранятся.
+ * GitHub Pages ходит на VITE_API_URL напрямую: роль берём из JSON login
+ * (`data.user.role_type`), не только из последующего GET /auth/session.
  */
 
 import { ApiError, BASE_URL, request } from "./apiClient.js";
@@ -30,32 +32,77 @@ const readCookie = (name) => {
   return "";
 };
 
+const isPlainObject = (value) =>
+  value != null && typeof value === "object" && !Array.isArray(value);
+
+const looksLikeUser = (obj) => {
+  if (!isPlainObject(obj)) return false;
+  return Boolean(
+    obj.user_id ||
+      obj.email ||
+      obj.role_type ||
+      obj.role ||
+      obj.first_name ||
+      obj.last_name
+  );
+};
+
+/**
+ * Login: `{ data: { user: UserFullInfo, expires_at } }`.
+ * Session: `{ data: UserFullInfo }`.
+ * Также принимает уже развёрнутый user / credentials.
+ */
+export const extractUserRecord = (payload) => {
+  if (!isPlainObject(payload)) return null;
+  const data = isPlainObject(payload.data) ? payload.data : payload;
+  if (looksLikeUser(data.user)) return data.user;
+  if (looksLikeUser(payload.user)) return payload.user;
+  if (looksLikeUser(data)) return data;
+  return null;
+};
+
+const pickRoleType = (u) => {
+  const raw = u?.role_type ?? u?.role ?? u?.roleType ?? "";
+  if (isPlainObject(raw)) {
+    return String(raw.type ?? raw.name ?? raw.role_type ?? "")
+      .toLowerCase()
+      .trim();
+  }
+  return String(raw).toLowerCase().trim();
+};
+
+const isAdminRole = (roleType) =>
+  roleType === "admin" || roleType === "administrator";
+
 /** Внешний User → форма для AuthContext / хедера / профиля. */
 export const mapExternalUser = (u) => {
-  if (!u) return null;
-  const fullName = [u.last_name, u.first_name, u.middle_name]
+  const record = extractUserRecord(u);
+  if (!record) return null;
+  const fullName = [record.last_name, record.first_name, record.middle_name]
     .filter(Boolean)
     .join(" ")
     .trim();
-  const roleType = String(u.role_type || "").toLowerCase();
-  const phone = u.phone ?? u.cellphone ?? u.phone_number ?? null;
-  const office = u.office_address ?? u.officeAddress ?? u.address ?? null;
+  const phone = record.phone ?? record.cellphone ?? record.phone_number ?? null;
+  const office =
+    record.office_address ?? record.officeAddress ?? record.address ?? null;
   return {
-    id: u.user_id,
-    full_name: fullName || u.email || "",
-    email: u.email ?? "",
-    phone: phone != null && String(phone).trim() !== "" ? String(phone).trim() : null,
+    id: record.user_id,
+    full_name: fullName || record.email || "",
+    email: record.email ?? "",
+    phone:
+      phone != null && String(phone).trim() !== "" ? String(phone).trim() : null,
     office_address:
-      office != null && String(office).trim() !== "" ? String(office).trim() : null,
-    role: roleType === "admin" ? "ADMIN" : "USER",
-    is_blocked: u.is_active === false,
-    department_id: u.department_id ?? null,
+      office != null && String(office).trim() !== ""
+        ? String(office).trim()
+        : null,
+    role: isAdminRole(pickRoleType(record)) ? "ADMIN" : "USER",
+    is_blocked: record.is_active === false,
+    department_id: record.department_id ?? null,
   };
 };
 
 const unwrapUser = (body) => {
-  const data = body?.data ?? body?.user ?? null;
-  const user = mapExternalUser(data);
+  const user = mapExternalUser(body);
   if (!user) {
     throw new ApiError(body?.error || "Некорректный ответ auth", {
       status: 500,
@@ -107,8 +154,8 @@ export const session = async () => {
       { method: "GET" },
       { silent401: true, allowNotFound: true }
     );
-    if (!body?.data) return null;
-    const user = mapExternalUser(body.data);
+    if (!body) return null;
+    const user = mapExternalUser(body);
     return user ? { user, raw: body } : null;
   } catch (err) {
     if (err?.status === 404 || err?.status === 401) return null;
