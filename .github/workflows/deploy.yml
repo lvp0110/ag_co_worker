@@ -40,9 +40,9 @@ jobs:
         env:
           # Только pathname — НЕ полный https://….github.io/…
           BASE_PATH: /ag_co_worker/
-          # Без этого /api и /auth уходят на github.io → 404.
+          # Pages → наш Node-прокси на isocalc, не напрямую в :3005.
           # Override: Settings → Variables → VITE_API_URL
-          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://dev3.constrtodo.ru:3005' }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://isocalc.constrtodo.ru' }}
           # КП = POST /integration/onec/isolation/document (на :3005 нет /api/offers).
           VITE_ONEC_DOCUMENT_DIRECT: ${{ vars.VITE_ONEC_DOCUMENT_DIRECT || 'true' }}
           # Hash-роутер: /calc не бьётся в настоящий 404 GitHub Pages

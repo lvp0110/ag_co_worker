@@ -8,8 +8,8 @@
  *   /api/*           → backend (legacy) / calc (/api/v1|/api/v2 в dev)
  *
  * Same-origin (dev / prod nginx): cookies access_token / refresh_token / csrf_token.
- * GitHub Pages (VITE_API_URL другой origin): cookies не доходят — берём
- * access_token из JSON логина (X-CSRF-Token: pages) и шлём Bearer.
+ * GitHub Pages (VITE_API_URL = isocalc): cookies с github.io не доходят —
+ * берём access_token из JSON логина и шлём Bearer.
  * На 401 сначала POST /auth/refresh, затем повтор. Если refresh не вышел —
  * `auth:unauthorized` (на Pages без сохранённого токена сессию не сбрасываем).
  */

@@ -9,6 +9,10 @@
  *   4) проксирует /admin/*, /commerce/*, /content/* и /api/v2/public/image туда же;
  *   5) проксирует остальной /api/* и /health в backend (BACKEND_URL);
  *   6) SPA-fallback на index.html.
+ *
+ * GitHub Pages (другой origin) бьёт сюда, не напрямую в :3005: cookie с github.io
+ * не доходят. Для Origin github.io прокси ставит X-Client-Type: plugin — это уже
+ * умеет живой auth, токены приходят в JSON, фронт шлёт Bearer. ConstrTodo не трогаем.
  */
 import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -20,6 +24,12 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://backend:3006";
 const AUTH_URL = process.env.AUTH_SERVICE_URL || "http://localhost:3005";
 const DIST_DIR = process.env.DIST_DIR || "/app/dist";
 const INDEX_HTML = path.join(DIST_DIR, "index.html");
+const PAGES_ORIGINS = new Set(
+  String(process.env.PAGES_CORS_ORIGINS || "https://lvp0110.github.io")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 if (!fs.existsSync(INDEX_HTML)) {
   console.error(
@@ -31,6 +41,52 @@ const app = express();
 
 // Трасту X-Forwarded-* только от loopback (host nginx приходит с 127.0.0.1).
 app.set("trust proxy", "loopback");
+
+const isPagesOrigin = (req) => PAGES_ORIGINS.has(String(req.headers.origin || ""));
+
+const requestPath = (req) => String(req.url || req.path || "").split("?")[0];
+
+const isAuthTokenPath = (req) => {
+  const p = requestPath(req);
+  return (
+    p === "/login" ||
+    p === "/auth/login" ||
+    p === "/auth/refresh" ||
+    p.endsWith("/auth/login") ||
+    p.endsWith("/auth/refresh")
+  );
+};
+
+const applyPagesCorsHeaders = (headers, origin) => {
+  headers["access-control-allow-origin"] = origin;
+  headers["access-control-allow-credentials"] = "true";
+  headers["access-control-allow-headers"] =
+    "Origin, Content-Type, Authorization, X-CSRF-Token, Accept";
+  headers["access-control-allow-methods"] = "GET,POST,PUT,DELETE,PATCH,OPTIONS";
+  headers.vary = "Origin";
+};
+
+// GitHub Pages → этот origin. Preflight закрываем сами, ConstrTodo не нужен.
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "");
+  if (PAGES_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Origin, Content-Type, Authorization, X-CSRF-Token, Accept"
+    );
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,DELETE,PATCH,OPTIONS"
+    );
+    res.setHeader("Vary", "Origin");
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+  }
+  next();
+});
 
 // Прокси на backend. Не монтируем через app.use("/api", ...) — так express
 // стрипает префикс и backend получает `/openapi.json` вместо `/api/openapi.json`.
@@ -67,6 +123,24 @@ const authProxy = createProxyMiddleware({
     }
     return false;
   },
+  on: {
+    proxyReq(proxyReq, req) {
+      // Браузер с github.io не может прислать X-Client-Type (CORS на :3005).
+      // Node→auth CORS не касается: plugin уже есть на живом сервисе.
+      if (isPagesOrigin(req) && isAuthTokenPath(req)) {
+        proxyReq.setHeader("X-Client-Type", "plugin");
+      }
+    },
+    proxyRes(proxyRes, req) {
+      delete proxyRes.headers["access-control-allow-origin"];
+      delete proxyRes.headers["access-control-allow-credentials"];
+      delete proxyRes.headers["access-control-allow-headers"];
+      delete proxyRes.headers["access-control-allow-methods"];
+      if (isPagesOrigin(req)) {
+        applyPagesCorsHeaders(proxyRes.headers, req.headers.origin);
+      }
+    },
+  },
 });
 app.use(authProxy);
 
@@ -87,6 +161,17 @@ const backendProxy = createProxyMiddleware({
       pathname === "/api" ||
       pathname.startsWith("/api/")
     );
+  },
+  on: {
+    proxyRes(proxyRes, req) {
+      delete proxyRes.headers["access-control-allow-origin"];
+      delete proxyRes.headers["access-control-allow-credentials"];
+      delete proxyRes.headers["access-control-allow-headers"];
+      delete proxyRes.headers["access-control-allow-methods"];
+      if (isPagesOrigin(req)) {
+        applyPagesCorsHeaders(proxyRes.headers, req.headers.origin);
+      }
+    },
   },
 });
 app.use(backendProxy);
