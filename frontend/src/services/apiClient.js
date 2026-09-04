@@ -9,9 +9,9 @@
  *
  * Same-origin (dev / prod nginx): cookies access_token / refresh_token / csrf_token.
  * GitHub Pages (VITE_API_URL другой origin): cookies не доходят — берём
- * access_token из JSON логина (X-Client-Type=pages) и шлём Authorization.
+ * access_token из JSON логина (X-CSRF-Token: pages) и шлём Bearer.
  * На 401 сначала POST /auth/refresh, затем повтор. Если refresh не вышел —
- * `auth:unauthorized` (на Pages без bearer не сбрасываем сессию с экрана).
+ * `auth:unauthorized` (на Pages без сохранённого токена сессию не сбрасываем).
  */
 
 const DEFAULT_BASE_URL = "";
@@ -21,6 +21,8 @@ export const BASE_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE_URL).repla
 );
 
 const TOKEN_STORAGE_KEY = "ag_auth_bearer_v1";
+
+let memoryAuthTokens = { access_token: "", refresh_token: "" };
 
 /** true, если фронт ходит на другой origin (GitHub Pages → :3005). */
 export const isCrossOriginAuth = () => {
@@ -48,31 +50,40 @@ export const extractAuthTokensFromBody = (body) => {
   if (!data || typeof data !== "object") {
     return { access_token: "", refresh_token: "" };
   }
-  return {
-    access_token: String(data.access_token || "").trim(),
-    refresh_token: String(data.refresh_token || "").trim(),
-  };
+  const access = String(
+    data.access_token || data.accessToken || data.token || ""
+  ).trim();
+  const refresh = String(
+    data.refresh_token || data.refreshToken || ""
+  ).trim();
+  return { access_token: access, refresh_token: refresh };
 };
 
 export const readStoredAuthTokens = () => {
+  if (memoryAuthTokens.access_token || memoryAuthTokens.refresh_token) {
+    return { ...memoryAuthTokens };
+  }
   if (!canUseSessionStorage()) return { access_token: "", refresh_token: "" };
   try {
     const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
     if (!raw) return { access_token: "", refresh_token: "" };
     const parsed = JSON.parse(raw);
-    return {
+    const tokens = {
       access_token: String(parsed?.access_token || "").trim(),
       refresh_token: String(parsed?.refresh_token || "").trim(),
     };
+    memoryAuthTokens = tokens;
+    return tokens;
   } catch {
     return { access_token: "", refresh_token: "" };
   }
 };
 
 const writeStoredAuthTokens = (tokens) => {
-  if (!canUseSessionStorage()) return;
   const access_token = String(tokens?.access_token || "").trim();
   const refresh_token = String(tokens?.refresh_token || "").trim();
+  memoryAuthTokens = { access_token, refresh_token };
+  if (!canUseSessionStorage()) return;
   if (!access_token && !refresh_token) {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     return;

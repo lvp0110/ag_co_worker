@@ -16,7 +16,8 @@
  * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
  * GitHub Pages ходит на VITE_API_URL напрямую: роль из data.user,
- * токен сессии — из JSON логина (X-Client-Type=pages) + Bearer.
+ * токен — из JSON логина (X-CSRF-Token: pages) + Bearer. Cookies с github.io
+ * до :3005 не доходят.
  */
 
 import {
@@ -154,13 +155,9 @@ export const login = async ({ email, password }) => {
 
   let body;
   if (isCrossOriginAuth()) {
-    try {
-      // Не browser: auth возвращает access_token в JSON (cookies с github.io не доходят).
-      body = await doLogin({ "X-Client-Type": "pages" });
-    } catch (err) {
-      if (err?.status) throw err;
-      body = await doLogin();
-    }
+    // X-Client-Type не в CORS AllowHeaders на :3005 — браузер режет запрос.
+    // X-CSRF-Token уже разрешён; auth считает pages/plugin не-browser и отдаёт токены в JSON.
+    body = await doLogin({ "X-CSRF-Token": "pages" });
   } else {
     body = await doLogin();
   }

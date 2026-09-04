@@ -107,4 +107,10 @@ describe("extractAuthTokensFromBody", () => {
       })
     ).toEqual({ access_token: "", refresh_token: "" });
   });
+
+  it("accepts token as access_token alias", () => {
+    expect(
+      extractAuthTokensFromBody({ data: { token: "jwt", refreshToken: "r" } })
+    ).toEqual({ access_token: "jwt", refresh_token: "r" });
+  });
 });
