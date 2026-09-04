@@ -9,7 +9,7 @@ import {
   normalizePriceRegion,
   orderPriceRegions,
 } from "./adminApi.js";
-import { BASE_URL } from "./apiClient";
+import { request } from "./apiClient";
 
 /**
  * Прайс: GET /commerce/price-list/{regionCode}
@@ -20,9 +20,8 @@ import { BASE_URL } from "./apiClient";
  * Для дочерних регионов прайс берётся у базового и умножается на
  * price_coefficient: в material_prices своих строк у derived нет.
  */
-const ADMIN_COMMERCE_REGIONS_URL = `${BASE_URL}/admin/commerce/regions`;
-const commercePriceListUrl = (regionCode) =>
-  `${BASE_URL}/commerce/price-list/${encodeURIComponent(regionCode)}`;
+const fetchJson = async (path) =>
+  request(path, { method: "GET" }, { silent401: true, allowNotFound: true });
 
 /** Bump when normalized row shape / source changes — forces refetch after HMR. */
 const NORMALIZE_SCHEMA_VERSION = 5;
@@ -118,20 +117,6 @@ const fallbackRegionCatalog = () => {
   return rows;
 };
 
-const fetchJson = async (url) => {
-  const response = await fetch(url, {
-    method: "GET",
-    credentials: "include",
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) {
-    const err = new Error(`HTTP ${response.status}`);
-    err.status = response.status;
-    throw err;
-  }
-  return response.json();
-};
-
 const catalogFromBody = (body) =>
   toActiveCatalog(unwrapList(body).map(normalizePriceRegion).filter(Boolean));
 
@@ -140,7 +125,7 @@ const catalogFromBody = (body) =>
  */
 const fetchCommerceRegionCatalog = async () => {
   try {
-    const rows = catalogFromBody(await fetchJson(ADMIN_COMMERCE_REGIONS_URL));
+    const rows = catalogFromBody(await fetchJson("/admin/commerce/regions"));
     if (rows.length) return rows;
   } catch {
     // нет сессии/роли admin — fallback REGION_SELECT_OPTIONS
@@ -180,7 +165,9 @@ const normalizeCommercePriceRow = (raw, regionCode) => {
 const fetchCommercePriceList = async (regionCode) => {
   const region = normalizeRegionName(regionCode);
   if (!region) return [];
-  const body = await fetchJson(commercePriceListUrl(region));
+  const body = await fetchJson(
+    `/commerce/price-list/${encodeURIComponent(region)}`
+  );
   return unwrapList(body)
     .map((row) => normalizeCommercePriceRow(row, region))
     .filter(Boolean);

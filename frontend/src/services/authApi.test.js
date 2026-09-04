@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractUserRecord, mapExternalUser } from "./authApi.js";
+import { extractAuthTokensFromBody } from "./apiClient.js";
 
 const adminUser = {
   user_id: "u-1",
@@ -81,5 +82,29 @@ describe("mapExternalUser", () => {
   it("returns null for empty payload", () => {
     expect(mapExternalUser(null)).toBeNull();
     expect(mapExternalUser({})).toBeNull();
+  });
+});
+
+describe("extractAuthTokensFromBody", () => {
+  it("reads tokens from login UserCredentials envelope", () => {
+    expect(
+      extractAuthTokensFromBody({
+        code: 200,
+        data: {
+          user: adminUser,
+          access_token: "acc",
+          refresh_token: "ref",
+        },
+      })
+    ).toEqual({ access_token: "acc", refresh_token: "ref" });
+  });
+
+  it("ignores browser-masked login without tokens", () => {
+    expect(
+      extractAuthTokensFromBody({
+        code: 200,
+        data: { user: adminUser, expires_at: "x" },
+      })
+    ).toEqual({ access_token: "", refresh_token: "" });
   });
 });

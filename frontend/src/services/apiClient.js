@@ -7,10 +7,11 @@
  *   /admin/*         → auth/calc (:3005) admin materials/constructions
  *   /api/*           → backend (legacy) / calc (/api/v1|/api/v2 в dev)
  *
- * credentials: 'include' — cookie access_token / refresh_token / csrf_token.
- * На 401 сначала POST /auth/refresh (cookie refresh_token + X-CSRF-Token),
- * затем повтор исходного запроса. Если refresh не вышел — `auth:unauthorized`.
- * Не добавляйте Authorization header — только cookies.
+ * Same-origin (dev / prod nginx): cookies access_token / refresh_token / csrf_token.
+ * GitHub Pages (VITE_API_URL другой origin): cookies не доходят — берём
+ * access_token из JSON логина (X-Client-Type=pages) и шлём Authorization.
+ * На 401 сначала POST /auth/refresh, затем повтор. Если refresh не вышел —
+ * `auth:unauthorized` (на Pages без bearer не сбрасываем сессию с экрана).
  */
 
 const DEFAULT_BASE_URL = "";
@@ -18,6 +19,83 @@ export const BASE_URL = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE_URL).repla
   /\/$/,
   ""
 );
+
+const TOKEN_STORAGE_KEY = "ag_auth_bearer_v1";
+
+/** true, если фронт ходит на другой origin (GitHub Pages → :3005). */
+export const isCrossOriginAuth = () => {
+  if (typeof window === "undefined" || !BASE_URL) return false;
+  try {
+    return new URL(BASE_URL, window.location.origin).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+};
+
+const canUseSessionStorage = () => {
+  try {
+    return typeof sessionStorage !== "undefined";
+  } catch {
+    return false;
+  }
+};
+
+export const extractAuthTokensFromBody = (body) => {
+  const data =
+    body && typeof body === "object" && body.data && typeof body.data === "object"
+      ? body.data
+      : body;
+  if (!data || typeof data !== "object") {
+    return { access_token: "", refresh_token: "" };
+  }
+  return {
+    access_token: String(data.access_token || "").trim(),
+    refresh_token: String(data.refresh_token || "").trim(),
+  };
+};
+
+export const readStoredAuthTokens = () => {
+  if (!canUseSessionStorage()) return { access_token: "", refresh_token: "" };
+  try {
+    const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!raw) return { access_token: "", refresh_token: "" };
+    const parsed = JSON.parse(raw);
+    return {
+      access_token: String(parsed?.access_token || "").trim(),
+      refresh_token: String(parsed?.refresh_token || "").trim(),
+    };
+  } catch {
+    return { access_token: "", refresh_token: "" };
+  }
+};
+
+const writeStoredAuthTokens = (tokens) => {
+  if (!canUseSessionStorage()) return;
+  const access_token = String(tokens?.access_token || "").trim();
+  const refresh_token = String(tokens?.refresh_token || "").trim();
+  if (!access_token && !refresh_token) {
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(
+    TOKEN_STORAGE_KEY,
+    JSON.stringify({ access_token, refresh_token })
+  );
+};
+
+export const persistAuthTokensFromBody = (body) => {
+  const next = extractAuthTokensFromBody(body);
+  if (!next.access_token && !next.refresh_token) return;
+  const prev = readStoredAuthTokens();
+  writeStoredAuthTokens({
+    access_token: next.access_token || prev.access_token,
+    refresh_token: next.refresh_token || prev.refresh_token,
+  });
+};
+
+export const clearStoredAuthTokens = () => {
+  writeStoredAuthTokens({ access_token: "", refresh_token: "" });
+};
 
 const dispatchUnauthorized = () => {
   if (typeof window !== "undefined") {
@@ -38,18 +116,24 @@ const readCookie = (name) => {
 
 let refreshInFlight = null;
 
-/** POST /auth/refresh. true, если auth выставил новые cookies. */
+/** POST /auth/refresh. true, если auth выставил новые cookies / токены. */
 const refreshSession = async () => {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     const csrf = readCookie("csrf_token");
-    if (!csrf) return false;
+    const stored = readStoredAuthTokens();
+    if (!csrf && !stored.refresh_token) return false;
     try {
-      const response = await doFetch("/auth/refresh", {
-        method: "POST",
-        headers: { "X-CSRF-Token": csrf },
-      });
-      return response.ok;
+      const headers = {};
+      if (csrf) headers["X-CSRF-Token"] = csrf;
+      const init = { method: "POST", headers };
+      if (stored.refresh_token && (isCrossOriginAuth() || !csrf)) {
+        init.body = { refresh_token: stored.refresh_token };
+      }
+      const response = await doFetch("/auth/refresh", init);
+      if (!response.ok) return false;
+      persistAuthTokensFromBody(await parseResponse(response));
+      return true;
     } catch {
       return false;
     }
@@ -88,7 +172,7 @@ const parseResponse = async (response) => {
   }
 };
 
-const buildHeaders = (init) => {
+const buildHeaders = (init, path = "") => {
   const headers = new Headers(init.headers || {});
   if (init.body !== undefined && !(init.body instanceof FormData)) {
     if (!headers.has("content-type")) {
@@ -97,6 +181,13 @@ const buildHeaders = (init) => {
   }
   if (!headers.has("accept")) {
     headers.set("accept", "application/json");
+  }
+  const isLogin =
+    /\/login$/.test(String(path).split("?")[0]) ||
+    String(path).includes("/auth/login");
+  if (isCrossOriginAuth() && !isLogin && !headers.has("authorization")) {
+    const access = readStoredAuthTokens().access_token;
+    if (access) headers.set("authorization", `Bearer ${access}`);
   }
   return headers;
 };
@@ -114,7 +205,7 @@ const doFetch = async (path, init) => {
     ...init,
     body,
     credentials: "include",
-    headers: buildHeaders({ ...init, body }),
+    headers: buildHeaders({ ...init, body }, path),
   });
 };
 
@@ -133,7 +224,11 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
     if (!options.skipAuthRetry && (await refreshSession())) {
       return fetchWithAuth(path, init, { ...options, skipAuthRetry: true });
     }
-    if (!options.silent401) dispatchUnauthorized();
+    if (!options.silent401) {
+      // Pages без bearer: 401 админки не должен выкидывать только что вошедшего.
+      const hasBearer = Boolean(readStoredAuthTokens().access_token);
+      if (!isCrossOriginAuth() || hasBearer) dispatchUnauthorized();
+    }
     const body = await parseResponse(response);
     console.error("[api] 401", init.method || "GET", url, body);
     throw new ApiError(

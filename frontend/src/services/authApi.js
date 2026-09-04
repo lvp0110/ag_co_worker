@@ -15,11 +15,19 @@
  *
  * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
- * GitHub Pages ходит на VITE_API_URL напрямую: роль берём из JSON login
- * (`data.user.role_type`), не только из последующего GET /auth/session.
+ * GitHub Pages ходит на VITE_API_URL напрямую: роль из data.user,
+ * токен сессии — из JSON логина (X-Client-Type=pages) + Bearer.
  */
 
-import { ApiError, BASE_URL, request } from "./apiClient.js";
+import {
+  ApiError,
+  clearStoredAuthTokens,
+  isCrossOriginAuth,
+  persistAuthTokensFromBody,
+  request,
+} from "./apiClient.js";
+
+export { isCrossOriginAuth };
 
 const readCookie = (name) => {
   if (typeof document === "undefined") return "";
@@ -132,14 +140,31 @@ export const formatAuthError = (err) => {
 
 /** POST /login */
 export const login = async ({ email, password }) => {
-  const body = await request(
-    "/login",
-    {
-      method: "POST",
-      body: { email: String(email || "").trim().toLowerCase(), password },
-    },
-    { skipAuthRetry: true }
-  );
+  clearStoredAuthTokens();
+  const payload = {
+    email: String(email || "").trim().toLowerCase(),
+    password,
+  };
+  const doLogin = (headers = {}) =>
+    request(
+      "/login",
+      { method: "POST", headers, body: payload },
+      { skipAuthRetry: true }
+    );
+
+  let body;
+  if (isCrossOriginAuth()) {
+    try {
+      // Не browser: auth возвращает access_token в JSON (cookies с github.io не доходят).
+      body = await doLogin({ "X-Client-Type": "pages" });
+    } catch (err) {
+      if (err?.status) throw err;
+      body = await doLogin();
+    }
+  } else {
+    body = await doLogin();
+  }
+  persistAuthTokensFromBody(body);
   return unwrapUser(body);
 };
 
@@ -158,23 +183,15 @@ export const session = async () => {
     const user = mapExternalUser(body);
     return user ? { user, raw: body } : null;
   } catch (err) {
-    if (err?.status === 404 || err?.status === 401) return null;
+    if (err?.status === 404 || err?.status === 401 || err?.status === 403) {
+      return null;
+    }
     throw err;
   }
 };
 
 /** CSRF из cookie (для мутаций auth и выгрузки в 1С). */
 export const getCsrfToken = async () => readCookie("csrf_token");
-
-/** true, если фронт ходит на другой origin (GitHub Pages → :3005). */
-export const isCrossOriginAuth = () => {
-  if (typeof window === "undefined" || !BASE_URL) return false;
-  try {
-    return new URL(BASE_URL, window.location.origin).origin !== window.location.origin;
-  } catch {
-    return false;
-  }
-};
 
 /** POST /auth/logout */
 export const logout = async () => {
@@ -190,4 +207,5 @@ export const logout = async () => {
   } catch {
     // ignore
   }
+  clearStoredAuthTokens();
 };
