@@ -30,6 +30,41 @@ import {
 
 export { isCrossOriginAuth };
 
+const USER_STORAGE_KEY = "ag_auth_user_v1";
+
+const canUseSessionStorage = () => {
+  try {
+    return typeof sessionStorage !== "undefined";
+  } catch {
+    return false;
+  }
+};
+
+export const readPersistedAuthUser = () => {
+  if (!canUseSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(USER_STORAGE_KEY);
+    if (!raw) return null;
+    const user = JSON.parse(raw);
+    if (!user || typeof user !== "object") return null;
+    if (!user.email && !user.id) return null;
+    return user;
+  } catch {
+    return null;
+  }
+};
+
+export const persistAuthUser = (user) => {
+  if (!canUseSessionStorage()) return;
+  if (!user) {
+    sessionStorage.removeItem(USER_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+};
+
+export const clearPersistedAuthUser = () => persistAuthUser(null);
+
 const readCookie = (name) => {
   if (typeof document === "undefined") return "";
   const prefix = `${name}=`;
@@ -157,12 +192,17 @@ export const login = async ({ email, password }) => {
   if (isCrossOriginAuth()) {
     // X-Client-Type не в CORS AllowHeaders на :3005 — браузер режет запрос.
     // X-CSRF-Token уже разрешён; auth считает pages/plugin не-browser и отдаёт токены в JSON.
-    body = await doLogin({ "X-CSRF-Token": "pages" });
+    body = await doLogin({
+      "X-CSRF-Token": "pages",
+      Authorization: "pages",
+    });
   } else {
     body = await doLogin();
   }
   persistAuthTokensFromBody(body);
-  return unwrapUser(body);
+  const result = unwrapUser(body);
+  persistAuthUser(result.user);
+  return result;
 };
 
 /**
@@ -205,4 +245,5 @@ export const logout = async () => {
     // ignore
   }
   clearStoredAuthTokens();
+  clearPersistedAuthUser();
 };

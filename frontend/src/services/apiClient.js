@@ -236,9 +236,8 @@ const fetchWithAuth = async (path, init = {}, options = {}) => {
       return fetchWithAuth(path, init, { ...options, skipAuthRetry: true });
     }
     if (!options.silent401) {
-      // Pages без bearer: 401 админки не должен выкидывать только что вошедшего.
-      const hasBearer = Boolean(readStoredAuthTokens().access_token);
-      if (!isCrossOriginAuth() || hasBearer) dispatchUnauthorized();
+      // Pages: cookie нет; 401 админки не должен выкидывать из учётки.
+      if (!isCrossOriginAuth()) dispatchUnauthorized();
     }
     const body = await parseResponse(response);
     console.error("[api] 401", init.method || "GET", url, body);

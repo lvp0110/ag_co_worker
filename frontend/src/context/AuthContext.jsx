@@ -26,21 +26,28 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const cached = authApi.readPersistedAuthUser();
       try {
         const data = await authApi.session();
         if (cancelled) return;
         if (data?.user) {
+          authApi.persistAuthUser(data.user);
           setUser(data.user);
           setStatus("authed");
           return;
         }
       } catch {
-        // сеть / 5xx → гость
+        // сеть / 5xx
       }
-      if (!cancelled) {
-        setUser(null);
-        setStatus("anon");
+      if (cancelled) return;
+      // GitHub Pages: cookie-сессии нет, держим вход из sessionStorage.
+      if (cached) {
+        setUser(cached);
+        setStatus("authed");
+        return;
       }
+      setUser(null);
+      setStatus("anon");
     })();
     return () => {
       cancelled = true;
@@ -49,6 +56,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const onUnauthorized = () => {
+      authApi.clearPersistedAuthUser();
       setUser(null);
       setStatus("anon");
       setLoginModal({ isOpen: true });
@@ -59,6 +67,7 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (credentials) => {
     const data = await authApi.login(credentials);
+    authApi.persistAuthUser(data.user);
     setUser(data.user);
     setStatus("authed");
     setLoginModal({ isOpen: false });
@@ -67,6 +76,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     await authApi.logout();
+    authApi.clearPersistedAuthUser();
     setUser(null);
     setStatus("anon");
   }, []);
