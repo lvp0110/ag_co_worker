@@ -56,6 +56,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const onUnauthorized = () => {
+      authApi.clearStoredAuthTokens();
       authApi.clearPersistedAuthUser();
       setUser(null);
       setStatus("anon");

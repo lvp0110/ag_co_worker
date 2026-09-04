@@ -15,8 +15,9 @@
  *
  * В dev Vite проксирует /login, /auth и /admin/* → AUTH_PROXY_TARGET (по умолчанию :3005).
  * В prod то же делает frontend/server.js → AUTH_SERVICE_URL.
- * GitHub Pages ходит на isocalc (VITE_API_URL): роль из data.user,
- * токен — из JSON логина (прокси ставит X-Client-Type: plugin) + Bearer.
+ * GitHub Pages (VITE_API_URL другой origin): роль из data.user,
+ * токен — из JSON логина (X-CSRF-Token: pages) + Bearer. Cookies с github.io
+ * до API не доходят / SameSite режет.
  */
 
 import {
@@ -27,7 +28,7 @@ import {
   request,
 } from "./apiClient.js";
 
-export { isCrossOriginAuth };
+export { isCrossOriginAuth, clearStoredAuthTokens };
 
 const USER_STORAGE_KEY = "ag_auth_user_v1";
 
@@ -176,17 +177,29 @@ export const formatAuthError = (err) => {
 /** POST /login */
 export const login = async ({ email, password }) => {
   clearStoredAuthTokens();
-  const body = await request(
-    "/login",
-    {
-      method: "POST",
-      body: {
-        email: String(email || "").trim().toLowerCase(),
-        password,
-      },
-    },
-    { skipAuthRetry: true }
-  );
+  const payload = {
+    email: String(email || "").trim().toLowerCase(),
+    password,
+  };
+  const doLogin = (headers = {}) =>
+    request(
+      "/login",
+      { method: "POST", headers, body: payload },
+      { skipAuthRetry: true }
+    );
+
+  let body;
+  if (isCrossOriginAuth()) {
+    // X-Client-Type не в CORS AllowHeaders на :3005 — браузер режет preflight.
+    // X-CSRF-Token уже разрешён; auth считает pages/plugin не-browser и отдаёт
+    // access_token в JSON (иначе cookies с github.io до API не доходят).
+    body = await doLogin({
+      "X-CSRF-Token": "pages",
+      Authorization: "pages",
+    });
+  } else {
+    body = await doLogin();
+  }
   persistAuthTokensFromBody(body);
   const result = unwrapUser(body);
   persistAuthUser(result.user);
