@@ -33,6 +33,7 @@ import {
   getAdminMaterialByCode,
   getCalculationTypeId,
   getConstructionId,
+  getConstructionPriceRegionIds,
   getMaterialCode,
   getMaterialTypeId,
   getPriceRegionBaseId,
@@ -50,6 +51,8 @@ import {
   orderPriceRegions,
   PRICE_REGION_MODE_DERIVED,
   pickCategoryIdFromRows,
+  sameIdSet,
+  uniquePositiveIds,
   updateAdminCommerceRegion,
   updateAdminConstruction,
   updateAdminConstructionCalculationParam,
@@ -213,7 +216,98 @@ const CONSTRUCTION_COLUMNS = [
           row.category?.code
       ),
   },
+  {
+    key: "price_regions",
+    label: "Регионы",
+    className: "admin-page__col--code",
+    render: (row) => {
+      const regions = Array.isArray(row.price_regions) ? row.price_regions : [];
+      const codes = regions
+        .map((item) => String(item?.code || "").trim())
+        .filter(Boolean);
+      return cell(codes.join(", "));
+    },
+  },
 ];
+
+const activePriceRegions = (regions) =>
+  orderPriceRegions(regions).filter((row) => row.is_active !== false);
+
+function AdminConstructionRegionsField({
+  regions,
+  selectedIds,
+  disabled,
+  onChange,
+}) {
+  const ordered = useMemo(() => activePriceRegions(regions), [regions]);
+  const allIds = useMemo(
+    () => ordered.map((row) => Number(row.id)),
+    [ordered]
+  );
+  const allSelected =
+    allIds.length > 0 && allIds.every((id) => selectedIds.includes(id));
+  const someSelected = allIds.some((id) => selectedIds.includes(id));
+  const selectAllRef = useRef(null);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [allSelected, someSelected]);
+
+  const toggle = (id) => {
+    const has = selectedIds.includes(id);
+    onChange(has ? selectedIds.filter((value) => value !== id) : [...selectedIds, id]);
+  };
+
+  if (!ordered.length) {
+    return (
+      <div className="admin-page__field admin-page__field--regions">
+        <span className="admin-page__field-label">Регионы продаж</span>
+        <p className="admin-page__hint">
+          Нет активных регионов. Добавьте их во вкладке «Регионы».
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <fieldset className="admin-page__field admin-page__field--regions">
+      <legend className="admin-page__field-label">Регионы продаж</legend>
+      <p className="admin-page__hint">
+        Нужен хотя бы один — иначе конструкция не появится в калькуляторе.
+      </p>
+      <div className="admin-page__region-checks">
+        <label className="admin-page__region-check admin-page__region-check--all">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            checked={allSelected}
+            disabled={disabled}
+            onChange={() => onChange(allSelected ? [] : allIds)}
+          />
+          <span className="admin-page__region-check-label">Выбрать все</span>
+        </label>
+        {ordered.map((region) => {
+          const id = Number(region.id);
+          const checked = selectedIds.includes(id);
+          const label = String(region.name || region.code || `ID ${id}`).trim();
+          return (
+            <label key={id} className="admin-page__region-check">
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={() => toggle(id)}
+              />
+              <span className="admin-page__region-check-label">{label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
 
 const CONSTRUCTION_CATEGORY_FILTERS = [
   { code: "sound", label: "Звукоизоляция" },
@@ -2510,7 +2604,6 @@ function ConstructionCalcParamsPanel({ constructionId }) {
 function ConstructionDetail({
   constructionId,
   label,
-  categoryCode,
   constructionTypes: constructionTypesProp,
   onUpdated,
   onDeleted,
@@ -2520,6 +2613,8 @@ function ConstructionDetail({
   const [editName, setEditName] = useState("");
   const [editTypeId, setEditTypeId] = useState("");
   const [editCategoryId, setEditCategoryId] = useState("");
+  const [editRegionIds, setEditRegionIds] = useState([]);
+  const [priceRegions, setPriceRegions] = useState([]);
   const [typeOptionsLocal, setTypeOptionsLocal] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [savingMeta, setSavingMeta] = useState(false);
@@ -2850,7 +2945,7 @@ function ConstructionDetail({
       setDefaultAddError(null);
       setPromoteError(null);
       try {
-        const [data, catalog, types, constrTypes, allConstructions, calcTypes] =
+        const [data, catalog, types, constrTypes, allConstructions, calcTypes, regions] =
           await Promise.all([
             getAdminConstructionById(constructionId),
             listAdminMaterials().catch(() => []),
@@ -2860,6 +2955,7 @@ function ConstructionDetail({
               : listConstructionTypes().catch(() => []),
             listAdminConstructions().catch(() => []),
             listAdminConstructionCalculationTypes().catch(() => []),
+            listAdminCommerceRegions().catch(() => []),
           ]);
         if (cancelled) return;
         setCatalogMaterials(catalog);
@@ -2886,6 +2982,18 @@ function ConstructionDetail({
             data?.detail?.category_id ?? data?.detail?.category?.id ?? ""
           )
         );
+        setPriceRegions(Array.isArray(regions) ? regions : []);
+        {
+          const assigned = getConstructionPriceRegionIds(data?.detail);
+          const activeIds = new Set(
+            activePriceRegions(regions).map((row) => Number(row.id))
+          );
+          setEditRegionIds(
+            activeIds.size
+              ? assigned.filter((id) => activeIds.has(id))
+              : assigned
+          );
+        }
         setMetaError(null);
         setMetaSuccess(null);
         const enriched = enrichCompositionFromMaterialsCatalog(
@@ -2920,6 +3028,8 @@ function ConstructionDetail({
           setEditName("");
           setEditTypeId("");
           setEditCategoryId("");
+          setEditRegionIds([]);
+          setPriceRegions([]);
           setTypeOptionsLocal([]);
           setCategoryOptions([]);
           setMetaError(null);
@@ -2991,6 +3101,13 @@ function ConstructionDetail({
       return;
     }
 
+    const regionIds = uniquePositiveIds(editRegionIds);
+    if (!regionIds.length) {
+      setMetaError("Выберите хотя бы один регион продаж.");
+      setMetaSuccess(null);
+      return;
+    }
+
     setSavingMeta(true);
     setMetaError(null);
     setMetaSuccess(null);
@@ -3000,12 +3117,20 @@ function ConstructionDetail({
         name,
         type_id: typeId,
         category_id: categoryId,
+        price_region_ids: regionIds,
       });
       const selectedType =
         typeOptions.find((item) => Number(item.id) === typeId) ?? null;
       const selectedCategory =
         categorySelectOptions.find((item) => Number(item.id) === categoryId) ??
         null;
+      const nextRegions = activePriceRegions(priceRegions)
+        .filter((item) => regionIds.includes(Number(item.id)))
+        .map((item) => ({
+          id: Number(item.id),
+          code: item.code,
+          name: item.name,
+        }));
       const nextDetail = {
         ...(detail || {}),
         code,
@@ -3018,6 +3143,8 @@ function ConstructionDetail({
         type_name: selectedType?.name ?? "",
         category_code: selectedCategory?.code ?? "",
         category_name: selectedCategory?.name ?? "",
+        price_regions: nextRegions,
+        price_region_ids: regionIds,
       };
       setDetail(nextDetail);
       setMetaSuccess("Сохранено.");
@@ -3033,6 +3160,8 @@ function ConstructionDetail({
         type_name: selectedType?.name ?? "",
         category_code: selectedCategory?.code ?? "",
         category_name: selectedCategory?.name ?? "",
+        price_regions: nextRegions,
+        price_region_ids: regionIds,
       });
     } catch (err) {
       setMetaError(formatRequestError(err));
@@ -3467,6 +3596,15 @@ function ConstructionDetail({
                 )}
               </select>
             </label>
+            <AdminConstructionRegionsField
+              regions={priceRegions}
+              selectedIds={editRegionIds}
+              disabled={savingMeta || deleting}
+              onChange={(ids) => {
+                setEditRegionIds(ids);
+                setMetaSuccess(null);
+              }}
+            />
             <div className="admin-page__meta-actions">
               <button
                 type="submit"
@@ -3478,12 +3616,17 @@ function ConstructionDetail({
                   !editName.trim() ||
                   !editTypeId ||
                   !editCategoryId ||
+                  !editRegionIds.length ||
                   (editCode.trim() === String(detail.code ?? "").trim() &&
                     editName.trim() === String(detail.name ?? "").trim() &&
                     String(editTypeId) ===
                       String(detail.type_id ?? detail.type?.id ?? "") &&
                     String(editCategoryId) ===
-                      String(detail.category_id ?? detail.category?.id ?? ""))
+                      String(detail.category_id ?? detail.category?.id ?? "") &&
+                    sameIdSet(
+                      editRegionIds,
+                      getConstructionPriceRegionIds(detail)
+                    ))
                 }
               >
                 {savingMeta ? "Сохранение…" : "Сохранить"}
@@ -3982,6 +4125,8 @@ function ConstructionsListPanel() {
   const [createCode, setCreateCode] = useState("");
   const [createName, setCreateName] = useState("");
   const [createTypeId, setCreateTypeId] = useState("");
+  const [createRegionIds, setCreateRegionIds] = useState([]);
+  const [priceRegions, setPriceRegions] = useState([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [createSuccess, setCreateSuccess] = useState(null);
@@ -4027,11 +4172,35 @@ function ConstructionsListPanel() {
   }, [reloadToken]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listAdminCommerceRegions();
+        if (cancelled) return;
+        setPriceRegions(data);
+      } catch {
+        if (!cancelled) {
+          setPriceRegions([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  useEffect(() => {
     setCreateCode("");
     setCreateName("");
     setCreateError(null);
     setCreateSuccess(null);
   }, [category]);
+
+  useEffect(() => {
+    setCreateRegionIds(
+      activePriceRegions(priceRegions).map((row) => Number(row.id))
+    );
+  }, [category, priceRegions]);
 
   const constructionTypes = useMemo(
     () => collectConstructionTypes(apiConstructionTypes, rows),
@@ -4113,6 +4282,9 @@ function ConstructionsListPanel() {
               type_name: patch.type_name ?? item.type_name,
               category_code: patch.category_code ?? item.category_code,
               category_name: patch.category_name ?? item.category_name,
+              price_regions: patch.price_regions ?? item.price_regions,
+              price_region_ids:
+                patch.price_region_ids ?? item.price_region_ids,
             }
           : item
       )
@@ -4151,6 +4323,13 @@ function ConstructionsListPanel() {
       return;
     }
 
+    const regionIds = uniquePositiveIds(createRegionIds);
+    if (!regionIds.length) {
+      setCreateError("Выберите хотя бы один регион продаж.");
+      setCreateSuccess(null);
+      return;
+    }
+
     setCreating(true);
     setCreateError(null);
     setCreateSuccess(null);
@@ -4160,6 +4339,7 @@ function ConstructionsListPanel() {
         name,
         type_id: typeId,
         category_id: categoryId,
+        price_region_ids: regionIds,
       });
       setCreateCode("");
       setCreateName("");
@@ -4279,6 +4459,12 @@ function ConstructionsListPanel() {
                 )}
               </select>
             </label>
+            <AdminConstructionRegionsField
+              regions={priceRegions}
+              selectedIds={createRegionIds}
+              disabled={creating || loading}
+              onChange={setCreateRegionIds}
+            />
             <button
               type="submit"
               className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
@@ -4288,7 +4474,8 @@ function ConstructionsListPanel() {
                 !createCode.trim() ||
                 !createName.trim() ||
                 !createTypeId ||
-                !soundCategoryId
+                !soundCategoryId ||
+                !createRegionIds.length
               }
             >
               {creating ? "Создание…" : "Создать"}
@@ -4356,7 +4543,6 @@ function ConstructionsListPanel() {
                         <ConstructionDetail
                           constructionId={id}
                           label={selectedLabel}
-                          categoryCode={category}
                           constructionTypes={constructionTypes}
                           onUpdated={handleConstructionUpdated}
                           onDeleted={handleConstructionDeleted}

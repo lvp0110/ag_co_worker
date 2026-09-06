@@ -32,9 +32,9 @@
  *   GET /api/v2/constructions/types
  *     → { id, code, name }[]  (справочник construction_types)
  *   POST /admin/constructions
- *     → body: { code, name, type_id, category_id }
+ *     → body: { code, name, type_id, category_id, price_region_ids }
  *   PUT /admin/constructions/{id}
- *     → body: { code, name, type_id, category_id }
+ *     → body: { code, name, type_id, category_id, price_region_ids }
  *   DELETE /admin/constructions/{id}
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
@@ -127,15 +127,52 @@ export const getConstructionId = (row) => {
   return Number.isFinite(n) ? n : raw;
 };
 
+export const uniquePositiveIds = (ids) => {
+  const seen = new Set();
+  const out = [];
+  for (const raw of ids || []) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+};
+
+/** ID регионов продаж из карточки / списка GET /admin/constructions. */
+export const getConstructionPriceRegionIds = (row) => {
+  if (!row || typeof row !== "object") return [];
+  if (Array.isArray(row.price_region_ids) && row.price_region_ids.length) {
+    return uniquePositiveIds(row.price_region_ids);
+  }
+  if (!Array.isArray(row.price_regions)) return [];
+  return uniquePositiveIds(row.price_regions.map((item) => item?.id));
+};
+
+export const sameIdSet = (a, b) => {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort((x, y) => x - y);
+  const right = [...b].sort((x, y) => x - y);
+  return left.every((value, i) => value === right[i]);
+};
+
 /**
  * Нормализует конструкцию: nested type/category → плоские поля + исходные объекты.
  */
 export const normalizeConstruction = (row) => {
   if (!row || typeof row !== "object") return row;
+  const priceRegions = Array.isArray(row.price_regions)
+    ? row.price_regions
+    : [];
   return {
     ...row,
     ...flattenRef("type", row.type, row),
     ...flattenRef("category", row.category, row),
+    price_regions: priceRegions,
+    price_region_ids: getConstructionPriceRegionIds({
+      ...row,
+      price_regions: priceRegions,
+    }),
   };
 };
 
@@ -903,9 +940,17 @@ export const listAdminConstructions = async (filters = {}) => {
   return unwrapList(body).map(normalizeConstruction);
 };
 
+const constructionUpsertBody = (payload) => ({
+  code: String(payload.code || "").trim(),
+  name: String(payload.name || "").trim(),
+  type_id: Number(payload.type_id),
+  category_id: Number(payload.category_id),
+  price_region_ids: uniquePositiveIds(payload.price_region_ids),
+});
+
 /**
  * POST /admin/constructions — создать конструкцию.
- * @param {{ code: string, name: string, type_id: number, category_id: number }} payload
+ * @param {{ code: string, name: string, type_id: number, category_id: number, price_region_ids: number[] }} payload
  */
 export const createAdminConstruction = async (payload) => {
   const csrf = await getCsrfToken();
@@ -915,19 +960,14 @@ export const createAdminConstruction = async (payload) => {
   return request("/admin/constructions", {
     method: "POST",
     headers,
-    body: {
-      code: String(payload.code || "").trim(),
-      name: String(payload.name || "").trim(),
-      type_id: Number(payload.type_id),
-      category_id: Number(payload.category_id),
-    },
+    body: constructionUpsertBody(payload),
   });
 };
 
 /**
- * PUT /admin/constructions/{id} — обновить код/название/тип/категорию.
+ * PUT /admin/constructions/{id} — обновить код/название/тип/категорию/регионы.
  * @param {string|number} id
- * @param {{ code: string, name: string, type_id: number, category_id: number }} payload
+ * @param {{ code: string, name: string, type_id: number, category_id: number, price_region_ids: number[] }} payload
  */
 export const updateAdminConstruction = async (id, payload) => {
   const csrf = await getCsrfToken();
@@ -937,12 +977,7 @@ export const updateAdminConstruction = async (id, payload) => {
   return request(`/admin/constructions/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers,
-    body: {
-      code: String(payload.code || "").trim(),
-      name: String(payload.name || "").trim(),
-      type_id: Number(payload.type_id),
-      category_id: Number(payload.category_id),
-    },
+    body: constructionUpsertBody(payload),
   });
 };
 

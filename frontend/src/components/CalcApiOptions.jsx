@@ -64,10 +64,23 @@ const CeilShiftOption = ({ param, current, itemId, setParam }) => {
   );
 };
 
-const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
-  if (!spec) return null;
+const CalcApiOptions = ({
+  spec,
+  values = {},
+  onChange,
+  itemId,
+  regionCode = "",
+  regionOptions = [],
+  onRegionChange,
+  regionLoading = false,
+}) => {
+  const params = spec?.params || [];
+  const optionals = spec?.optionalMaterials || [];
+  const showRegion = typeof onRegionChange === "function";
+  if (!params.length && !optionals.length && !showRegion) return null;
 
   const setParam = (code, next) => {
+    if (typeof onChange !== "function") return;
     onChange({
       ...values,
       paramValues: { ...values.paramValues, [code]: next },
@@ -75,6 +88,7 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
   };
 
   const toggleOptional = (code, checked) => {
+    if (typeof onChange !== "function") return;
     const current = values.selectedOptionals || [];
     onChange({
       ...values,
@@ -84,12 +98,32 @@ const CalcApiOptions = ({ spec, values, onChange, itemId }) => {
     });
   };
 
-  const params = spec.params || [];
-  const optionals = spec.optionalMaterials || [];
-  if (!params.length && !optionals.length) return null;
-
   return (
     <div className="selected-item-forms__stack">
+      {showRegion && (
+        <div>
+          <h4 className="selected-item-forms__group-heading">регион</h4>
+          <select
+            id={`calc_region_${itemId || "new"}`}
+            className="selected-item-forms__region-select"
+            value={regionCode}
+            disabled={regionLoading || regionOptions.length === 0}
+            onChange={(e) => onRegionChange(e.target.value)}
+          >
+            {regionLoading && regionOptions.length === 0 ? (
+              <option value="">Загрузка регионов...</option>
+            ) : regionOptions.length === 0 ? (
+              <option value="">Регионы не найдены</option>
+            ) : (
+              regionOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+      )}
       {params.map((param) => {
         const current = values.paramValues?.[param.code] || {};
         const isBool = param.value_type === "bool";

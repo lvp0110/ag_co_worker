@@ -10,8 +10,15 @@ export default function AppLayout() {
   const isAdmin = location.pathname.startsWith("/admin");
 
   useEffect(() => {
-    ensurePriceDataLoaded();
-    getItemsWithApiImages();
+    let cancelled = false;
+    (async () => {
+      await ensurePriceDataLoaded();
+      if (cancelled) return;
+      getItemsWithApiImages();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

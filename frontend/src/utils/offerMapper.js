@@ -38,7 +38,7 @@ function mergeUiDisplayIntoCalcParams(calcParams, ui) {
 }
 
 /**
- * Конструкции для POST /api/offers → 1С.
+ * Конструкции для выгрузки КП в 1С (/integration/onec/isolation/document).
  * Возвращает [{ calc_params }] из состояния калькулятора.
  */
 export function buildCreateOfferPayload({

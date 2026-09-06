@@ -5,7 +5,7 @@ import FacingForm from "./forms/FacingForm";
 import SoundboardForm from "./forms/SoundboardForm";
 import OpeningsForm from "./OpeningsForm";
 import CalcApiOptions from "./CalcApiOptions";
-import { hasCalcApiOptions, defaultCalcApiValues } from "../utils/isolationCalcV2";
+import { defaultCalcApiValues } from "../utils/isolationCalcV2";
 
 /**
  * Формы выбранного элемента: размеры — формы по секции,
@@ -26,6 +26,10 @@ const SelectedItemForms = ({
   calcApiSpec,
   calcApiValues,
   onCalcApiValuesChange,
+  calcRegion = "",
+  regionOptions = [],
+  onCalcRegionChange,
+  regionLoading = false,
 }) => {
   const cId = selectedItem?.c_id;
   const template = selectedItem?.template;
@@ -34,7 +38,6 @@ const SelectedItemForms = ({
   const isFacing = cId === "L" || cId === "W";
   const isSoundboardTemplate = [201, 202].includes(template);
   const isVerticalSoundboard = template === 201 && selectedItem?.c_id === "5";
-  const showApiOptions = hasCalcApiOptions(calcApiSpec);
   const apiValues = calcApiValues || defaultCalcApiValues();
   const navigate = useNavigate();
 
@@ -50,16 +53,19 @@ const SelectedItemForms = ({
 
   const displayTitle = selectedItem?.title ?? "";
 
-  const toggleParams = showApiOptions || isFacing ? getStartParam : undefined;
-  const apiOptions =
-    showApiOptions && unvisible ? (
-      <CalcApiOptions
-        spec={calcApiSpec}
-        values={apiValues}
-        onChange={onCalcApiValuesChange}
-        itemId={selectedItem.id}
-      />
-    ) : null;
+  const toggleParams = getStartParam;
+  const apiOptions = unvisible ? (
+    <CalcApiOptions
+      spec={calcApiSpec}
+      values={apiValues}
+      onChange={onCalcApiValuesChange}
+      itemId={selectedItem.id}
+      regionCode={calcRegion}
+      regionOptions={regionOptions}
+      onRegionChange={onCalcRegionChange}
+      regionLoading={regionLoading}
+    />
+  ) : null;
 
   return (
     <div className="selected-item-forms">

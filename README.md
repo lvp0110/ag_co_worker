@@ -17,7 +17,7 @@
 | КП | ConstrTodo → 1С: `/integration/onec/isolation/document(s)`; список и карточка читаются с сервера, `sessionStorage` — кэш на вкладку |
 | Админка | `/admin` — конструкции, материалы, регионы, картинки (`/admin/*`, `/content/*`, `/commerce/*`) |
 | Внешний сервис | `:3005` — всё перечисленное в одном сервисе (локально `localhost:3005`, staging `dev3.constrtodo.ru:3005`) |
-| Prod | host nginx + systemd (`ag-co-worker-frontend`) |
+| Prod | host nginx + Docker Compose (`ag_co_worker-frontend`) → https://isocalc.constrtodo.ru |
 
 ---
 
@@ -65,9 +65,9 @@ UPSTREAM_TARGET=https://dev3.constrtodo.ru:3005
 | `make clean` | Удалить `node_modules` и `dist` |
 | `make status` | Занятость портов 3005 / 5175 |
 
-Prod-деплой: `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
+Prod-деплой: `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
 
-Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3008` (`node server.js`) → ConstrTodo на `dev3.constrtodo.ru:3005`. Юнит — `deploy/systemd/ag-co-worker-frontend.service`, адрес upstream и секреты — `$DEPLOY_DIR/.env.prod`.
+Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3007` (frontend-контейнер, `node server.js` на `:3008`) → ConstrTodo на `dev3.constrtodo.ru:3005`. Стек — [docker-compose.prod.yml](docker-compose.prod.yml), адрес upstream и секреты — `$DEPLOY_DIR/.env.prod`. Сборка (vite) идёт на сервере внутри образа на Node 22.
 
 ---
 
@@ -119,9 +119,9 @@ ag_co_worker/
 │   ├── vite.config.js              ← dev-прокси (тот же набор путей)
 │   ├── public/
 │   └── package.json
-├── deploy/                         ← SSH-деплой, nginx, systemd, bootstrap
-│   ├── systemd/                    ← ag-co-worker-frontend.service
+├── deploy/                         ← SSH-деплой, nginx server block, bootstrap
 │   └── nginx/                      ← ag_co_worker.conf (шаблон server block)
+├── docker-compose.prod.yml         ← прод-стек (один сервис: frontend)
 ├── Makefile                        ← команды разработки и деплоя
 └── .github/workflows/              ← GitHub Pages + prod-deploy
 ```

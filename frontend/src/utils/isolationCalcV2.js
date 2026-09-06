@@ -466,15 +466,66 @@ export const buildIsolationCalcRequestFromStored = (sent, overrides = {}) => {
   });
 };
 
+const toFiniteNumber = (value) => {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Product / CalculatedProductPriceItem → строка материалов калькулятора. */
+export const normalizeCalcProduct = (raw) => {
+  if (!raw || typeof raw !== "object") return null;
+  const code = String(raw.Code ?? raw.code ?? "").trim();
+  if (!code) return null;
+  const quantity = Number(raw.Quantity ?? raw.quantity);
+  const product = {
+    Code: code,
+    Name: String(raw.Name ?? raw.name ?? "").trim(),
+    Quantity: Number.isFinite(quantity) ? quantity : 0,
+  };
+  const units = String(raw.Units ?? raw.units ?? "").trim();
+  if (units) product.Units = units;
+  const infoPack = String(raw.InfoPack ?? raw.info_pack ?? "").trim();
+  if (infoPack) product.InfoPack = infoPack;
+  const order = Number(raw.Order ?? raw.order);
+  if (Number.isFinite(order) && order !== 0) product.Order = order;
+
+  const hasPrice = raw.has_price === true || raw.HasPrice === true;
+  const unitPrice = toFiniteNumber(raw.unit_price ?? raw.UnitPrice);
+  const unitM2 = toFiniteNumber(raw.unit_m2_price ?? raw.UnitM2Price);
+  if (unitM2 != null && unitM2 > 0) product.KpPricePerM2 = unitM2;
+  if (unitPrice != null && (hasPrice || unitPrice > 0)) {
+    product.KpPricePerUnit = unitPrice;
+  }
+  return product;
+};
+
+/** data[] или { items, region, total_price } из by-construction[/{region}]. */
+export const isolationCalcItemsFromData = (data) => {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object" && Array.isArray(data.items)) {
+    return data.items;
+  }
+  return [];
+};
+
 export const extractCalcProducts = (body) => {
   const data = unwrapApiData(body);
-  if (!Array.isArray(data) || data.length === 0) return [];
-  if (data[0] && Array.isArray(data[0].products)) {
-    return data.flatMap((item) =>
-      Array.isArray(item.products) ? item.products : []
+  const items = isolationCalcItemsFromData(data);
+  if (items.length === 0) {
+    if (Array.isArray(data) && data.length > 0 && (data[0].Code || data[0].code)) {
+      return data.map(normalizeCalcProduct).filter(Boolean);
+    }
+    return [];
+  }
+  if (items[0] && Array.isArray(items[0].products)) {
+    return items.flatMap((item) =>
+      (Array.isArray(item.products) ? item.products : [])
+        .map(normalizeCalcProduct)
+        .filter(Boolean)
     );
   }
-  return data;
+  return items.map(normalizeCalcProduct).filter(Boolean);
 };
 
 export const paramIntValue = (paramValues, code, fallback = 0) => {
@@ -654,7 +705,7 @@ export const mapPublicConstructionToInfoRecord = (detail) => {
 };
 
 /**
- * Публичный каталог GET /api/v2/constructions/{category}
+ * Публичный каталог GET /api/v2/constructions/{category}/{regionCode}
  * (те же конструкции, что в админке). title/description/картинки — из API.
  * ItemsBase только для template/size_limit_id (каталог / UI catalog_id).
  */

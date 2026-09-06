@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getImageUrl } from "../services/api.js";
+import { getRegionLabel, usePriceData } from "../services/priceApi.js";
 import { useCalculatorStore } from "../stores/calculatorStore.js";
 import "./AppHeader.css";
 
@@ -65,6 +66,9 @@ function IconAdmin() {
   );
 }
 
+const isCalcPath = (pathname) =>
+  pathname === "/calc" || pathname.startsWith("/calc/");
+
 export default function AppHeader() {
   const innerRef = useRef(null);
   const logoSrc = `${import.meta.env.BASE_URL}logo1.png`;
@@ -74,6 +78,22 @@ export default function AppHeader() {
   const location = useLocation();
   const { user, status, openLoginModal, logout } = useAuth();
   const activeKpId = useCalculatorStore((s) => s.activeKpId);
+  const calcRegion = useCalculatorStore((s) => s.calcRegion);
+  const regionFilterOpen = useCalculatorStore((s) => s.regionFilterOpen);
+  const toggleRegionFilterOpen = useCalculatorStore(
+    (s) => s.toggleRegionFilterOpen
+  );
+  const { regionCatalog, selectedRegion } = usePriceData();
+  const onCalcPage = isCalcPath(location.pathname);
+  const regionLabel = useMemo(() => {
+    const code = String(calcRegion || selectedRegion || "").trim();
+    if (!code) return "";
+    const fromCatalog = regionCatalog.find(
+      (row) => String(row?.code || "").toLowerCase() === code.toLowerCase()
+    );
+    const name = String(fromCatalog?.name || "").trim();
+    return name || getRegionLabel(code);
+  }, [calcRegion, regionCatalog, selectedRegion]);
   const kpPath = activeKpId ? `/kp/${activeKpId}` : "/kp/list";
   const kpNavActive =
     location.pathname === "/kp/list" ||
@@ -101,10 +121,31 @@ export default function AppHeader() {
       <div ref={innerRef} className="app-header__inner">
         <NavLink
           to="/calc"
-          className="app-header__brand"
+          className={({ isActive }) =>
+            `app-header__brand${isActive ? " active" : ""}`
+          }
           end={false}
-          title="Калькулятор конструкций"
-          aria-label="Калькулятор конструкций"
+          title={
+            onCalcPage
+              ? regionLabel
+                ? `Регион: ${regionLabel}`
+                : "Выбрать регион"
+              : "Калькулятор конструкций"
+          }
+          aria-label={
+            onCalcPage
+              ? regionLabel
+                ? `Регион: ${regionLabel}. Выбрать регион`
+                : "Выбрать регион"
+              : "Калькулятор конструкций"
+          }
+          aria-expanded={onCalcPage ? regionFilterOpen : undefined}
+          aria-controls={onCalcPage ? "calculator-region-filter" : undefined}
+          onClick={(e) => {
+            if (!onCalcPage) return;
+            e.preventDefault();
+            toggleRegionFilterOpen();
+          }}
         >
           <img
             src={logoSrc}
@@ -113,6 +154,9 @@ export default function AppHeader() {
             width={65}
             height={65}
           />
+          {onCalcPage && regionLabel ? (
+            <span className="app-header__brand-region">{regionLabel}</span>
+          ) : null}
         </NavLink>
         <nav className="app-header__nav" aria-label="Разделы">
           <NavLink

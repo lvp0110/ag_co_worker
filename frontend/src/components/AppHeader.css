@@ -24,11 +24,14 @@
 }
 
 .app-header__brand {
+  position: relative;
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   text-decoration: none;
   border-radius: 8px;
   outline-offset: 2px;
+  overflow: visible;
 }
 
 .app-header__brand:hover {
@@ -40,6 +43,40 @@
   width: 65px;
   height: 65px;
   object-fit: contain;
+}
+
+.app-header__brand.active .app-header__brand-region {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  bottom: 0;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: none;
+  padding: 4px 3px 3px;
+  overflow: visible;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    to top,
+    rgba(238, 246, 250, 0.95) 55%,
+    rgba(238, 246, 250, 0)
+  );
+  color: #2a5f78;
+  -webkit-text-fill-color: #2a5f78;
+  -webkit-background-clip: padding-box;
+  background-clip: padding-box;
+  font-family: "Montserrat", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  text-shadow: 0 0 2px #eef6fa;
+  text-overflow: unset;
+  white-space: nowrap;
+  pointer-events: none;
+  justify-content: center;
 }
 
 .app-header__nav {

@@ -13,6 +13,7 @@ import {
 import { buildIsolationCalcRequestFromStored } from "../utils/isolationCalcV2.js";
 import { calculateIsolationByConstruction } from "./constructionApi.js";
 import { getCsrfToken, isCrossOriginAuth, session } from "./authApi.js";
+import { ensurePriceDataLoaded, getPriceState } from "./priceApi.js";
 
 /**
  * КП через 1C integration documents (auth :3005), без нашего backend:
@@ -268,12 +269,20 @@ export const loadKpDocumentIntoCalculator = async (
   );
 
   const materialsByConstruction = [];
+  await ensurePriceDataLoaded();
+  const region =
+    useCalculatorStore.getState().calcRegion ||
+    getPriceState().selectedRegion ||
+    "";
   for (let i = 0; i < constrToCalcToSent.length; i++) {
     const sent = constrToCalcToSent[i];
     const key_id = constrToCalc[i]?.key_id;
     try {
       const requestItem = buildIsolationCalcRequestFromStored(sent);
-      const result = await calculateIsolationByConstruction([requestItem]);
+      const result = await calculateIsolationByConstruction(
+        [requestItem],
+        region
+      );
       materialsByConstruction.push({
         key_id,
         data: result?.data ?? [],

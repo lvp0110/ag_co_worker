@@ -26,7 +26,7 @@ README покрывает сценарии разработчика деталь
 
 Нужен внешний ConstrTodo на `:3005`. Если локального нет — `UPSTREAM_TARGET=https://dev3.constrtodo.ru:3005` в `frontend/.env.development.local` (см. `frontend/.env.example`).
 
-**Prod-деплой** (SSH + Makefile): `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. SOP — в [deploy/README.md](deploy/README.md).
+**Prod-деплой** (SSH + Docker Compose): `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. SOP — в [deploy/README.md](deploy/README.md).
 
 **Тесты**: vitest в frontend (`cd frontend && npm test -- --run`) — 8 файлов, покрыты чистые адаптеры: `isolationCalcV2`, `validation`, `adminImageSrc`, `adminSizeLimits`, `regionSelectOptions`, `constructionSection`, `itemsCatalog`, `priceSearch`. Полная проверка: `npm run build` (ловит битые импорты) + `npm run lint`.
 
@@ -97,18 +97,26 @@ README покрывает сценарии разработчика деталь
 
 Не «чистить» эти правила глобально — сломается legacy-калькулятор.
 
-### Prod-деплой: host Node + systemd + host nginx
+### Prod-деплой: Docker Compose + host nginx
 
-`Интернет :443 → host nginx → 127.0.0.1:3008 [node server.js] → ConstrTodo (UPSTREAM_URL)`.
+Прод — `isocalc.constrtodo.ru` на `51.250.51.86` (hostname `webtest`), общая машина с `constr-todo-web` / `hr-todo-web` / `ag_sound_calc` / `cad-*`. Все проекты там в Docker, исходники в `/home/leonidl/<project>`.
 
-- Один юнит: `deploy/systemd/ag-co-worker-frontend.service`. Слушает только loopback, TLS — у nginx.
-- Секреты и адрес upstream: `$DEPLOY_DIR/.env.prod` (`EnvironmentFile` юнита). `PORT` и `DIST_DIR` задаются в юните.
-- `make deploy-frontend` — локальный `vite build` + rsync `dist`; `REBUILD=1` переустанавливает prod-deps и рестартует юнит (когда менялся `server.js`).
-- `make deploy-status` — статус юнита, порт 3008, доступность upstream и `/health` через домен.
+`Интернет :443 → host nginx → 127.0.0.1:3007 [frontend-контейнер :3008] → ConstrTodo (UPSTREAM_URL, dev3.constrtodo.ru:3005)`.
+
+- В стеке один сервис: [docker-compose.prod.yml](docker-compose.prod.yml) + [frontend/Dockerfile](frontend/Dockerfile). Своего backend нет.
+- Сборка идёт **на сервере внутри образа** (Node 22). Хостовой Node — 18, он для сборки не годится и не используется; локальный Node для деплоя тоже не нужен.
+- Секреты и адрес upstream: `$DEPLOY_DIR/.env.prod` — `env_file` сервиса.
+- `make deploy-frontend` — `git checkout` нужной части + `docker compose up -d --build frontend`.
+- Порты: host `3007` свободен (3000–3006 заняты соседями), контейнер слушает `:3008` только на loopback, TLS — у nginx.
+- TLS — общий wildcard `*.constrtodo.ru` в `/home/leonidl/certs`, certbot не нужен. Postgres в стеке нет.
+- Деплой контейнеров sudo не требует (`leonidl` в группе `docker`); sudo нужен только для nginx server block — это ручной шаг, в CI выключен (переменная `NGINX_AUTOSYNC`).
+- `make deploy-status` — `compose ps`, выкаченная ревизия, порт 3007, `/__front_health` и `/health` через домен.
 
 ### GitHub Pages — второй, cross-origin контур
 
-[.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main` публикует ветку `gh-pages` с `VITE_API_URL=https://dev3.constrtodo.ru:3005`, `BASE_PATH=/ag_co_worker/` и `VITE_ROUTER_HASH=true`. Прокси там нет вообще, поэтому все запросы идут cross-origin: нужны CORS для `https://lvp0110.github.io` и cookies `SameSite=None; Secure` на стороне ConstrTodo. Полноценный контур — systemd выше.
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main` публикует ветку `gh-pages` с `BASE_PATH=/ag_co_worker/`, `VITE_ROUTER_HASH=true` и `VITE_API_URL` (дефолт — `https://dev3.constrtodo.ru:3005`, override в Settings → Variables; чтобы Pages ходили через прод-прокси, ставится `https://isocalc.constrtodo.ru`).
+
+Прокси у Pages нет, все запросы идут cross-origin, поэтому cookie с `github.io` не доходят. Когда `VITE_API_URL` указывает на `server.js`, тот отдаёт CORS-заголовки для origin'ов из `PAGES_CORS_ORIGINS` (дефолт `https://lvp0110.github.io`) и шлёт логин в upstream как не-браузерный (`X-Client-Type: plugin`) — токены приходят в JSON, фронт использует Bearer. Полноценный контур — Compose выше.
 
 ## Ключевые файлы для ориентации
 
@@ -124,7 +132,9 @@ README покрывает сценарии разработчика деталь
 
 ## Мелкие привычки
 
-- В prod-сборке фронта не используй `VITE_API_URL` для прокси-пути: правильный default уже `""`.
-- В проде наружу слушает только host nginx; приложение — `127.0.0.1:3008`. Логи — `journalctl -u ag-co-worker-frontend`.
+- В prod-сборке фронта не используй `VITE_API_URL` для прокси-пути: правильный default уже `""` (исключение — сборка GitHub Pages).
+- В проде наружу слушает только host nginx; фронт-контейнер — `127.0.0.1:3007` (внутри `:3008`). Логи — `make deploy-logs` (`FOLLOW=1`).
+- `HOST` в `.env.prod` задавать НЕЛЬЗЯ: пустой `HOST` → bind `0.0.0.0` внутри контейнера, а с `127.0.0.1` контейнер станет недоступен хостовому nginx.
+- `UPSTREAM_URL` в проде — `https://dev3.constrtodo.ru:3005`, не `127.0.0.1:3005`: на webtest этот порт занят контейнером hr-todo-web. Историческое имя `AUTH_SERVICE_URL` тоже читается.
 - Мутации upstream (в т.ч. КП) требуют `X-CSRF-Token` — значение берётся из читаемой cookie `csrf_token`.
 - Не логируй тела запросов КП в прод-консоль: в `offersApi.js` такие `console.log` есть, новые не добавляй.
