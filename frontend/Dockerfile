@@ -10,10 +10,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 
-# VITE_API_URL="" → apiClient.js бьёт по относительным /api/* (single-origin auth).
+# VITE_API_URL="" → apiClient.js бьёт по относительным путям, а server.js
+# проксирует их в ConstrTodo (single-origin auth).
 # BASE_PATH не задаём: отдаём с корня домена, а не из подпути как на GH Pages.
-# VITE_ROUTER_HASH / VITE_ONEC_DOCUMENT_DIRECT не задаём: нужен BrowserRouter
-# и создание КП через backend /api/offers, а не напрямую в 1С.
+# VITE_ROUTER_HASH не задаём: с корня домена нужен BrowserRouter.
 ENV VITE_API_URL=""
 RUN npm run build
 

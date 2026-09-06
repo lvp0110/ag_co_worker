@@ -258,8 +258,17 @@ export const getIsolationConstrMaterials = async (isolationConstrCode) => {
 };
 
 /**
- * Список материалов для страницы «Инфо»: состав из админки,
- * затем legacy IsolationConstrMaterials / calc.
+ * Список материалов для страницы «Инфо». Цепочка фолбэков:
+ *   1) состав из админки (`GET /api/v2/constructions/{category}/{code}`);
+ *   2) LEGACY `GET /api/v1/IsolationConstrMaterials/{code}`;
+ *   3) LEGACY расчёт v1 (`getMaterialsListViaCalc`, типовые размеры);
+ *   4) LEGACY `GET /api/v2/isolationConstructions/props/{code}`.
+ *
+ * Шаги 2–4 живы только потому, что состав конструкций в БД ещё не заполнен
+ * (`construction_materials` / `construction_optional_materials` пустые). Когда
+ * заполнится — шаги 2–4 удалить, и отдельно решить судьбу колонки количества:
+ * сейчас цифры считаются по типовым размерам из шага 3, а состав из админки
+ * количеств не даёт.
  */
 export const loadInfoPageMaterialsList = async (code) => {
   if (!code) return null;

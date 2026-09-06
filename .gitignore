@@ -45,12 +45,4 @@ deploy/.env.deploy
 deploy/nginx/*.rendered.conf
 # Маркеры выкаченных ревизий (пишутся на сервере при каждом роллауте)
 .deployed-*
-backend/.env.prod
 .env.prod
-
-# Local docker-compose overrides (port mappings for parallel projects, etc.)
-docker-compose.override.yml
-
-# Uploaded user files (логотипы КП и т.п.). Локально живут в backend/uploads/,
-# на проде — в named volume ag_co_worker_uploads. В git не коммитим.
-backend/uploads/

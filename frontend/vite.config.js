@@ -22,15 +22,19 @@ function normalizeBase(raw) {
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  // Auth/calc: локально :3005, либо staging в .env.development.local:
-  //   AUTH_PROXY_TARGET=https://dev3.constrtodo.ru:3005
-  //   CALC_PROXY_TARGET=https://dev3.constrtodo.ru:3005
-  const authTarget =
-    env.AUTH_PROXY_TARGET || process.env.AUTH_PROXY_TARGET || 'http://localhost:3005'
-  const calcTarget =
-    env.CALC_PROXY_TARGET || process.env.CALC_PROXY_TARGET || 'http://localhost:3005'
-  const backendTarget =
-    env.BACKEND_PROXY_TARGET || process.env.BACKEND_PROXY_TARGET || 'http://localhost:3007'
+  // Один upstream на всё: auth, calc, админ-API и 1С — это сервис ConstrTodo.
+  // Локально :3005, либо staging в .env.development.local:
+  //   UPSTREAM_TARGET=https://dev3.constrtodo.ru:3005
+  // AUTH_PROXY_TARGET / CALC_PROXY_TARGET читаем для совместимости со старыми
+  // локальными .env.
+  const upstreamTarget =
+    env.UPSTREAM_TARGET ||
+    process.env.UPSTREAM_TARGET ||
+    env.AUTH_PROXY_TARGET ||
+    process.env.AUTH_PROXY_TARGET ||
+    env.CALC_PROXY_TARGET ||
+    process.env.CALC_PROXY_TARGET ||
+    'http://localhost:3005'
 
   /** HTML-навигация на /admin/materials/:code → SPA; fetch с Accept: json → API. */
   const bypassAdminSpaNavigation = (req) => {
@@ -66,97 +70,30 @@ export default defineConfig(({ mode }) => {
     watch: {
       usePolling: process.env.CHOKIDAR_USEPOLLING === 'true' || env.CHOKIDAR_USEPOLLING === 'true',
     },
+    // Тот же набор путей, что проксирует frontend/server.js в проде: всё уходит
+    // в один upstream, поэтому cookies остаются same-origin.
+    // `/admin/...` — и API, и SPA-роуты карточек, они разводятся по Accept.
     proxy: {
-      // Auth same-origin → cookies first-party (не бьём напрямую в :3005 с фронта).
-      '/login': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/auth': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // КП в 1С: POST/PUT/DELETE document, GET documents (без нашего backend).
-      '/integration': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Admin materials/constructions/commerce API (:3005). Точный /admin — SPA-роут.
+      '/login': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/auth': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/api': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/integration': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/content': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/commerce': { target: upstreamTarget, changeOrigin: true, secure: false },
       '/admin/materials': {
-        target: authTarget,
+        target: upstreamTarget,
         changeOrigin: true,
         secure: false,
         bypass: bypassAdminSpaNavigation,
       },
       '/admin/constructions': {
-        target: authTarget,
+        target: upstreamTarget,
         changeOrigin: true,
         secure: false,
         bypass: bypassAdminSpaNavigation,
       },
-      '/admin/commerce': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/admin/images': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Картинки из админки лежат в MinIO AUTH, не на CALC/staging.
-      '/api/v2/public/image': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // CMS warning-блоки для size-limits (роль manager).
-      '/content': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Commerce price-list + regions (same auth cookies as /admin).
-      '/commerce': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Unmatched import list и справочник типов конструкций живут на том же
-      // сервисе, что и /admin/materials. Не через CALC_PROXY_TARGET: в .env
-      // часто staging, а materials/types — localhost.
-      '/api/v2/data/unmatched': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api/v2/constructions': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api/v2/calculations': {
-        target: authTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api/v1': {
-        target: calcTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api/v2': {
-        target: calcTarget,
-        changeOrigin: true,
-        secure: false,
-      },
-      '/api': {
-        target: backendTarget,
-        changeOrigin: true,
-      },
+      '/admin/commerce': { target: upstreamTarget, changeOrigin: true, secure: false },
+      '/admin/images': { target: upstreamTarget, changeOrigin: true, secure: false },
     },
   },
   }

@@ -44,7 +44,7 @@ remote '
   test -f .env.prod || {
     echo "✗ .env.prod нет в корне checkout'"'"'а."
     echo "  На сервере: cp deploy/.env.prod.example .env.prod && chmod 600 .env.prod"
-    echo "  Затем заполнить AUTH_SERVICE_URL / CALC_SERVICE_URL / ONEC_SERVICE_URL."
+    echo "  Затем заполнить UPSTREAM_URL (адрес ConstrTodo)."
     exit 1
   }
   command -v docker >/dev/null 2>&1 || { echo "✗ docker не установлен"; exit 1; }
@@ -69,12 +69,10 @@ dc "up -d --build"
 
 # bootstrap двигает HEAD целиком, но маркеры инициализируем сразу — чтобы
 # deploy-status.sh с первого запуска показывал ревизии, а не «маркера нет».
-mark_deployed backend "$REV"
 mark_deployed frontend "$REV"
 
 info "ждём health"
 wait_health 30 || true
-check_backend || true
 
 info "статус:"
 dc "ps"

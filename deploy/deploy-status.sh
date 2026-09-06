@@ -38,11 +38,9 @@ else
   FAILED=1
 fi
 
-check_backend || FAILED=1
-
 if [ -n "$DEPLOY_DOMAIN" ]; then
   info "health через домен: https://$DEPLOY_DOMAIN/health"
-  # Ждём JSON от нашего backend. HTML означает чужой catch-all server block.
+  # Ждём JSON от нашего фронта. HTML означает чужой catch-all server block.
   BODY="$(curl -fsS --max-time 15 "https://$DEPLOY_DOMAIN/health" 2>/dev/null || true)"
   if printf '%s' "$BODY" | grep -q '"ok"'; then
     ok "домен отдаёт наш /health"

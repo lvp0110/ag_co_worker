@@ -23,7 +23,7 @@ import {
   calculateAreaAndPerimeter,
   resolveDisplayCipher,
 } from "../utils/calculations";
-import { stripHangerSuffix } from "../utils/calcUlTapeFallback";
+import { stripHangerSuffix } from "../utils/constructionCiphers";
 import {
   getItemsAgIdKeyMap,
   itemsBaseTableName,

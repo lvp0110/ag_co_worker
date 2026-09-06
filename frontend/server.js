@@ -2,17 +2,20 @@
  * Prod-сервер фронта (systemd: ag-co-worker-frontend).
  *
  * TLS и маршрутизация по домену — на хостовом nginx → 127.0.0.1:PORT.
- * Этот процесс:
- *   1) отдаёт статику из DIST_DIR (vite build, rsync);
- *   2) проксирует /api/* и /health в backend (BACKEND_URL);
- *   3) проксирует /login, /auth/*, /integration/* во внешний auth (AUTH_SERVICE_URL);
- *   4) проксирует /admin/*, /commerce/*, /content/* и /api/v2/public/image туда же;
- *   5) проксирует остальной /api/* и /health в backend (BACKEND_URL);
- *   6) SPA-fallback на index.html.
+ * Этот процесс — весь серверный слой проекта:
+ *   1) отдаёт статику из DIST_DIR (vite build);
+ *   2) проксирует всё API в ConstrTodo (UPSTREAM_URL): /login, /auth/*,
+ *      /api/*, /integration/*, /admin/* (API), /content/*, /commerce/*;
+ *   3) отвечает на /health и /__front_health (живость самого процесса);
+ *   4) SPA-fallback на index.html.
+ *
+ * Своего backend у проекта нет — auth, calc, админ-API и выгрузка КП живут в
+ * ConstrTodo. Прокси нужен, чтобы фронт ходил по относительным путям и cookies
+ * оставались first-party.
  *
  * GitHub Pages (другой origin) бьёт сюда, не напрямую в :3005: cookie с github.io
  * не доходят. Для Origin github.io прокси ставит X-Client-Type: plugin — это уже
- * умеет живой auth, токены приходят в JSON, фронт шлёт Bearer. ConstrTodo не трогаем.
+ * умеет живой upstream, токены приходят в JSON, фронт шлёт Bearer.
  */
 import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -20,8 +23,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 const PORT = Number(process.env.PORT) || 3004;
-const BACKEND_URL = process.env.BACKEND_URL || "http://backend:3006";
-const AUTH_URL = process.env.AUTH_SERVICE_URL || "http://localhost:3005";
+// AUTH_SERVICE_URL — историческое имя той же переменной: на сервере в .env.prod
+// лежит именно оно, поэтому читаем оба и не требуем правки файла при деплое.
+const UPSTREAM_URL =
+  process.env.UPSTREAM_URL || process.env.AUTH_SERVICE_URL || "http://localhost:3005";
 const DIST_DIR = process.env.DIST_DIR || "/app/dist";
 const INDEX_HTML = path.join(DIST_DIR, "index.html");
 const PAGES_ORIGINS = new Set(
@@ -88,14 +93,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Прокси на backend. Не монтируем через app.use("/api", ...) — так express
-// стрипает префикс и backend получает `/openapi.json` вместо `/api/openapi.json`.
+// Health самого процесса. Регистрируем ДО прокси, иначе `/health` попадёт под
+// фильтр `/api`-соседей и уедет в upstream: мониторинг должен проверять нас,
+// а не ConstrTodo. `/__front_health` — исторический алиас.
+const health = (_req, res) => res.json({ ok: true });
+app.get("/health", health);
+app.get("/__front_health", health);
+
+// Единый прокси в ConstrTodo. Не монтируем через app.use("/api", ...) — так
+// express стрипает префикс и upstream получает `/v1/...` вместо `/api/v1/...`.
 // Используем pathFilter — path сохраняется один-в-один.
-// `/health` тоже проксируем: это backend-ручка, её используют nginx-healthcheck'и
-// и мониторинг.
-// Auth-сервис: /login и /auth/* (session, logout). Same-origin cookies.
-const authProxy = createProxyMiddleware({
-  target: AUTH_URL,
+const upstreamProxy = createProxyMiddleware({
+  target: UPSTREAM_URL,
   changeOrigin: true,
   xfwd: true,
   pathFilter: (pathname, req) => {
@@ -103,15 +112,14 @@ const authProxy = createProxyMiddleware({
       pathname === "/login" ||
       pathname === "/auth" ||
       pathname.startsWith("/auth/") ||
+      pathname === "/api" ||
+      pathname.startsWith("/api/") ||
       pathname === "/integration" ||
       pathname.startsWith("/integration/") ||
       pathname === "/commerce" ||
       pathname.startsWith("/commerce/") ||
       pathname === "/content" ||
-      pathname.startsWith("/content/") ||
-      // Admin-загруженные файлы в MinIO AUTH — не через backend :filename.
-      pathname === "/api/v2/public/image" ||
-      pathname.startsWith("/api/v2/public/image/")
+      pathname.startsWith("/content/")
     ) {
       return true;
     }
@@ -124,22 +132,22 @@ const authProxy = createProxyMiddleware({
     return false;
   },
   on: {
-    proxyReq(proxyReq, req) {
+    proxyReq: (proxyReq, req) => {
       // Браузер с github.io не может прислать X-Client-Type (CORS на :3005).
-      // Node→auth CORS не касается: plugin уже есть на живом сервисе.
+      // Node→upstream CORS не касается: plugin уже есть на живом сервисе.
       if (isPagesOrigin(req) && isAuthTokenPath(req)) {
         proxyReq.setHeader("X-Client-Type", "plugin");
       }
-      // Снимаем Origin перед отправкой в auth-сервис.
+      // Снимаем Origin перед отправкой в upstream.
       //
       // Браузер присылает Origin даже на same-origin POST. Этот хоп —
-      // server-to-server, CORS к нему неприменим, но auth-сервис всё равно
-      // сверяет Origin со своим allowlist'ом (там только dev'ый
-      // http://localhost:5175) и на всё остальное отвечает 403 с пустым телом.
-      // Запрос без Origin он обрабатывает нормально.
+      // server-to-server, CORS к нему неприменим, но ConstrTodo всё равно
+      // сверяет Origin со своим allowlist'ом (там dev'ый localhost) и на всё
+      // остальное отвечает 403 с пустым телом. Запрос без Origin он
+      // обрабатывает нормально.
       //
       // Защиту это не ослабляет: Origin-проверка отсекает только браузеры,
-      // любой не-браузерный клиент просто не посылает заголовок. CSRF здесь
+      // любой не-браузерный клиент заголовок просто не посылает. CSRF здесь
       // держится на csrf_token + X-CSRF-Token, а не на Origin.
       proxyReq.removeHeader("origin");
     },
@@ -154,43 +162,7 @@ const authProxy = createProxyMiddleware({
     },
   },
 });
-app.use(authProxy);
-
-const backendProxy = createProxyMiddleware({
-  target: BACKEND_URL,
-  changeOrigin: true,
-  xfwd: true,
-  pathFilter: (pathname) => {
-    // public/image уже ушёл в authProxy.
-    if (
-      pathname === "/api/v2/public/image" ||
-      pathname.startsWith("/api/v2/public/image/")
-    ) {
-      return false;
-    }
-    return (
-      pathname === "/health" ||
-      pathname === "/api" ||
-      pathname.startsWith("/api/")
-    );
-  },
-  on: {
-    proxyRes(proxyRes, req) {
-      delete proxyRes.headers["access-control-allow-origin"];
-      delete proxyRes.headers["access-control-allow-credentials"];
-      delete proxyRes.headers["access-control-allow-headers"];
-      delete proxyRes.headers["access-control-allow-methods"];
-      if (isPagesOrigin(req)) {
-        applyPagesCorsHeaders(proxyRes.headers, req.headers.origin);
-      }
-    },
-  },
-});
-app.use(backendProxy);
-
-// Локальный health самого фронт-процесса (не трогает backend) — полезно
-// различать «фронт жив, но backend упал».
-app.get("/__front_health", (_req, res) => res.json({ ok: true }));
+app.use(upstreamProxy);
 
 // Статика: хешированные ассеты можно кешировать надолго, index.html — нет.
 app.use(
@@ -206,7 +178,7 @@ app.use(
   })
 );
 
-// SPA fallback: любой GET, не попавший в /api и не найденный в static → index.html.
+// SPA fallback: любой GET, не попавший в прокси и не найденный в static → index.html.
 app.get("*", (_req, res, next) => {
   if (!fs.existsSync(INDEX_HTML)) return next(new Error("index.html missing"));
   res.setHeader("Cache-Control", "no-cache");
@@ -215,7 +187,7 @@ app.get("*", (_req, res, next) => {
 
 const server = app.listen(PORT, () => {
   console.log(
-    `[frontend] listening on :${PORT}, dist=${DIST_DIR}, backend=${BACKEND_URL}, auth=${AUTH_URL}`
+    `[frontend] listening on :${PORT}, dist=${DIST_DIR}, upstream=${UPSTREAM_URL}`
   );
 });
 

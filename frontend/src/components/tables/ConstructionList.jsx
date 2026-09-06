@@ -5,7 +5,7 @@ import {
   resolveConstructionTableText,
 } from "../../utils/itemsCatalog.js";
 import MaterialsList, { formatRub } from "./MaterialsList";
-import { constructionDisplayCipher } from "../../utils/calcUlTapeFallback";
+import { constructionDisplayCipher } from "../../utils/constructionCiphers";
 import "./ConstructionList.css";
 
 /** Строка итога «Стоимость конструкций» (калькулятор). */

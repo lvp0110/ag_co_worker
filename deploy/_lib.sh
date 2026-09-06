@@ -35,9 +35,9 @@ DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_REV="${DEPLOY_REV:-origin/main}"
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+# Единственный сервис проекта: статика + прокси в ConstrTodo.
 # Host-порт, на который смотрит nginx (см. docker-compose.prod.yml и
-# deploy/nginx/ag_co_worker.conf). У backend host-порта нет вовсе — он живёт
-# только в compose-сети, поэтому занятый на хосте 3006 (cad-api) не мешает.
+# deploy/nginx/ag_co_worker.conf).
 FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3007}"
 
 # Одна shared-сессия ssh вместо многих коннектов — быстрее и меньше шума в authlog.
@@ -97,22 +97,10 @@ wait_health() {
   return 1
 }
 
-# Проверить, что backend жив ИЗ frontend-контейнера (backend наружу не смотрит).
-check_backend() {
-  if dc "exec -T frontend node -e \
-    \"fetch('http://backend:3006/health').then(r=>{console.log('backend /health',r.status);process.exit(r.ok?0:1)}).catch(e=>{console.error(e.message);process.exit(1)})\""; then
-    ok "backend /health OK (через compose-сеть)"
-    return 0
-  fi
-  warn "backend /health не отвечает"
-  return 1
-}
-
 # ─── маркеры выкаченных ревизий ─────────────────────────────────────────────
 # Роллаут делает `git checkout <rev> -- <paths>`: файлы обновляются, а HEAD
-# остаётся на месте. Поэтому `git log -1` на сервере НЕ показывает выкаченное.
-# Каждый сервис пишет свою ревизию в отдельный маркер — backend и frontend
-# сознательно могут стоять на разных ревизиях.
+# остаётся на месте. Поэтому `git log -1` на сервере НЕ показывает выкаченное —
+# ревизия пишется в маркер .deployed-<service>.
 
 # mark_deployed <service> <rev>
 mark_deployed() {
@@ -125,7 +113,7 @@ mark_deployed() {
 
 show_deployed() {
   local svc line
-  for svc in backend frontend; do
+  for svc in frontend; do
     line="$(remote "cat '.deployed-$svc' 2>/dev/null || true" 2>/dev/null || true)"
     if [ -n "$line" ]; then
       printf '  %-9s %s\n' "$svc" "$line"
