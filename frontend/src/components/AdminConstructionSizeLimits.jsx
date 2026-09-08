@@ -406,8 +406,8 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
     >
       <p className="admin-page__empty admin-page__empty--inline">
         Попадают в калькулятор через публичные calculation-params. Отдельный
-        текст предупреждения для минимума и максимума (warning_text_min /
-        warning_text_max). Для параметрической высоты нужен <code>step</code> в
+        текст предупреждения для минимума и максимума (min_warning_text /
+        max_warning_text). Для параметрической высоты нужен <code>step</code> в
         «Опции расчета». Обычный и параметрический режим нельзя смешивать на
         одном измерении.
       </p>

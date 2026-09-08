@@ -1362,10 +1362,10 @@ export const normalizeAdminSizeLimit = (row) => {
     row.warning_text ?? warning?.text ?? warning?.message ?? ""
   ).trim();
   const warningTextMin = String(
-    row.warning_text_min ?? row.min_warning_text ?? ""
+    row.min_warning_text ?? row.warning_text_min ?? ""
   ).trim() || legacyText;
   const warningTextMax = String(
-    row.warning_text_max ?? row.max_warning_text ?? ""
+    row.max_warning_text ?? row.warning_text_max ?? ""
   ).trim() || legacyText;
   return {
     id: Number(row.id) || null,
@@ -1414,8 +1414,12 @@ export const buildSizeLimitUpsertBody = (payload) => {
     max_value: optionalMm(payload?.max_value),
     sort_order: Number(payload?.sort_order) || 0,
     conditions,
-    warning_text_min: String(payload?.warning_text_min || "").trim(),
-    warning_text_max: String(payload?.warning_text_max || "").trim(),
+    min_warning_text: String(
+      payload?.min_warning_text || payload?.warning_text_min || ""
+    ).trim(),
+    max_warning_text: String(
+      payload?.max_warning_text || payload?.warning_text_max || ""
+    ).trim(),
   };
 };
 

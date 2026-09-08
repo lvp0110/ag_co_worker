@@ -52,6 +52,16 @@ const warningFromPayload = (payload) => {
     payload.heading,
     payload.header
   );
+  const messageMin = pickText(
+    payload.message_min,
+    payload.text_min,
+    payload.html_min
+  );
+  const messageMax = pickText(
+    payload.message_max,
+    payload.text_max,
+    payload.html_max
+  );
   const message = pickText(
     payload.html,
     payload.text,
@@ -60,8 +70,8 @@ const warningFromPayload = (payload) => {
     payload.body,
     payload.description
   );
-  if (!title && !message) return null;
-  return { title, message };
+  if (!title && !message && !messageMin && !messageMax) return null;
+  return { title, message, message_min: messageMin, message_max: messageMax };
 };
 
 export const normalizeSizeLimitWarning = (raw) => {
@@ -96,13 +106,28 @@ export const normalizeSizeLimitWarning = (raw) => {
     fromPayload?.title,
     nested?.title
   );
+  const messageMin = pickText(
+    fromPayload?.message_min,
+    fromSelf?.message_min,
+    nested?.message_min
+  );
+  const messageMax = pickText(
+    fromPayload?.message_max,
+    fromSelf?.message_max,
+    nested?.message_max
+  );
   const message = pickText(
     fromPayload?.message,
     fromSelf?.message,
     nested?.message
   );
-  if (!title && !message) return null;
-  return { title, message };
+  if (!title && !message && !messageMin && !messageMax) return null;
+  return {
+    title,
+    message,
+    message_min: messageMin,
+    message_max: messageMax,
+  };
 };
 
 export const normalizeSizeLimitCondition = (row) => {
@@ -134,13 +159,6 @@ export const normalizeSizeLimit = (row, warningsById = new Map()) => {
     return null;
   }
   const mode = String(row.mode || "common").trim() || "common";
-  const legacyText = String(row.warning_text || "").trim();
-  const warningTextMin = String(
-    row.warning_text_min ?? row.min_warning_text ?? ""
-  ).trim();
-  const warningTextMax = String(
-    row.warning_text_max ?? row.max_warning_text ?? ""
-  ).trim();
   const warningId = String(row.warning_content_id ?? row.warning_id ?? "").trim();
   const nestedWarning =
     normalizeSizeLimitWarning(row.warning) ||
@@ -149,10 +167,33 @@ export const normalizeSizeLimit = (row, warningsById = new Map()) => {
     normalizeSizeLimitWarning(row.warning_blocks) ||
     (warningId ? warningsById.get(warningId) : null) ||
     null;
-  const messageMin =
-    warningTextMin || legacyText || nestedWarning?.message || "";
-  const messageMax =
-    warningTextMax || legacyText || nestedWarning?.message || "";
+  const nestedMin = normalizeSizeLimitWarning(
+    row.warning_min ?? row.min_warning ?? row.warning_min_content
+  );
+  const nestedMax = normalizeSizeLimitWarning(
+    row.warning_max ?? row.max_warning ?? row.warning_max_content
+  );
+  const legacyText = String(row.warning_text || "").trim();
+  const messageMin = pickText(
+    row.min_warning_text,
+    row.warning_text_min,
+    row.warning?.message_min,
+    row.warning?.text_min,
+    nestedMin?.message,
+    nestedWarning?.message_min,
+    legacyText,
+    nestedWarning?.message
+  );
+  const messageMax = pickText(
+    row.max_warning_text,
+    row.warning_text_max,
+    row.warning?.message_max,
+    row.warning?.text_max,
+    nestedMax?.message,
+    nestedWarning?.message_max,
+    legacyText,
+    nestedWarning?.message
+  );
   const warning =
     messageMin || messageMax || nestedWarning
       ? {
