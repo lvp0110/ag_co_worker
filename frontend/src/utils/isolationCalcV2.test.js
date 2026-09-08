@@ -145,8 +145,8 @@ describe("isolationCalcV2", () => {
               min_value: 100,
               max_value: 50000,
               sort_order: 1,
-              warning_text_min: "Минимальная ШИРИНА конструкции 100 мм",
-              warning_text_max: "В конструкциях шире 15 м нужны швы",
+              min_warning_text: "Минимальная ШИРИНА конструкции 100 мм",
+              max_warning_text: "В конструкциях шире 15 м нужны швы",
               warning: {
                 title: "Введите правильную ширину",
               },
@@ -156,7 +156,7 @@ describe("isolationCalcV2", () => {
               mode: "parametric",
               max_value: 3000,
               sort_order: 2,
-              warning_text_max: "Максимальная ВЫСОТА указана в меню шага профиля",
+              max_warning_text: "Максимальная ВЫСОТА указана в меню шага профиля",
               conditions: [
                 { construction_system_param_id: 15, value_int: 600 },
               ],
@@ -197,6 +197,37 @@ describe("isolationCalcV2", () => {
       conditions: [{ construction_system_param_id: 15, value_int: 600 }],
       warning: {
         message_max: "Максимальная ВЫСОТА указана в меню шага профиля",
+      },
+    });
+  });
+
+  it("reads nested warning.message_min / message_max when flat fields are absent", () => {
+    const spec = parseCalcApiSpec({
+      paramsBody: {
+        data: {
+          size_limits: [
+            {
+              dimension: "len_x",
+              mode: "common",
+              min_value: 100,
+              max_value: 15000,
+              warning: {
+                title: "Введите правильную ширину",
+                message_min: "Минимальная ширина 100 мм",
+                message_max: "Текст из админки для максимума",
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(spec.sizeLimits[0]).toMatchObject({
+      warning_text_min: "Минимальная ширина 100 мм",
+      warning_text_max: "Текст из админки для максимума",
+      warning: {
+        title: "Введите правильную ширину",
+        message_min: "Минимальная ширина 100 мм",
+        message_max: "Текст из админки для максимума",
       },
     });
   });

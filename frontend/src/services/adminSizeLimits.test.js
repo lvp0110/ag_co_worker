@@ -48,15 +48,15 @@ describe("admin size limits", () => {
     });
   });
 
-  it("normalizes warning_text_min and warning_text_max from API", () => {
+  it("normalizes min_warning_text and max_warning_text from API", () => {
     const row = normalizeAdminSizeLimit({
       id: 1,
       dimension: "len_x",
       mode: "common",
       min_value: 100,
       max_value: 50000,
-      warning_text_min: "Минимальная ширина 100 мм",
-      warning_text_max: "В конструкциях шире 15 м нужны деформационные швы",
+      min_warning_text: "Минимальная ширина 100 мм",
+      max_warning_text: "В конструкциях шире 15 м нужны деформационные швы",
     });
     expect(row.warning_text_min).toBe("Минимальная ширина 100 мм");
     expect(row.warning_text_max).toBe(
@@ -64,7 +64,7 @@ describe("admin size limits", () => {
     );
   });
 
-  it("builds common upsert with warning_text_min and warning_text_max", () => {
+  it("builds common upsert with min_warning_text and max_warning_text", () => {
     expect(
       buildSizeLimitUpsertBody({
         dimension: "len_x",
@@ -81,8 +81,8 @@ describe("admin size limits", () => {
       mode: "common",
       min_value: 100,
       max_value: 50000,
-      warning_text_min: "Минимум",
-      warning_text_max: "Превышена допустимая ширина",
+      min_warning_text: "Минимум",
+      max_warning_text: "Превышена допустимая ширина",
       sort_order: 0,
       conditions: [],
     });
@@ -101,8 +101,8 @@ describe("admin size limits", () => {
       })
     ).toMatchObject({
       mode: "parametric",
-      warning_text_min: "Мин высота",
-      warning_text_max: "Превышена допустимая высота для шага 600 мм",
+      min_warning_text: "Мин высота",
+      max_warning_text: "Превышена допустимая высота для шага 600 мм",
       conditions: [{ construction_system_param_id: 42, value_int: 600 }],
     });
   });

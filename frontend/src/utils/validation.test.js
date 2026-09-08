@@ -121,4 +121,59 @@ describe("validateConstructionSizeLimits", () => {
     expect(getMaxLenZFromSizeLimits(sizeLimits, 600, params)).toBe("4.2");
     expect(getMaxLenZFromSizeLimits(sizeLimits, 400, params)).toBeNull();
   });
+
+  it("shows max_warning_text from API and does not invent a size fallback", () => {
+    const { sizeLimits } = specFromLimits([
+      {
+        dimension: "len_x",
+        mode: "common",
+        max_value: 15000,
+        max_warning_text:
+          "В конструкциях ШИРИНОЙ свыше 15 метров необходимы деформационные швы",
+      },
+    ]);
+    const html = validateConstructionSizeLimits(
+      { lenX: 16000, lenZ: 2000 },
+      sizeLimits,
+      {}
+    );
+    expect(html).toContain(
+      "В конструкциях ШИРИНОЙ свыше 15 метров необходимы деформационные швы"
+    );
+    expect(html).not.toContain("Максимальный размер конструкции");
+  });
+
+  it("uses admin HTML warning as modal content as-is", () => {
+    const { sizeLimits } = specFromLimits([
+      {
+        dimension: "len_x",
+        mode: "common",
+        max_value: 15000,
+        warning_text_max:
+          '<span class="p1">Введите правильную ширину</span> <br>Текст из админки',
+      },
+    ]);
+    expect(
+      validateConstructionSizeLimits({ lenX: 16000 }, sizeLimits, {})
+    ).toBe(
+      '<span class="p1">Введите правильную ширину</span> <br>Текст из админки'
+    );
+  });
+
+  it("does not generate «Максимальный размер конструкции N мм» without API text", () => {
+    const { sizeLimits } = specFromLimits([
+      {
+        dimension: "len_x",
+        mode: "common",
+        max_value: 15000,
+      },
+    ]);
+    const html = validateConstructionSizeLimits(
+      { lenX: 16000 },
+      sizeLimits,
+      {}
+    );
+    expect(html).not.toContain("Максимальный размер конструкции");
+    expect(html).not.toContain("15000");
+  });
 });

@@ -43,22 +43,21 @@ export const sizeLimitApplies = (limit, paramValues = {}, params = []) => {
   });
 };
 
+const looksLikeHtml = (value) => /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
+
+/** Текст модалки — min_warning_text / max_warning_text из calculation-params. */
 const formatSizeLimitMessage = (limit, kind) => {
-  const title =
-    limit?.warning?.title ||
-    (kind === "min" ? "Введите правильный размер" : "Внимание!");
-  const fallback =
+  const message = String(
     kind === "min"
-      ? `Минимальный размер конструкции ${limit?.min_value} мм`
-      : `Максимальный размер конструкции ${limit?.max_value} мм`;
-  const message =
-    (kind === "min"
-      ? limit?.warning_text_min || limit?.warning?.message_min
-      : limit?.warning_text_max || limit?.warning?.message_max) ||
-    limit?.warning?.message ||
-    fallback;
-  if (title) return `<span class="p1">${title}</span> <br>${message}`;
-  return message;
+      ? limit?.warning_text_min || limit?.warning?.message_min || ""
+      : limit?.warning_text_max || limit?.warning?.message_max || ""
+  ).trim();
+  if (message && looksLikeHtml(message)) return message;
+  const title = String(limit?.warning?.title || "").trim();
+  if (title && message) return `<span class="p1">${title}</span> <br>${message}`;
+  if (message) return message;
+  if (title) return `<span class="p1">${title}</span>`;
+  return `<span class="p1">Внимание!</span>`;
 };
 
 const toMm = (raw) => {
