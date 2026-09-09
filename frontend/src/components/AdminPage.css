@@ -449,6 +449,15 @@ textarea.admin-page__input {
   opacity: 1;
 }
 
+.admin-page__category-btn--action {
+  margin-left: auto;
+}
+
+.admin-page__category-btn--action:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .admin-page__table--selectable {
   pointer-events: auto;
   width: 100%;
