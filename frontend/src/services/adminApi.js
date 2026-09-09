@@ -20,12 +20,15 @@
  *   GET /api/v2/data/unmatched
  *     → UnmatchedMaterial[] { id, code, name, units, prices, created_at }
  *   DELETE /api/v2/data/unmatched/{code}
+ *   POST /api/v2/import/replay
+ *     → повторно обработать imported_materials без загрузки из 1С
  *   POST /admin/materials
  *     → body: AdminMaterialUpsert { ..., type_id }
  *   PUT /admin/materials/{code}
  *     → body: AdminMaterialUpsert { ..., type_id }
- *   DELETE /admin/materials/{code}?replacement_code=
- *     → если материал в конструкциях — обязателен replacement_code того же type
+ *   DELETE /admin/materials/{code}
+ *     → голый delete (FK assemblies/construction_materials); для замены в
+ *       составах см. replaceAdminMaterialInConstructions
  *   POST /admin/commerce/materials/{materialID}/prices
  *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
@@ -789,6 +792,20 @@ export const deleteUnmatchedMaterial = async (code) => {
 };
 
 /**
+ * POST /api/v2/import/replay — повторно обработать imported_materials без 1С.
+ */
+export const replayImportedMaterials = async () => {
+  const csrf = await getCsrfToken();
+  const headers = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  return request("/api/v2/import/replay", {
+    method: "POST",
+    headers,
+  });
+};
+
+/**
  * POST /admin/materials — создать материал.
  * @param {object} payload AdminMaterialUpsert
  */
@@ -822,24 +839,181 @@ export const updateAdminMaterial = async (code, payload) => {
 };
 
 /**
- * DELETE /admin/materials/{code} — удалить материал.
+ * DELETE /admin/materials/{code} — удалить материал (без reassign в составах).
  * @param {string} code
- * @param {{ replacementCode?: string }} [options] код замены того же type (нужен, если материал в конструкциях)
  */
-export const deleteAdminMaterial = async (code, options = {}) => {
+export const deleteAdminMaterial = async (code) => {
   const csrf = await getCsrfToken();
   const headers = {};
   if (csrf) headers["X-CSRF-Token"] = csrf;
 
-  const replacementCode = String(options.replacementCode || "").trim();
-  const qs = replacementCode
-    ? `?replacement_code=${encodeURIComponent(replacementCode)}`
-    : "";
-
-  return request(`/admin/materials/${encodeURIComponent(code)}${qs}`, {
+  return request(`/admin/materials/${encodeURIComponent(code)}`, {
     method: "DELETE",
     headers,
   });
+};
+
+const compositionRowMaterialId = (row) => {
+  const n = Number(row?.material_id ?? row?.material?.id);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+const compositionRowMatchesMaterial = (row, code, materialId) => {
+  const rowCode = getMaterialCode(row);
+  if (code && rowCode && rowCode === code) return true;
+  const rowId = compositionRowMaterialId(row);
+  return Boolean(materialId) && rowId === materialId;
+};
+
+const compositionReplacementGroupKey = (row) => {
+  if (row?.replacement_group == null || row.replacement_group === "") {
+    return "default";
+  }
+  const n = Number(row.replacement_group);
+  return Number.isFinite(n) ? `g:${n}` : `g:${String(row.replacement_group)}`;
+};
+
+const constructionMaterialReplacePayload = (row, nextMaterialId) => {
+  const replacementGroup =
+    row.replacement_group == null || row.replacement_group === ""
+      ? null
+      : Number(row.replacement_group);
+  const replacementTypeId = getReplacementMaterialTypeId(row);
+  return {
+    id: nextMaterialId,
+    weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
+    sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+    is_default: Boolean(row.is_default),
+    replacement_group: Number.isFinite(replacementGroup)
+      ? replacementGroup
+      : null,
+    replacement_material_type_id:
+      Number.isFinite(Number(replacementTypeId)) &&
+      Number(replacementTypeId) > 0
+        ? Number(replacementTypeId)
+        : null,
+    calculation_type_id: getCalculationTypeId(row),
+    calculation_note: String(row.calculation_note || ""),
+  };
+};
+
+/**
+ * Заменяет материал во всех конструкциях (без удаления из каталога).
+ * Через PUT/DELETE записей состава: /admin/constructions/{id}/materials|optional-materials.
+ * Если целевой материал уже есть в той же группе состава — исходная строка снимается.
+ *
+ * @param {string} fromCode
+ * @param {string} toCode
+ * @returns {Promise<{ fromCode: string, toCode: string, constructionsScanned: number, updated: number, removedDuplicates: number }>}
+ */
+export const replaceAdminMaterialInConstructions = async (fromCode, toCode) => {
+  const sourceCode = String(fromCode || "").trim();
+  const targetCode = String(toCode || "").trim();
+  if (!sourceCode || !targetCode) {
+    throw new Error("Нужны коды исходного и заменяющего материала.");
+  }
+  if (sourceCode === targetCode) {
+    throw new Error("Код замены должен отличаться от исходного.");
+  }
+
+  const [sourceMaterial, targetMaterial] = await Promise.all([
+    getAdminMaterialByCode(sourceCode),
+    getAdminMaterialByCode(targetCode),
+  ]);
+  const sourceId = Number(sourceMaterial?.id);
+  const targetId = Number(targetMaterial?.id);
+  if (!Number.isFinite(sourceId) || sourceId <= 0) {
+    throw new Error(`Материал «${sourceCode}» не найден.`);
+  }
+  if (!Number.isFinite(targetId) || targetId <= 0) {
+    throw new Error(`Материал «${targetCode}» не найден.`);
+  }
+
+  const constructions = await listAdminConstructions();
+  let constructionsScanned = 0;
+  let updated = 0;
+  let removedDuplicates = 0;
+
+  for (const construction of constructions) {
+    const constructionId = getConstructionId(construction);
+    if (constructionId == null) continue;
+
+    const detail = await getAdminConstructionById(constructionId);
+    if (!detail) continue;
+    constructionsScanned += 1;
+
+    const compositionRows = [
+      ...(detail.defaultMaterials || []),
+      ...(detail.replacementGroups || []).flatMap(
+        (group) => group.materials || []
+      ),
+    ];
+
+    /** @type {Map<string, number>} */
+    const targetItemByScope = new Map();
+    for (const row of compositionRows) {
+      if (!compositionRowMatchesMaterial(row, targetCode, targetId)) continue;
+      const itemId = Number(row.id);
+      if (!Number.isFinite(itemId) || itemId <= 0) continue;
+      targetItemByScope.set(compositionReplacementGroupKey(row), itemId);
+    }
+
+    for (const row of compositionRows) {
+      if (!compositionRowMatchesMaterial(row, sourceCode, sourceId)) continue;
+      const itemId = Number(row.id);
+      if (!Number.isFinite(itemId) || itemId <= 0) continue;
+
+      const scope = compositionReplacementGroupKey(row);
+      if (targetItemByScope.has(scope)) {
+        await deleteAdminConstructionMaterial(constructionId, itemId);
+        removedDuplicates += 1;
+        continue;
+      }
+
+      await updateAdminConstructionMaterial(
+        constructionId,
+        itemId,
+        constructionMaterialReplacePayload(row, targetId)
+      );
+      targetItemByScope.set(scope, itemId);
+      updated += 1;
+    }
+
+    const optionalRows = detail.optionalMaterials || [];
+    let optionalHasTarget = optionalRows.some((row) =>
+      compositionRowMatchesMaterial(row, targetCode, targetId)
+    );
+
+    for (const row of optionalRows) {
+      if (!compositionRowMatchesMaterial(row, sourceCode, sourceId)) continue;
+      const itemId = Number(row.id);
+      if (!Number.isFinite(itemId) || itemId <= 0) continue;
+
+      if (optionalHasTarget) {
+        await deleteAdminConstructionOptionalMaterial(constructionId, itemId);
+        removedDuplicates += 1;
+        continue;
+      }
+
+      await updateAdminConstructionOptionalMaterial(constructionId, itemId, {
+        id: targetId,
+        weight: Number(row.weight) > 0 ? Number(row.weight) : 1,
+        sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+        calculation_type_id: getCalculationTypeId(row),
+        calculation_note: String(row.calculation_note || ""),
+      });
+      optionalHasTarget = true;
+      updated += 1;
+    }
+  }
+
+  return {
+    fromCode: sourceCode,
+    toCode: targetCode,
+    constructionsScanned,
+    updated,
+    removedDuplicates,
+  };
 };
 
 const parseMaterialTypeId = (payload) => {
