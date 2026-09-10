@@ -164,6 +164,16 @@
   line-height: 1;
 }
 
+.admin-page__row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
 .admin-page__btn--danger {
   background: var(--admin-danger);
   color: #fff;
@@ -461,17 +471,29 @@ textarea.admin-page__input {
 .admin-page__table--selectable {
   pointer-events: auto;
   width: 100%;
+  max-width: 100%;
 }
 
 .admin-page__table--selectable th,
 .admin-page__table--selectable td {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   overflow-wrap: normal;
 }
 
 .admin-page__table--selectable .admin-page__col--grow {
   white-space: normal;
-  overflow-wrap: break-word;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+}
+
+.admin-page__table--selectable th:last-child,
+.admin-page__table--selectable td:last-child {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .admin-page__row--clickable {
@@ -803,6 +825,9 @@ textarea.admin-page__input {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   padding: 20px 22px;
   margin-bottom: 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-page__card-head {
@@ -860,11 +885,20 @@ textarea.admin-page__input {
 .admin-page__table-wrap {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   border: 1px solid var(--admin-border-strong);
   border-radius: 6px;
   background: var(--admin-surface);
+}
+
+.admin-page__table-wrap > .admin-page__table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .admin-page__meta-form {
@@ -1100,6 +1134,7 @@ textarea.admin-page__input {
 
 .admin-page__table {
   width: 100%;
+  max-width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
@@ -1113,6 +1148,7 @@ textarea.admin-page__input {
   border-bottom: 1px solid var(--admin-border);
   vertical-align: middle;
   white-space: normal;
+  overflow: hidden;
   overflow-wrap: break-word;
   word-break: normal;
   box-sizing: border-box;
@@ -1127,6 +1163,7 @@ textarea.admin-page__input {
 .admin-page__table--selectable th:last-child,
 .admin-page__table--selectable td:last-child {
   white-space: nowrap;
+  overflow: visible;
   overflow-wrap: normal;
 }
 
@@ -1163,10 +1200,11 @@ textarea.admin-page__input {
 }
 
 .admin-page__col--actions {
-  width: 3.25rem;
+  width: 4.75rem;
   padding-left: 8px;
   padding-right: 8px;
   white-space: nowrap;
+  overflow: visible;
   overflow-wrap: normal;
   text-align: right;
 }
@@ -1179,7 +1217,7 @@ textarea.admin-page__input {
 
 .admin-page__col--grow {
   width: auto;
-  min-width: 8rem;
+  min-width: 0;
 }
 
 .admin-page__table tbody tr:last-child td {
