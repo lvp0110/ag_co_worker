@@ -24,6 +24,7 @@ import {
   deleteAdminConstructionCalculationParam,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
+  deleteUnusedAdminMaterial,
   enrichCompositionFromMaterialsCatalog,
   expandMaterialPricesWithDerivedRegions,
   filterMaterialsByUsage,
@@ -1002,6 +1003,8 @@ function MaterialsListPanel() {
   const [replayingImport, setReplayingImport] = useState(false);
   const [replayImportError, setReplayImportError] = useState(null);
   const [replayImportSuccess, setReplayImportSuccess] = useState(null);
+  const [deletingCode, setDeletingCode] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
   const isCompare = usage === MATERIALS_COMPARE_MODE;
 
   useEffect(() => {
@@ -1065,6 +1068,8 @@ function MaterialsListPanel() {
     setPendingReplaceCode(null);
     setReplayImportError(null);
     setReplayImportSuccess(null);
+    setDeleteError(null);
+    setDeletingCode(null);
   }, [usage]);
 
   const catalogTypeOptions = materialTypes;
@@ -1159,6 +1164,7 @@ function MaterialsListPanel() {
     setPendingReplaceCode(null);
     setReplaceError(null);
     setReplaceSuccess(null);
+    setDeleteError(null);
     setSelectedCode((prev) => (prev === code ? null : code));
   };
 
@@ -1181,6 +1187,7 @@ function MaterialsListPanel() {
     setReplacingCode(code);
     setReplaceError(null);
     setReplaceSuccess(null);
+    setDeleteError(null);
     try {
       const result = await replaceAdminMaterialInConstructions(
         code,
@@ -1195,40 +1202,94 @@ function MaterialsListPanel() {
     }
   };
 
+  const handleDeleteMaterial = async (code) => {
+    const materialCode = String(code || "").trim();
+    if (!materialCode) return;
+    const label =
+      materialOptionLabel(
+        rows.find((row) => getMaterialCode(row) === materialCode) || {
+          code: materialCode,
+        }
+      ) || materialCode;
+    if (
+      !window.confirm(
+        `Удалить материал «${label}» из каталога?\nУдаление возможно только если он не используется в конструкциях.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingCode(materialCode);
+    setDeleteError(null);
+    setReplaceError(null);
+    setReplaceSuccess(null);
+    setPendingReplaceCode(null);
+    try {
+      await deleteUnusedAdminMaterial(materialCode);
+      setRows((prev) =>
+        prev.filter((row) => getMaterialCode(row) !== materialCode)
+      );
+      if (selectedCode === materialCode) setSelectedCode(null);
+      setUnmatchedReloadToken((t) => t + 1);
+    } catch (err) {
+      setDeleteError(formatRequestError(err));
+    } finally {
+      setDeletingCode(null);
+    }
+  };
+
   const materialColumns = useMemo(
     () => [
       ...MATERIAL_COLUMNS,
       {
         key: "actions",
         label: "",
+        className: "admin-page__col--actions",
         render: (row) => {
           const code = getMaterialCode(row);
           return (
-            <button
-              type="button"
-              className="admin-page__btn admin-page__btn--icon"
-              disabled={!code || replacingCode != null}
-              aria-label={
-                replacingCode === code
-                  ? `Замена ${code}`
-                  : `Заменить ${code || "материал"} в конструкциях`
-              }
-              title="Заменить в конструкциях"
-              onClick={(e) => {
-                e.stopPropagation();
-                setReplaceError(null);
-                setReplaceSuccess(null);
-                setSelectedCode(null);
-                setPendingReplaceCode(code);
-              }}
-            >
-              {replacingCode === code ? "…" : "⇄"}
-            </button>
+            <div className="admin-page__row-actions">
+              <button
+                type="button"
+                className="admin-page__btn admin-page__btn--icon"
+                disabled={!code || replacingCode != null || deletingCode != null}
+                aria-label={
+                  replacingCode === code
+                    ? `Замена ${code}`
+                    : `Заменить ${code || "материал"} в конструкциях`
+                }
+                title="Заменить в конструкциях"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReplaceError(null);
+                  setReplaceSuccess(null);
+                  setDeleteError(null);
+                  setSelectedCode(null);
+                  setPendingReplaceCode(code);
+                }}
+              >
+                {replacingCode === code ? "…" : "⇄"}
+              </button>
+              <DeleteIconButton
+                deleting={deletingCode != null && deletingCode === code}
+                disabled={!code || replacingCode != null || deletingCode != null}
+                label={code || "материал"}
+                onClick={() => {
+                  setDeleteError(null);
+                  setReplaceError(null);
+                  setReplaceSuccess(null);
+                  setPendingReplaceCode(null);
+                  handleDeleteMaterial(code);
+                }}
+              />
+            </div>
           );
         },
       },
     ],
-    [replacingCode]
+    // handleDeleteMaterial closes over rows/selectedCode; buttons only need busy flags.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [replacingCode, deletingCode]
   );
 
   const selectedLabel = selectedRow
@@ -1325,6 +1386,13 @@ function MaterialsListPanel() {
         <p className="admin-page__success" role="status">
           {replayImportSuccess}
         </p>
+      ) : null}
+
+      {isCompare ? null : deleteError ? (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Не удалось удалить</p>
+          <pre className="admin-page__error-body">{deleteError}</pre>
+        </div>
       ) : null}
 
       {isCompare ? null : pendingReplaceRow ? (
@@ -1475,6 +1543,15 @@ function MaterialsListPanel() {
                             }
                             setUnmatchedReloadToken((t) => t + 1);
                           }}
+                          onDeleted={(deletedCode) => {
+                            setRows((prev) =>
+                              prev.filter(
+                                (row) => getMaterialCode(row) !== deletedCode
+                              )
+                            );
+                            setSelectedCode(null);
+                            setUnmatchedReloadToken((t) => t + 1);
+                          }}
                         />
                       ) : null
                     }
@@ -1495,6 +1572,7 @@ function MaterialDetail({
   showBackLink = false,
   onCodeChanged,
   onSaved,
+  onDeleted,
   typeOptions: typeOptionsProp,
   catalogMaterials: catalogMaterialsProp,
 }) {
@@ -1503,6 +1581,7 @@ function MaterialDetail({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [replacing, setReplacing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [error, setError] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -1582,6 +1661,7 @@ function MaterialDetail({
       setSaveError(null);
       setSaveSuccess(null);
       setConfirmReplace(false);
+      setDeleting(false);
       try {
         const [data, regions] = await Promise.all([
           getAdminMaterialByCode(code),
@@ -1693,6 +1773,31 @@ function MaterialDetail({
       setSaveError(formatRequestError(err));
     } finally {
       setReplacing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!code || deleting) return;
+    const materialLabel = label || code;
+    if (
+      !window.confirm(
+        `Удалить материал «${materialLabel}» из каталога?\nУдаление возможно только если он не используется в конструкциях.`
+      )
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    setConfirmReplace(false);
+    try {
+      await deleteUnusedAdminMaterial(code);
+      onDeleted?.(code);
+    } catch (err) {
+      setSaveError(formatRequestError(err));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1988,14 +2093,14 @@ function MaterialDetail({
             <button
               type="submit"
               className="admin-page__btn admin-page__btn--inline"
-              disabled={saving || replacing || confirmReplace}
+              disabled={saving || replacing || deleting || confirmReplace}
             >
               {saving ? "Сохранение…" : "Сохранить"}
             </button>
             <button
               type="button"
               className="admin-page__btn admin-page__btn--inline"
-              disabled={saving || replacing || confirmReplace}
+              disabled={saving || replacing || deleting || confirmReplace}
               onClick={(e) => {
                 e.stopPropagation();
                 setSaveError(null);
@@ -2004,6 +2109,17 @@ function MaterialDetail({
               }}
             >
               Заменить в конструкциях
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline admin-page__btn--danger"
+              disabled={saving || replacing || deleting || confirmReplace}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete();
+              }}
+            >
+              {deleting ? "Удаление…" : "Удалить"}
             </button>
           </div>
 
@@ -5143,6 +5259,9 @@ export function AdminMaterialPage() {
             navigate(`/admin/materials/${encodeURIComponent(nextCode)}`, {
               replace: true,
             });
+          }}
+          onDeleted={() => {
+            navigate("/admin?list=materials", { replace: true });
           }}
         />
       </div>

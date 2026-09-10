@@ -27,8 +27,9 @@
  *   PUT /admin/materials/{code}
  *     → body: AdminMaterialUpsert { ..., type_id }
  *   DELETE /admin/materials/{code}
- *     → голый delete (FK assemblies/construction_materials); для замены в
- *       составах см. replaceAdminMaterialInConstructions
+ *     → удаление; на клиенте — только если нет ссылок в construction_materials
+ *       (см. deleteUnusedAdminMaterial). Для замены в составах —
+ *       replaceAdminMaterialInConstructions
  *   POST /admin/commerce/materials/{materialID}/prices
  *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
@@ -871,6 +872,98 @@ const compositionReplacementGroupKey = (row) => {
   }
   const n = Number(row.replacement_group);
   return Number.isFinite(n) ? `g:${n}` : `g:${String(row.replacement_group)}`;
+};
+
+/**
+ * Ищет вхождения материала в составах всех конструкций (default / замены / optional).
+ * @param {string} code
+ * @returns {Promise<{ code: string, materialId: number, usages: { constructionId: number|string, constructionCode: string, constructionName: string, slots: string[] }[] }>}
+ */
+export const findAdminMaterialConstructionUsages = async (code) => {
+  const sourceCode = String(code || "").trim();
+  if (!sourceCode) {
+    throw new Error("Код материала обязателен.");
+  }
+
+  const material = await getAdminMaterialByCode(sourceCode);
+  const materialId = Number(material?.id);
+  if (!Number.isFinite(materialId) || materialId <= 0) {
+    throw new Error(`Материал «${sourceCode}» не найден.`);
+  }
+
+  const constructions = await listAdminConstructions();
+  const usages = [];
+
+  for (const construction of constructions) {
+    const constructionId = getConstructionId(construction);
+    if (constructionId == null) continue;
+
+    const detail = await getAdminConstructionById(constructionId);
+    if (!detail) continue;
+
+    const slots = [];
+    const compositionRows = [
+      ...(detail.defaultMaterials || []),
+      ...(detail.replacementGroups || []).flatMap(
+        (group) => group.materials || []
+      ),
+    ];
+
+    for (const row of compositionRows) {
+      if (!compositionRowMatchesMaterial(row, sourceCode, materialId)) continue;
+      const scope = compositionReplacementGroupKey(row);
+      slots.push(scope === "default" ? "default" : `replacement:${scope}`);
+    }
+
+    for (const row of detail.optionalMaterials || []) {
+      if (!compositionRowMatchesMaterial(row, sourceCode, materialId)) continue;
+      slots.push("optional");
+    }
+
+    if (!slots.length) continue;
+
+    const constructionCode = String(
+      detail.detail?.code || construction.code || ""
+    ).trim();
+    const constructionName = String(
+      detail.detail?.name || construction.name || ""
+    ).trim();
+    usages.push({
+      constructionId,
+      constructionCode,
+      constructionName,
+      slots,
+    });
+  }
+
+  return { code: sourceCode, materialId, usages };
+};
+
+/**
+ * Удаляет материал, только если он не используется в составах конструкций.
+ * @param {string} code
+ */
+export const deleteUnusedAdminMaterial = async (code) => {
+  const sourceCode = String(code || "").trim();
+  if (!sourceCode) {
+    throw new Error("Код материала обязателен.");
+  }
+
+  const { usages } = await findAdminMaterialConstructionUsages(sourceCode);
+  if (usages.length) {
+    const sample = usages
+      .slice(0, 5)
+      .map((item) => item.constructionCode || `id ${item.constructionId}`)
+      .join(", ");
+    const more =
+      usages.length > 5 ? ` и ещё ${usages.length - 5}` : "";
+    throw new Error(
+      `Материал «${sourceCode}» используется в конструкциях (${usages.length}): ${sample}${more}. Сначала замените его в составах.`
+    );
+  }
+
+  await deleteAdminMaterial(sourceCode);
+  return { code: sourceCode };
 };
 
 const constructionMaterialReplacePayload = (row, nextMaterialId) => {
