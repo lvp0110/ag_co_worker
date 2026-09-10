@@ -29,6 +29,7 @@ import {
   expandMaterialPricesWithDerivedRegions,
   filterMaterialsByUsage,
   filterMaterialsByUsageSi,
+  filterMaterialsWithTextualCode,
   getAdminConstructionById,
   getAdminMaterialByCode,
   getCalculationTypeId,
@@ -39,6 +40,7 @@ import {
   getPriceRegionBaseId,
   getReplacementMaterialTypeId,
   isDirectPriceRegion,
+  isTextualMaterialCode,
   listAdminCommerceRegions,
   listAdminConstructionCalculationParams,
   listAdminConstructionCalculationTypes,
@@ -75,6 +77,7 @@ const MATERIAL_USAGE_FILTERS = [
 ];
 
 const MATERIALS_COMPARE_MODE = "compare";
+const MATERIALS_EXTRAS_MODE = "extras";
 
 const materialTypeOptionLabel = (type) => {
   if (!type) return "";
@@ -1006,6 +1009,7 @@ function MaterialsListPanel() {
   const [deletingCode, setDeletingCode] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const isCompare = usage === MATERIALS_COMPARE_MODE;
+  const isExtras = usage === MATERIALS_EXTRAS_MODE;
 
   useEffect(() => {
     let cancelled = false;
@@ -1122,10 +1126,15 @@ function MaterialsListPanel() {
     [addingUnmatchedCode]
   );
 
-  const usageRows = useMemo(
-    () => (isCompare ? [] : filterMaterialsByUsage(rows, usage)),
-    [rows, usage, isCompare]
-  );
+  const usageRows = useMemo(() => {
+    if (isCompare) return [];
+    if (isExtras) {
+      return filterMaterialsWithTextualCode(rows);
+    }
+    return filterMaterialsByUsage(rows, usage).filter(
+      (row) => !isTextualMaterialCode(row)
+    );
+  }, [rows, usage, isCompare, isExtras]);
 
   const filtered = useMemo(() => {
     if (isCompare) {
@@ -1303,7 +1312,11 @@ function MaterialsListPanel() {
     <section className="admin-page__card">
       <div className="admin-page__card-head">
         <h2 className="admin-page__card-title">
-          {isCompare ? "Несовпадения импорта" : "Материалы"}
+          {isCompare
+            ? "Несовпадения импорта"
+            : isExtras
+              ? "Допы"
+              : "Материалы"}
           <span className="admin-page__count">
             {listLoading
               ? "…"
@@ -1352,6 +1365,18 @@ function MaterialsListPanel() {
             </button>
           );
         })}
+        <button
+          type="button"
+          className={
+            isExtras
+              ? "admin-page__category-btn admin-page__category-btn--active"
+              : "admin-page__category-btn"
+          }
+          aria-pressed={isExtras}
+          onClick={() => setUsage(MATERIALS_EXTRAS_MODE)}
+        >
+          Допы
+        </button>
         <button
           type="button"
           className={
@@ -1531,15 +1556,21 @@ function MaterialsListPanel() {
                             setSelectedCode(nextCode);
                           }}
                           onSaved={(nextCode, meta) => {
-                            const nextUsage = String(meta?.usage || "").trim();
-                            if (
-                              nextUsage &&
-                              MATERIAL_USAGE_FILTERS.some(
-                                (item) => item.code === nextUsage
-                              ) &&
-                              nextUsage !== usage
-                            ) {
-                              setUsage(nextUsage);
+                            if (isTextualMaterialCode({ code: nextCode })) {
+                              setUsage(MATERIALS_EXTRAS_MODE);
+                            } else {
+                              const nextUsage = String(
+                                meta?.usage || ""
+                              ).trim();
+                              if (
+                                nextUsage &&
+                                MATERIAL_USAGE_FILTERS.some(
+                                  (item) => item.code === nextUsage
+                                ) &&
+                                nextUsage !== usage
+                              ) {
+                                setUsage(nextUsage);
+                              }
                             }
                             setUnmatchedReloadToken((t) => t + 1);
                           }}

@@ -2201,6 +2201,19 @@ export const filterMaterialsByUsage = (materials, usage) => {
 export const filterMaterialsByUsageSi = (materials) =>
   filterMaterialsByUsage(materials, "si");
 
+/** true, если в code есть буквы (текстовый артикул, не только цифры). */
+export const isTextualMaterialCode = (row) => {
+  const code = getMaterialCode(row) || String(row?.code ?? "").trim();
+  if (!code) return false;
+  return /[a-zA-Zа-яА-ЯёЁ]/.test(code);
+};
+
+/** Каталог materials с текстовыми артикулами (вкладка «Допы»). */
+export const filterMaterialsWithTextualCode = (materials) => {
+  if (!Array.isArray(materials)) return [];
+  return materials.filter((mat) => isTextualMaterialCode(mat));
+};
+
 /** Нормализует запись справочника GET /admin/images/types. */
 export const normalizeImageType = (row) => {
   if (!row || typeof row !== "object") return null;
