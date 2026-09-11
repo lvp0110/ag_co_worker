@@ -2865,6 +2865,9 @@ function ConstructionDetail({
   const [defaultAddArticle, setDefaultAddArticle] = useState("");
   const [defaultAddQuery, setDefaultAddQuery] = useState("");
   const [defaultAddCalcTypeId, setDefaultAddCalcTypeId] = useState("");
+  const [generalAddArticle, setGeneralAddArticle] = useState("");
+  const [generalAddQuery, setGeneralAddQuery] = useState("");
+  const [generalAddCalcTypeId, setGeneralAddCalcTypeId] = useState("");
   const [promoteItemId, setPromoteItemId] = useState("");
   const [promoteGroupId, setPromoteGroupId] = useState("");
   const [promoteTypeId, setPromoteTypeId] = useState("");
@@ -2873,12 +2876,14 @@ function ConstructionDetail({
   const [addError, setAddError] = useState(null);
   const [optionalAddError, setOptionalAddError] = useState(null);
   const [defaultAddError, setDefaultAddError] = useState(null);
+  const [generalAddError, setGeneralAddError] = useState(null);
   const [deletingMaterialId, setDeletingMaterialId] = useState(null);
   const [deletingOptionalId, setDeletingOptionalId] = useState(null);
   const [promoteError, setPromoteError] = useState(null);
   const [addingGroupKey, setAddingGroupKey] = useState(null);
   const [addingOptional, setAddingOptional] = useState(false);
   const [addingDefault, setAddingDefault] = useState(false);
+  const [addingGeneral, setAddingGeneral] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [savingCalcTypeKey, setSavingCalcTypeKey] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -2911,17 +2916,41 @@ function ConstructionDetail({
     [catalogMaterials]
   );
 
+  /** Каталог «Допы»: текстовые артикулы (как вкладка Материалы → Допы). */
+  const extrasCatalog = useMemo(
+    () => filterMaterialsWithTextualCode(catalogMaterials),
+    [catalogMaterials]
+  );
+
+  /** SI без текстовых кодов — для «Материалы по умолчанию». */
+  const siNumericCatalog = useMemo(
+    () => siCatalog.filter((mat) => !isTextualMaterialCode(mat)),
+    [siCatalog]
+  );
+
+  /** default_materials с числовым артикулом (звукоизоляция). */
+  const soundIsolationDefaults = useMemo(
+    () => defaultMaterials.filter((row) => !isTextualMaterialCode(row)),
+    [defaultMaterials]
+  );
+
+  /** default_materials с текстовым артикулом → «Общестроительные материалы». */
+  const generalConstructionMaterials = useMemo(
+    () => defaultMaterials.filter((row) => isTextualMaterialCode(row)),
+    [defaultMaterials]
+  );
+
   const defaultArticles = useMemo(() => {
     const set = new Set();
-    for (const row of defaultMaterials) {
+    for (const row of soundIsolationDefaults) {
       const article = String(row.code || row.material_code || "").trim();
       if (article) set.add(article);
     }
     return set;
-  }, [defaultMaterials]);
+  }, [soundIsolationDefaults]);
 
   const defaultCandidates = useMemo(() => {
-    return siCatalog
+    return siNumericCatalog
       .filter((mat) => {
         const article = String(mat.code || "").trim();
         if (!article) return false;
@@ -2930,15 +2959,36 @@ function ConstructionDetail({
       .filter((mat) =>
         matchesQuery(mat, defaultAddQuery.trim(), ["code", "name", "type"])
       );
-  }, [siCatalog, defaultArticles, defaultAddQuery]);
+  }, [siNumericCatalog, defaultArticles, defaultAddQuery]);
+
+  const generalArticles = useMemo(() => {
+    const set = new Set();
+    for (const row of generalConstructionMaterials) {
+      const article = String(row.code || row.material_code || "").trim();
+      if (article) set.add(article);
+    }
+    return set;
+  }, [generalConstructionMaterials]);
+
+  const generalCandidates = useMemo(() => {
+    return extrasCatalog
+      .filter((mat) => {
+        const article = String(mat.code || "").trim();
+        if (!article) return false;
+        return !generalArticles.has(article);
+      })
+      .filter((mat) =>
+        matchesQuery(mat, generalAddQuery.trim(), ["code", "name", "type"])
+      );
+  }, [extrasCatalog, generalArticles, generalAddQuery]);
 
   /** Материалы по умолчанию без группы — кандидаты в заменяемые позиции. */
   const promotableDefaults = useMemo(
     () =>
-      defaultMaterials.filter(
+      soundIsolationDefaults.filter(
         (row) => row.replacement_group == null || row.replacement_group === ""
       ),
-    [defaultMaterials]
+    [soundIsolationDefaults]
   );
 
   const replacementMaterialTypes = useMemo(
@@ -2961,7 +3011,7 @@ function ConstructionDetail({
       setOptionalMaterials((prev) => prev.map(patchRow));
       return;
     }
-    if (kind === "default") {
+    if (kind === "default" || kind === "general") {
       setDefaultMaterials((prev) => prev.map(patchRow));
       return;
     }
@@ -3017,7 +3067,9 @@ function ConstructionDetail({
         ? setOptionalAddError
         : kind === "replacement"
           ? setAddError
-          : setDefaultAddError;
+          : kind === "general"
+            ? setGeneralAddError
+            : setDefaultAddError;
     setErr(null);
     try {
       if (kind === "optional") {
@@ -3109,6 +3161,39 @@ function ConstructionDetail({
     [deletingMaterialId, calculationTypes, savingCalcTypeKey]
   );
 
+  const generalMaterialsColumns = useMemo(
+    () => [
+      ...COMPOSITION_COLUMNS,
+      {
+        key: "calculation_type",
+        label: "Тип расчёта",
+        className: "admin-page__col--calc",
+        render: (row) => renderCalcTypeSelect(row, "general"),
+      },
+      {
+        key: "actions",
+        label: "",
+        className: "admin-page__col--actions",
+        render: (row) => {
+          const itemId = Number(row.id);
+          const article = String(
+            row.code || row.material_code || itemId || ""
+          ).trim();
+          return (
+            <DeleteIconButton
+              deleting={deletingMaterialId === itemId}
+              disabled={!Number.isFinite(itemId) || itemId <= 0}
+              label={article}
+              onClick={() => handleDeleteCompositionMaterial(row, "general")}
+            />
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletingMaterialId, calculationTypes, savingCalcTypeKey]
+  );
+
   const optionalMaterialsColumns = useMemo(
     () => [
       ...COMPOSITION_COLUMNS,
@@ -3172,6 +3257,7 @@ function ConstructionDetail({
       setAddError(null);
       setOptionalAddError(null);
       setDefaultAddError(null);
+      setGeneralAddError(null);
       setPromoteError(null);
       try {
         const [data, catalog, types, constrTypes, allConstructions, calcTypes, regions] =
@@ -3247,6 +3333,9 @@ function ConstructionDetail({
         setDefaultAddArticle("");
         setDefaultAddQuery("");
         setDefaultAddCalcTypeId("");
+        setGeneralAddArticle("");
+        setGeneralAddQuery("");
+        setGeneralAddCalcTypeId("");
         setPromoteItemId("");
         setPromoteGroupId("");
         setPromoteTypeId("");
@@ -3277,6 +3366,9 @@ function ConstructionDetail({
           setDefaultAddArticle("");
           setDefaultAddQuery("");
           setDefaultAddCalcTypeId("");
+          setGeneralAddArticle("");
+          setGeneralAddQuery("");
+          setGeneralAddCalcTypeId("");
           setPromoteItemId("");
           setPromoteGroupId("");
           setPromoteTypeId("");
@@ -3524,7 +3616,7 @@ function ConstructionDetail({
       return;
     }
 
-    const catalogItem = siCatalog.find(
+    const catalogItem = siNumericCatalog.find(
       (m) => String(m.code || "").trim() === article
     );
     const materialId = Number(catalogItem?.id);
@@ -3561,10 +3653,58 @@ function ConstructionDetail({
     }
   };
 
+  const handleAddGeneralMaterial = async () => {
+    const article = String(generalAddArticle || "").trim();
+    if (!article) {
+      setGeneralAddError("Выберите материал из каталога «Допы» по артикулу.");
+      return;
+    }
+
+    const catalogItem = extrasCatalog.find(
+      (m) => String(m.code || "").trim() === article
+    );
+    const materialId = Number(catalogItem?.id);
+    if (!catalogItem || !Number.isFinite(materialId) || materialId <= 0) {
+      setGeneralAddError(
+        `Артикул «${article}» не найден в каталоге «Допы» (/admin/materials).`
+      );
+      return;
+    }
+
+    const maxSort = defaultMaterials.reduce(
+      (max, m) => Math.max(max, Number(m.sort_order) || 0),
+      0
+    );
+
+    setAddingGeneral(true);
+    setGeneralAddError(null);
+    try {
+      await addAdminConstructionMaterial(constructionId, {
+        id: materialId,
+        weight: 1,
+        sort_order: maxSort + 1,
+        is_default: true,
+        replacement_group: null,
+        replacement_material_type_id: null,
+        calculation_type_id: calcTypeIdPayload(generalAddCalcTypeId),
+        calculation_note: "",
+      });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setGeneralAddError(formatRequestError(err));
+    } finally {
+      setAddingGeneral(false);
+    }
+  };
+
   const handleDeleteCompositionMaterial = async (row, source = "default") => {
     const itemId = Number(row.id);
     const setErr =
-      source === "replacement" ? setAddError : setDefaultAddError;
+      source === "replacement"
+        ? setAddError
+        : source === "general"
+          ? setGeneralAddError
+          : setDefaultAddError;
     if (!Number.isFinite(itemId) || itemId <= 0) {
       setErr("У записи состава нет id — удалить нельзя.");
       return;
@@ -3573,7 +3713,9 @@ function ConstructionDetail({
     const article = String(row.code || row.material_code || itemId).trim();
     const isDefault = Boolean(row.is_default);
     let message = `Удалить материал «${article}» из материалов по умолчанию?`;
-    if (source === "replacement") {
+    if (source === "general") {
+      message = `Удалить «${article}» из общестроительных материалов?`;
+    } else if (source === "replacement") {
       message = isDefault
         ? `Удалить «${article}» из группы замены? Это default-вариант группы.`
         : `Удалить «${article}» из группы замены?`;
@@ -3894,7 +4036,7 @@ function ConstructionDetail({
 
           <AdminCollapsibleSection
             title="Материалы по умолчанию"
-            count={`${defaultMaterials.length} мат.`}
+            count={`${soundIsolationDefaults.length} мат.`}
           >
           {defaultAddError && (
             <div className="admin-page__error" role="alert">
@@ -3907,7 +4049,7 @@ function ConstructionDetail({
 
           <SimpleTable
             columns={defaultMaterialsColumns}
-            rows={defaultMaterials}
+            rows={soundIsolationDefaults}
             emptyText="Нет материалов по умолчанию."
           />
 
@@ -3917,7 +4059,7 @@ function ConstructionDetail({
               className="admin-page__search admin-page__search--inline"
               placeholder="Поиск по артикулу, названию…"
               value={defaultAddQuery}
-              disabled={addingDefault || !siCatalog.length}
+              disabled={addingDefault || !siNumericCatalog.length}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
@@ -3938,7 +4080,7 @@ function ConstructionDetail({
               aria-label="Добавить материал по умолчанию usage=si"
             >
               <option value="">
-                {!siCatalog.length
+                {!siNumericCatalog.length
                   ? "Нет материалов с usage=si"
                   : defaultCandidates.length
                     ? `Добавить из каталога… (${defaultCandidates.length})`
@@ -3972,6 +4114,90 @@ function ConstructionDetail({
               }}
             >
               {addingDefault ? "Добавление…" : "Добавить"}
+            </button>
+          </div>
+          </AdminCollapsibleSection>
+
+          <AdminCollapsibleSection
+            title="Общестроительные материалы"
+            count={`${generalConstructionMaterials.length} мат.`}
+          >
+          {generalAddError && (
+            <div className="admin-page__error" role="alert">
+              <p className="admin-page__error-title">
+                Ошибка общестроительных материалов
+              </p>
+              <pre className="admin-page__error-body">{generalAddError}</pre>
+            </div>
+          )}
+
+          <SimpleTable
+            columns={generalMaterialsColumns}
+            rows={generalConstructionMaterials}
+            emptyText="Нет общестроительных материалов."
+          />
+
+          <div className="admin-page__optional-add">
+            <input
+              type="search"
+              className="admin-page__search admin-page__search--inline"
+              placeholder="Поиск по артикулу, названию…"
+              value={generalAddQuery}
+              disabled={addingGeneral || !extrasCatalog.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setGeneralAddQuery(e.target.value);
+                setGeneralAddArticle("");
+              }}
+              aria-label="Поиск общестроительного материала из Допы"
+            />
+            <select
+              className="admin-page__select"
+              value={generalAddArticle}
+              disabled={addingGeneral || !generalCandidates.length}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                setGeneralAddArticle(e.target.value);
+              }}
+              aria-label="Добавить общестроительный материал из Допы"
+            >
+              <option value="">
+                {!extrasCatalog.length
+                  ? "Нет материалов в каталоге «Допы»"
+                  : generalCandidates.length
+                    ? `Добавить из Допы… (${generalCandidates.length})`
+                    : generalAddQuery.trim()
+                      ? "Ничего не найдено по запросу"
+                      : "Все подходящие уже в составе"}
+              </option>
+              {generalCandidates.map((mat) => {
+                const article = String(mat.code || "").trim();
+                return (
+                  <option key={article} value={article}>
+                    {materialOptionLabel(mat)}
+                  </option>
+                );
+              })}
+            </select>
+            <CalculationTypeSelect
+              value={generalAddCalcTypeId}
+              options={calculationTypes}
+              disabled={addingGeneral || !calculationTypes.length}
+              ariaLabel="Тип расчёта общестроительного материала"
+              onChange={setGeneralAddCalcTypeId}
+            />
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--inline"
+              disabled={addingGeneral || !generalAddArticle}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddGeneralMaterial();
+              }}
+            >
+              {addingGeneral ? "Добавление…" : "Добавить"}
             </button>
           </div>
           </AdminCollapsibleSection>
