@@ -621,3 +621,54 @@ describe("mapPublicConstructionToInfoRecord", () => {
     ]);
   });
 });
+
+describe("materialsFromPublicComposition", () => {
+  it("uses only default_materials (ignores mirrored group defaults and optionals)", () => {
+    expect(
+      materialsFromPublicComposition({
+        default_materials: [
+          {
+            id: 1,
+            is_default: true,
+            replacement_group: 1,
+            material: { code: "1088665", name: "Мембрана" },
+          },
+          {
+            id: 2,
+            is_default: true,
+            replacement_group: null,
+            material: { code: "1211.1001", name: "Профиль" },
+          },
+        ],
+        replacement_groups: [
+          {
+            group: 1,
+            materials: [
+              {
+                id: 1,
+                is_default: true,
+                material: { code: "1088665", name: "Мембрана" },
+              },
+              {
+                id: 9,
+                is_default: false,
+                material: { code: "1088663", name: "Альтернатива" },
+              },
+            ],
+          },
+        ],
+        optional_materials: [
+          { material: { code: "10300009", name: "Опциональный" } },
+        ],
+      })
+    ).toEqual([
+      { code: "1088665", name: "Мембрана", Code: "1088665", Name: "Мембрана" },
+      {
+        code: "1211.1001",
+        name: "Профиль",
+        Code: "1211.1001",
+        Name: "Профиль",
+      },
+    ]);
+  });
+});
