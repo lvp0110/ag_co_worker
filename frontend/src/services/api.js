@@ -264,6 +264,8 @@ export const getIsolationConstrMaterials = async (isolationConstrCode) => {
  *   3) LEGACY расчёт v1 (`getMaterialsListViaCalc`, типовые размеры);
  *   4) LEGACY `GET /api/v2/isolationConstructions/props/{code}`.
  *
+ * Шаг 1 берёт только `default_materials` (без optional и без повторного
+ * разбора групп замены — defaults из групп уже лежат в default_materials).
  * Шаги 2–4 живы только потому, что состав конструкций в БД ещё не заполнен
  * (`construction_materials` / `construction_optional_materials` пустые). Когда
  * заполнится — шаги 2–4 удалить, и отдельно решить судьбу колонки количества:

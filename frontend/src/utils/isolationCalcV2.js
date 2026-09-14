@@ -692,25 +692,16 @@ const materialRowFromCompositionItem = (row) => {
   return { code, name, Code: code, Name: name };
 };
 
-/** Плоский список материалов из composition публичной карточки. */
+/**
+ * Материалы по умолчанию для страницы «Инфо».
+ * Только `default_materials`: API уже включает туда defaults из групп замены,
+ * а повторный разбор `replacement_groups` / `optional_materials` давал дубли.
+ */
 export const materialsFromPublicComposition = (composition) => {
   const defaults = Array.isArray(composition?.default_materials)
     ? composition.default_materials
     : [];
-  const optionals = Array.isArray(composition?.optional_materials)
-    ? composition.optional_materials
-    : [];
-  const fromGroups = (Array.isArray(composition?.replacement_groups)
-    ? composition.replacement_groups
-    : []
-  ).flatMap((group) =>
-    (Array.isArray(group?.materials) ? group.materials : []).filter(
-      (item) => item?.is_default
-    )
-  );
-  return [...defaults, ...fromGroups, ...optionals]
-    .map(materialRowFromCompositionItem)
-    .filter(Boolean);
+  return defaults.map(materialRowFromCompositionItem).filter(Boolean);
 };
 
 /**
