@@ -509,6 +509,10 @@ textarea.admin-page__input {
   background: var(--admin-surface-hover);
 }
 
+.admin-page__cell--toggle {
+  cursor: pointer;
+}
+
 .admin-page__row--selected td {
   background: rgba(108, 171, 200, 0.22);
 }

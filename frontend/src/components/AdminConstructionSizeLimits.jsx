@@ -428,7 +428,7 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
         </div>
       )}
 
-      {loading ? (
+      {loading && !rows.length ? (
         <p className="admin-page__empty admin-page__empty--inline">
           Загрузка ограничений…
         </p>
@@ -455,7 +455,10 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
                           className="admin-page__collapsible-toggle"
                           aria-expanded={open}
                           aria-controls={panelId}
-                          onClick={() => toggleLimitOpen(row.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleLimitOpen(row.id);
+                          }}
                         >
                           <span
                             className={
@@ -478,6 +481,8 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
                       id={panelId}
                       className="admin-page__collapsible-body"
                       hidden={!open}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
                     >
                       {renderLimitFields(
                         draft,

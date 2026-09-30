@@ -2581,7 +2581,7 @@ function ConstructionCalcParamsPanel({ constructionId }) {
         </div>
       )}
 
-      {loading ? (
+      {loading && !rows.length ? (
         <p className="admin-page__empty admin-page__empty--inline">
           Загрузка параметров…
         </p>
@@ -2613,7 +2613,10 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                           className="admin-page__collapsible-toggle"
                           aria-expanded={open}
                           aria-controls={panelId}
-                          onClick={() => toggleParamOpen(row.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleParamOpen(row.id);
+                          }}
                         >
                           <span
                             className={
@@ -2635,6 +2638,8 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                       id={panelId}
                       className="admin-page__collapsible-body"
                       hidden={!open}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
                     >
                       <label className="admin-page__field admin-page__field--checkbox">
                         <span className="admin-page__field-label">
@@ -3858,14 +3863,16 @@ function ConstructionDetail({
         </div>
       )}
 
-      {loading ? (
-        <p className="admin-page__empty admin-page__empty--inline">
-          Загрузка карточки…
-        </p>
-      ) : !detail ? (
-        <p className="admin-page__empty admin-page__empty--inline">
-          Конструкция не найдена.
-        </p>
+      {!detail ? (
+        loading ? (
+          <p className="admin-page__empty admin-page__empty--inline">
+            Загрузка карточки…
+          </p>
+        ) : (
+          <p className="admin-page__empty admin-page__empty--inline">
+            Конструкция не найдена.
+          </p>
+        )
       ) : (
         <>
           <div className="admin-page__construction-top">
@@ -4588,18 +4595,23 @@ function ConstructionsListPanel() {
 
   const isSoundCategory = category === "sound";
 
+  const listRequestRef = useRef({ category, reloadToken });
+
   useEffect(() => {
     let cancelled = false;
+    const prev = listRequestRef.current;
+    const background =
+      prev.category === category && prev.reloadToken !== reloadToken;
+    listRequestRef.current = { category, reloadToken };
     (async () => {
-      setLoading(true);
+      if (!background) setLoading(true);
       setError(null);
-      setSelectedId(null);
       try {
         const data = await listAdminConstructions({ category });
         if (!cancelled) setRows(data);
       } catch (err) {
         if (!cancelled) {
-          setRows([]);
+          if (!background) setRows([]);
           setError(formatRequestError(err));
         }
       } finally {
@@ -4719,7 +4731,6 @@ function ConstructionsListPanel() {
       setRows((prev) =>
         prev.filter((item) => getConstructionId(item) !== id)
       );
-      setSelectedId((prev) => (prev === id ? null : prev));
       return;
     }
     setRows((prev) =>
@@ -4992,6 +5003,7 @@ function ConstructionsListPanel() {
                     columns={CONSTRUCTION_COLUMNS}
                     selected={selected}
                     onSelect={handleSelect}
+                    toggleClassName="admin-page__col--grow"
                     colSpan={CONSTRUCTION_COLUMNS.length}
                     detail={
                       selected ? (
@@ -5015,34 +5027,83 @@ function ConstructionsListPanel() {
   );
 }
 
-function FragmentRow({ row, columns, selected, onSelect, colSpan, detail }) {
+function classListHas(className, token) {
+  return String(className || "")
+    .split(/\s+/)
+    .includes(token);
+}
+
+function FragmentRow({
+  row,
+  columns,
+  selected,
+  onSelect,
+  colSpan,
+  detail,
+  toggleClassName,
+}) {
+  const toggleCellOnly = Boolean(toggleClassName);
+  const activate = () => onSelect(row);
+  const onToggleKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      activate();
+    }
+  };
+
   return (
     <>
       <tr
         className={
           selected
-            ? "admin-page__row admin-page__row--selected admin-page__row--clickable"
-            : "admin-page__row admin-page__row--clickable"
+            ? toggleCellOnly
+              ? "admin-page__row admin-page__row--selected"
+              : "admin-page__row admin-page__row--selected admin-page__row--clickable"
+            : toggleCellOnly
+              ? "admin-page__row"
+              : "admin-page__row admin-page__row--clickable"
         }
-        onClick={() => onSelect(row)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onSelect(row);
-          }
-        }}
-        tabIndex={0}
-        aria-expanded={selected}
+        onClick={toggleCellOnly ? undefined : activate}
+        onKeyDown={toggleCellOnly ? undefined : onToggleKeyDown}
+        tabIndex={toggleCellOnly ? undefined : 0}
+        aria-expanded={toggleCellOnly ? undefined : selected}
         aria-selected={selected}
       >
-        {columns.map((col) => (
-          <td key={col.key} className={col.className}>
-            {col.render ? col.render(row) : cell(row[col.key])}
-          </td>
-        ))}
+        {columns.map((col) => {
+          const isToggle =
+            toggleCellOnly && classListHas(col.className, toggleClassName);
+          return (
+            <td
+              key={col.key}
+              className={
+                isToggle
+                  ? `${col.className} admin-page__cell--toggle`.trim()
+                  : col.className
+              }
+              onClick={
+                isToggle
+                  ? (e) => {
+                      e.stopPropagation();
+                      activate();
+                    }
+                  : undefined
+              }
+              onKeyDown={isToggle ? onToggleKeyDown : undefined}
+              tabIndex={isToggle ? 0 : undefined}
+              role={isToggle ? "button" : undefined}
+              aria-expanded={isToggle ? selected : undefined}
+            >
+              {col.render ? col.render(row) : cell(row[col.key])}
+            </td>
+          );
+        })}
       </tr>
       {detail ? (
-        <tr className="admin-page__detail-row">
+        <tr
+          className="admin-page__detail-row"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <td colSpan={colSpan}>{detail}</td>
         </tr>
       ) : null}
