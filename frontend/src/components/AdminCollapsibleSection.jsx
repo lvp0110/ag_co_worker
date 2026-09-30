@@ -18,7 +18,10 @@ export default function AdminCollapsibleSection({
             className="admin-page__collapsible-toggle"
             aria-expanded={open}
             aria-controls={panelId}
-            onClick={() => setOpen((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
           >
             <span
               className={
@@ -38,6 +41,8 @@ export default function AdminCollapsibleSection({
         id={panelId}
         className="admin-page__collapsible-body"
         hidden={!open}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {children}
       </div>
