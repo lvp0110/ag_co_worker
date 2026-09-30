@@ -22,6 +22,7 @@ import {
   deleteAdminCommerceRegion,
   deleteAdminConstruction,
   deleteAdminConstructionCalculationParam,
+  duplicateAdminConstruction,
   deleteAdminConstructionMaterial,
   deleteAdminConstructionOptionalMaterial,
   deleteUnusedAdminMaterial,
@@ -686,6 +687,24 @@ function DeleteIconButton({ deleting, disabled, label, onClick }) {
       }}
     >
       {deleting ? "…" : "×"}
+    </button>
+  );
+}
+
+function DuplicateIconButton({ duplicating, disabled, label, onClick }) {
+  return (
+    <button
+      type="button"
+      className="admin-page__btn admin-page__btn--icon"
+      disabled={disabled || duplicating}
+      aria-label={duplicating ? `Дублирование ${label}` : `Дублировать ${label}`}
+      title="Дублировать"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
+    >
+      {duplicating ? "…" : "⧉"}
     </button>
   );
 }
@@ -2883,6 +2902,7 @@ function ConstructionDetail({
   const [defaultAddError, setDefaultAddError] = useState(null);
   const [generalAddError, setGeneralAddError] = useState(null);
   const [deletingMaterialId, setDeletingMaterialId] = useState(null);
+  const [duplicatingMaterialId, setDuplicatingMaterialId] = useState(null);
   const [deletingOptionalId, setDeletingOptionalId] = useState(null);
   const [promoteError, setPromoteError] = useState(null);
   const [addingGroupKey, setAddingGroupKey] = useState(null);
@@ -3145,25 +3165,42 @@ function ConstructionDetail({
       {
         key: "actions",
         label: "",
-        className: "admin-page__col--actions",
+        className: "admin-page__col--actions admin-page__col--actions-pair",
         render: (row) => {
           const itemId = Number(row.id);
+          const materialId = Number(row.material_id ?? row.material?.id);
           const article = String(
             row.code || row.material_code || itemId || ""
           ).trim();
+          const busy =
+            deletingMaterialId != null || duplicatingMaterialId != null;
           return (
-            <DeleteIconButton
-              deleting={deletingMaterialId === itemId}
-              disabled={!Number.isFinite(itemId) || itemId <= 0}
-              label={article}
-              onClick={() => handleDeleteCompositionMaterial(row, "default")}
-            />
+            <div className="admin-page__row-actions">
+              <DuplicateIconButton
+                duplicating={duplicatingMaterialId === itemId}
+                disabled={
+                  busy ||
+                  !Number.isFinite(itemId) ||
+                  itemId <= 0 ||
+                  !Number.isFinite(materialId) ||
+                  materialId <= 0
+                }
+                label={article}
+                onClick={() => handleDuplicateDefaultMaterial(row)}
+              />
+              <DeleteIconButton
+                deleting={deletingMaterialId === itemId}
+                disabled={busy || !Number.isFinite(itemId) || itemId <= 0}
+                label={article}
+                onClick={() => handleDeleteCompositionMaterial(row, "default")}
+              />
+            </div>
           );
         },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId, calculationTypes, savingCalcTypeKey]
+    [deletingMaterialId, duplicatingMaterialId, calculationTypes, savingCalcTypeKey, defaultMaterials]
   );
 
   const generalMaterialsColumns = useMemo(
@@ -3611,6 +3648,39 @@ function ConstructionDetail({
       setOptionalAddError(formatRequestError(err));
     } finally {
       setAddingOptional(false);
+    }
+  };
+
+  const handleDuplicateDefaultMaterial = async (row) => {
+    const materialId = Number(row.material_id ?? row.material?.id);
+    const itemId = Number(row.id);
+    if (!Number.isFinite(materialId) || materialId <= 0) {
+      setDefaultAddError("У записи состава нет material.id — дублировать нельзя.");
+      return;
+    }
+
+    const maxSort = defaultMaterials.reduce(
+      (max, m) => Math.max(max, Number(m.sort_order) || 0),
+      0
+    );
+
+    setDuplicatingMaterialId(itemId);
+    setDefaultAddError(null);
+    try {
+      await addAdminConstructionMaterial(
+        constructionId,
+        constructionMaterialUpsert(row, {
+          sort_order: maxSort + 1,
+          is_default: true,
+          replacement_group: null,
+          replacement_material_type_id: null,
+        })
+      );
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setDefaultAddError(formatRequestError(err));
+    } finally {
+      setDuplicatingMaterialId(null);
     }
   };
 
@@ -4592,6 +4662,9 @@ function ConstructionsListPanel() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [createSuccess, setCreateSuccess] = useState(null);
+  const [duplicatingId, setDuplicatingId] = useState(null);
+  const [duplicateError, setDuplicateError] = useState(null);
+  const [duplicateSuccess, setDuplicateSuccess] = useState(null);
 
   const isSoundCategory = category === "sound";
 
@@ -4661,6 +4734,8 @@ function ConstructionsListPanel() {
     setCreateName("");
     setCreateError(null);
     setCreateSuccess(null);
+    setDuplicateError(null);
+    setDuplicateSuccess(null);
   }, [category]);
 
   useEffect(() => {
@@ -4761,6 +4836,55 @@ function ConstructionsListPanel() {
     setRows((prev) => prev.filter((item) => getConstructionId(item) !== id));
     setSelectedId((prev) => (prev === id ? null : prev));
   };
+
+  const handleDuplicateConstruction = async (row) => {
+    const id = getConstructionId(row);
+    if (id == null || duplicatingId != null) return;
+    const sourceCode = String(row.code || id).trim();
+    setDuplicatingId(id);
+    setDuplicateError(null);
+    setDuplicateSuccess(null);
+    try {
+      const result = await duplicateAdminConstruction(id);
+      const warningText = (result.warnings || []).filter(Boolean).join("\n");
+      if (warningText) {
+        setDuplicateError(
+          `Копия «${result.code}» создана, но часть данных не перенеслась.\n${warningText}`
+        );
+      }
+      setDuplicateSuccess(
+        warningText
+          ? `Копия «${sourceCode}» сохранена как «${result.code}».`
+          : `Конструкция «${sourceCode}» скопирована как «${result.code}».`
+      );
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setDuplicateError(formatRequestError(err));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
+  const constructionColumns = [
+    ...CONSTRUCTION_COLUMNS,
+    {
+      key: "actions",
+      label: "",
+      className: "admin-page__col--actions",
+      render: (row) => {
+        const id = getConstructionId(row);
+        const code = String(row.code || id || "").trim();
+        return (
+          <DuplicateIconButton
+            duplicating={duplicatingId === id}
+            disabled={duplicatingId != null || id == null}
+            label={code}
+            onClick={() => handleDuplicateConstruction(row)}
+          />
+        );
+      },
+    },
+  ];
 
   const handleCreateConstruction = async (e) => {
     e.preventDefault();
@@ -4963,6 +5087,18 @@ function ConstructionsListPanel() {
         </form>
       )}
 
+      {duplicateError && (
+        <div className="admin-page__error" role="alert">
+          <p className="admin-page__error-title">Копирование конструкции</p>
+          <pre className="admin-page__error-body">{duplicateError}</pre>
+        </div>
+      )}
+      {duplicateSuccess && (
+        <p className="admin-page__success" role="status">
+          {duplicateSuccess}
+        </p>
+      )}
+
       {error && (
         <div className="admin-page__error" role="alert">
           <p className="admin-page__error-title">Не удалось загрузить список</p>
@@ -4985,7 +5121,7 @@ function ConstructionsListPanel() {
           <table className="admin-page__table admin-page__table--selectable">
             <thead>
               <tr>
-                {CONSTRUCTION_COLUMNS.map((col) => (
+                {constructionColumns.map((col) => (
                   <th key={col.key} className={col.className}>
                     {col.label}
                   </th>
@@ -5000,11 +5136,11 @@ function ConstructionsListPanel() {
                   <FragmentRow
                     key={id ?? idx}
                     row={row}
-                    columns={CONSTRUCTION_COLUMNS}
+                    columns={constructionColumns}
                     selected={selected}
                     onSelect={handleSelect}
                     toggleClassName="admin-page__col--grow"
-                    colSpan={CONSTRUCTION_COLUMNS.length}
+                    colSpan={constructionColumns.length}
                     detail={
                       selected ? (
                         <ConstructionDetail

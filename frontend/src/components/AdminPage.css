@@ -1213,6 +1213,12 @@ textarea.admin-page__input {
   text-align: right;
 }
 
+.admin-page__table th.admin-page__col--actions-pair,
+.admin-page__table td.admin-page__col--actions-pair {
+  width: 5.75rem;
+  overflow: visible;
+}
+
 .admin-page__col--controls {
   width: 9.75rem;
   white-space: nowrap;

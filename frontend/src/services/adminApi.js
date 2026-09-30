@@ -1973,8 +1973,169 @@ export const getAdminConstructionById = async (id) => {
   const detail = normalizeConstruction(constructionRaw);
   const { defaultMaterials, replacementGroups, optionalMaterials } =
     unwrapConstructionComposition(data);
+  const calculationParams = (
+    Array.isArray(data.calculation_params) ? data.calculation_params : []
+  )
+    .map(normalizeConstructionCalculationParam)
+    .filter(Boolean);
+  const sizeLimits = (Array.isArray(data.size_limits) ? data.size_limits : [])
+    .map(normalizeAdminSizeLimit)
+    .filter(Boolean);
 
-  return { detail, defaultMaterials, replacementGroups, optionalMaterials };
+  return {
+    detail,
+    defaultMaterials,
+    replacementGroups,
+    optionalMaterials,
+    calculationParams,
+    sizeLimits,
+  };
+};
+
+/**
+ * Шифр копии: исходный код плюс «_». Если такой уже есть — ещё одно подчёркивание.
+ * @param {string} code
+ * @param {string[]} [existingCodes]
+ */
+export const nextConstructionCopyCode = (code, existingCodes = []) => {
+  const base = String(code || "").trim();
+  if (!base) return "";
+  const taken = new Set(
+    existingCodes.map((item) => String(item || "").trim()).filter(Boolean)
+  );
+  let next = `${base}_`;
+  while (taken.has(next)) next += "_";
+  return next;
+};
+
+/** Строки состава без повторов: default и участники групп замены — одна запись. */
+export const collectCompositionCopyRows = ({
+  defaultMaterials = [],
+  replacementGroups = [],
+} = {}) => {
+  const seen = new Set();
+  const rows = [];
+  const push = (row) => {
+    if (!row || typeof row !== "object") return;
+    const id = Number(row.id);
+    if (Number.isFinite(id) && id > 0) {
+      const key = String(id);
+      if (seen.has(key)) return;
+      seen.add(key);
+    }
+    rows.push(row);
+  };
+  for (const row of defaultMaterials) push(row);
+  for (const group of replacementGroups) {
+    for (const row of group?.materials || []) push(row);
+  }
+  return rows;
+};
+
+/** Тело POST /admin/constructions/{id}/materials для копии строки состава. */
+export const compositionMaterialCopyPayload = (row) => {
+  const groupRaw = row?.replacement_group;
+  const group =
+    groupRaw == null || groupRaw === "" ? null : Number(groupRaw);
+  const hasGroup = Number.isFinite(group) && group > 0;
+  const typeId = Number(getReplacementMaterialTypeId(row));
+  return {
+    id: Number(row?.material_id ?? row?.material?.id),
+    weight: Number(row?.weight) > 0 ? Number(row.weight) : 1,
+    sort_order: Number(row?.sort_order) >= 0 ? Number(row.sort_order) : 0,
+    is_default: hasGroup ? Boolean(row?.is_default) : row?.is_default !== false,
+    replacement_group: hasGroup ? group : null,
+    replacement_material_type_id:
+      Number.isFinite(typeId) && typeId > 0 ? typeId : null,
+    calculation_type_id: getCalculationTypeId(row),
+    calculation_note: String(row?.calculation_note || ""),
+  };
+};
+
+/** Тело POST /admin/constructions/{id}/optional-materials. */
+export const optionalMaterialCopyPayload = (row) => ({
+  id: Number(row?.material_id ?? row?.material?.id),
+  weight: Number(row?.weight) > 0 ? Number(row.weight) : 1,
+  sort_order: Number(row?.sort_order) >= 0 ? Number(row.sort_order) : 0,
+  calculation_type_id: getCalculationTypeId(row),
+  calculation_note: String(row?.calculation_note || ""),
+});
+
+/** Тело POST /admin/constructions/{id}/calculation-params. */
+export const calculationParamCopyPayload = (row) => {
+  const valueType =
+    String(row?.value_type || CONSTRUCTION_PARAM_TYPE_INT).trim() ||
+    CONSTRUCTION_PARAM_TYPE_INT;
+  const isBool = valueType === CONSTRUCTION_PARAM_TYPE_BOOL;
+  const options = (Array.isArray(row?.options) ? row.options : [])
+    .map((opt, index) => {
+      const label = String(opt?.label || "").trim();
+      if (!label) return null;
+      const item = {
+        label,
+        sort_order: Number(opt.sort_order) >= 0 ? Number(opt.sort_order) : index,
+      };
+      if (isBool) item.value_bool = Boolean(opt.value_bool);
+      else item.value_int = Number(opt.value_int) || 0;
+      return item;
+    })
+    .filter(Boolean);
+  const body = {
+    param_id: Number(row?.param_id),
+    value_type: valueType,
+    is_required: row?.is_required !== false,
+    sort_order: Number(row?.sort_order) || 0,
+    options,
+  };
+  if (isBool) body.default_value_bool = Boolean(row?.default_value_bool);
+  else body.default_value_int = Number(row?.default_value_int) || 0;
+  return body;
+};
+
+/**
+ * id настройки параметра на исходной конструкции → id той же настройки на копии.
+ * Сопоставление по param_id справочника.
+ */
+export const mapCalculationParamConfigIds = (sourceParams, copiedParams) => {
+  const byParamId = new Map();
+  for (const row of copiedParams || []) {
+    const paramId = Number(row?.param_id);
+    const configId = Number(row?.id);
+    if (paramId > 0 && configId > 0) byParamId.set(paramId, configId);
+  }
+  const map = new Map();
+  for (const row of sourceParams || []) {
+    const sourceConfigId = Number(row?.id);
+    const next = byParamId.get(Number(row?.param_id));
+    if (sourceConfigId > 0 && next) map.set(sourceConfigId, next);
+  }
+  return map;
+};
+
+/**
+ * Тело POST size-limits. null, если условие ссылается на параметр, которого нет на копии.
+ */
+export const sizeLimitCopyPayload = (limit, configIdBySourceId) => {
+  const conditions = [];
+  for (const condition of limit?.conditions || []) {
+    const sourceId = Number(condition?.construction_system_param_id);
+    const mapped = configIdBySourceId?.get(sourceId);
+    if (!mapped) return null;
+    const body = { construction_system_param_id: mapped };
+    if (condition.value_int != null) body.value_int = condition.value_int;
+    if (condition.value_bool != null) body.value_bool = condition.value_bool;
+    conditions.push(body);
+  }
+  return {
+    dimension: limit.dimension,
+    mode: limit.mode,
+    min_value: limit.min_value,
+    max_value: limit.max_value,
+    sort_order: limit.sort_order,
+    min_warning_text: limit.warning_text_min || limit.min_warning_text || "",
+    max_warning_text: limit.warning_text_max || limit.max_warning_text || "",
+    conditions,
+  };
 };
 
 /**
@@ -2431,6 +2592,186 @@ export const createAdminEntityImage = async (payload) => {
     body: buildEntityImageUpsertBody(payload),
   });
   return normalizeEntityImage(unwrapData(body) ?? body);
+};
+
+const constructionCodeTaken = (err) =>
+  /already exists/i.test(String(err?.message || ""));
+
+const recordCopyFailure = async (warnings, label, fn) => {
+  try {
+    await fn();
+  } catch (err) {
+    warnings.push(`${label}: ${err?.message || err}`);
+  }
+};
+
+const findConstructionByCode = async (code, categoryCode) => {
+  const match = (rows) =>
+    (rows || []).find((row) => String(row?.code || "").trim() === code) || null;
+  const scoped = await listAdminConstructions(
+    categoryCode ? { category: categoryCode } : {}
+  );
+  const hit = match(scoped);
+  if (hit || !categoryCode) return hit;
+  return match(await listAdminConstructions());
+};
+
+/**
+ * Копия конструкции через существующие admin API.
+ * POST карточки (шифр + «_»), затем состав, параметры, лимиты и привязки картинок.
+ * @param {string|number} sourceId
+ * @returns {Promise<{ id: number, code: string, name: string, warnings: string[] }>}
+ */
+export const duplicateAdminConstruction = async (sourceId) => {
+  const source = await getAdminConstructionById(sourceId);
+  const detail = source?.detail;
+  if (!detail) throw new Error("Конструкция не найдена.");
+
+  const sourceCode = String(detail.code || "").trim();
+  const catalog = await listAdminConstructions();
+  let code = nextConstructionCopyCode(
+    sourceCode,
+    catalog.map((row) => row.code)
+  );
+  if (!code) throw new Error("У конструкции нет кода.");
+
+  const typeId = Number(detail.type_id ?? detail.type?.id);
+  const categoryId = Number(detail.category_id ?? detail.category?.id);
+  const regionIds = getConstructionPriceRegionIds(detail);
+  if (!Number.isFinite(typeId) || typeId <= 0) {
+    throw new Error("У конструкции нет type_id.");
+  }
+  if (!Number.isFinite(categoryId) || categoryId <= 0) {
+    throw new Error("У конструкции нет category_id.");
+  }
+  if (!regionIds.length) {
+    throw new Error("У конструкции нет регионов продаж.");
+  }
+
+  const card = {
+    name: String(detail.name || "").trim(),
+    type_id: typeId,
+    category_id: categoryId,
+    price_region_ids: regionIds,
+  };
+
+  let created = false;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await createAdminConstruction({ ...card, code });
+      created = true;
+      break;
+    } catch (err) {
+      if (!constructionCodeTaken(err) || attempt === 7) throw err;
+      code += "_";
+    }
+  }
+  if (!created) throw new Error("Не удалось создать копию конструкции.");
+
+  const categoryCode = String(
+    detail.category_code || detail.category?.code || ""
+  ).trim();
+  const createdRow = await findConstructionByCode(code, categoryCode);
+  const newId = getConstructionId(createdRow);
+  if (!Number.isFinite(Number(newId)) || Number(newId) <= 0) {
+    throw new Error(
+      `Конструкция «${code}» создана, но её id не найден в списке.`
+    );
+  }
+
+  const warnings = [];
+  for (const row of collectCompositionCopyRows(source)) {
+    const payload = compositionMaterialCopyPayload(row);
+    const label = String(row.code || row.material_code || payload.id || "материал");
+    if (!Number.isFinite(payload.id) || payload.id <= 0) {
+      warnings.push(`${label}: нет material.id`);
+      continue;
+    }
+    await recordCopyFailure(warnings, label, () =>
+      addAdminConstructionMaterial(newId, payload)
+    );
+  }
+
+  for (const row of source.optionalMaterials || []) {
+    const payload = optionalMaterialCopyPayload(row);
+    const label = String(
+      row.code || row.material_code || payload.id || "доп. материал"
+    );
+    if (!Number.isFinite(payload.id) || payload.id <= 0) {
+      warnings.push(`${label}: нет material.id`);
+      continue;
+    }
+    await recordCopyFailure(warnings, `доп. ${label}`, () =>
+      addAdminConstructionOptionalMaterial(newId, payload)
+    );
+  }
+
+  for (const param of source.calculationParams || []) {
+    const payload = calculationParamCopyPayload(param);
+    const label = String(param.code || param.name || payload.param_id || "параметр");
+    if (!Number.isFinite(payload.param_id) || payload.param_id <= 0) {
+      warnings.push(`${label}: нет param_id`);
+      continue;
+    }
+    await recordCopyFailure(warnings, label, () =>
+      addAdminConstructionCalculationParam(newId, payload)
+    );
+  }
+
+  let copiedParams = [];
+  await recordCopyFailure(warnings, "параметры копии", async () => {
+    copiedParams = await listAdminConstructionCalculationParams(newId);
+  });
+  const configIds = mapCalculationParamConfigIds(
+    source.calculationParams,
+    copiedParams
+  );
+  for (const limit of source.sizeLimits || []) {
+    const payload = sizeLimitCopyPayload(limit, configIds);
+    const label = `лимит ${limit.dimension || ""}`.trim();
+    if (!payload) {
+      warnings.push(`${label}: не удалось сопоставить параметр расчёта`);
+      continue;
+    }
+    await recordCopyFailure(warnings, label, () =>
+      createAdminConstructionSizeLimit(newId, payload)
+    );
+  }
+
+  let images = [];
+  await recordCopyFailure(warnings, "картинки", async () => {
+    images = await listAdminEntityImages(IMAGE_ENTITY_CONSTR, sourceId);
+  });
+  for (const image of images) {
+    const label = image.title || image.file_name || "картинка";
+    if (!image.file_name || !image.image_type_id) {
+      warnings.push(`${label}: нет файла или типа`);
+      continue;
+    }
+    await recordCopyFailure(warnings, label, () =>
+      createAdminEntityImage({
+        entity_type: IMAGE_ENTITY_CONSTR,
+        entity_id: newId,
+        image_type_id: image.image_type_id,
+        file_name: image.file_name,
+        mime_type: image.mime_type,
+        file_size: image.file_size,
+        width: image.width,
+        height: image.height,
+        title: image.title,
+        alt: image.alt,
+        sort_order: image.sort_order,
+        is_primary: image.is_primary,
+      })
+    );
+  }
+
+  return {
+    id: Number(newId),
+    code,
+    name: card.name,
+    warnings,
+  };
 };
 
 /**
