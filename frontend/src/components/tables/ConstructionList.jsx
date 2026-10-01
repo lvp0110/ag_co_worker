@@ -5,7 +5,11 @@ import {
   resolveConstructionTableText,
 } from "../../utils/itemsCatalog.js";
 import MaterialsList, { formatRub } from "./MaterialsList";
-import { constructionDisplayCipher } from "../../utils/constructionCiphers";
+import {
+  constructionDisplayCipher,
+  constructionPublicCipher,
+  constructionVisibleText,
+} from "../../utils/constructionCiphers";
 import "./ConstructionList.css";
 
 /** Строка итога «Стоимость конструкций» (калькулятор). */
@@ -90,8 +94,8 @@ function constructionDisplayTitle({ title }) {
 /** Колонка «название» в legacy-таблице: не дублируем шифр, если title = ag_id. */
 function constructionLegacyTitle(item, calcParams) {
   const { title } = resolveConstructionTableText(item, calcParams);
-  const display = constructionDisplayTitle({ title });
-  const code = String(item.ag_id ?? "").trim();
+  const display = constructionVisibleText(constructionDisplayTitle({ title }));
+  const code = constructionPublicCipher(item.ag_id);
   if (code !== "" && display === code) return "";
   return display;
 }
@@ -253,7 +257,7 @@ const ConstructionList = ({
             const baseTableId = index === 0 ? "table2" : `table2-${index}`;
             const legacyTitle =
               constructionLegacyTitle(constRItem, calcParams) ||
-              constRItem.ag_id ||
+              constructionPublicCipher(constRItem.ag_id) ||
               "";
             const materialsPanelId = `construction-legacy-materials-${constRItem.key_id}`;
             const replacementPanelProps = {
@@ -399,7 +403,7 @@ const ConstructionList = ({
             const baseTableId = index === 0 ? "table2" : `table2-${index}`;
             const legacyTitle =
               constructionLegacyTitle(constRItem, calcParams) ||
-              constRItem.ag_id ||
+              constructionPublicCipher(constRItem.ag_id) ||
               "";
             const titleExpandable =
               legacyTableWithMaterials && legacyTitle !== "";

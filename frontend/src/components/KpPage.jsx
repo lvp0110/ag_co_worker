@@ -7,6 +7,7 @@ import {
   loadKpDocumentIntoCalculator,
 } from "../services/offersApi.js";
 import { formatRequestError } from "../services/apiClient.js";
+import { constructionPublicCipher } from "../utils/constructionCiphers.js";
 import { useCalculatorStore } from "../stores/calculatorStore.js";
 import {
   getKpDocument,
@@ -318,7 +319,7 @@ const KpPage = () => {
                 <tbody>
                   {constructions.map((c, i) => (
                     <tr key={c.id || `${c.code}-${i}`}>
-                      <td>{c.code || "—"}</td>
+                      <td>{constructionPublicCipher(c.code) || "—"}</td>
                       <td>{c.len_x ?? "—"}</td>
                       <td>{c.len_y ?? "—"}</td>
                       <td>{c.len_z ?? "—"}</td>

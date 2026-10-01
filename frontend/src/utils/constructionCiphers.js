@@ -32,6 +32,26 @@ export const stripHangerSuffix = (code) => {
   return { base: s, hanger: "" };
 };
 
+/**
+ * Шифр для интерфейса вне админки.
+ * «_» и всё после него — служебный хвост (копия в админке) и на экран не попадает.
+ * Для расчёта и админки код остаётся полным.
+ */
+export const constructionPublicCipher = (code) => {
+  const value = String(code ?? "").trim();
+  if (!value) return "";
+  const cut = value.indexOf("_");
+  return cut === -1 ? value : value.slice(0, cut);
+};
+
+/** Если вся строка — шифр с хвостом после «_», на экране остаётся часть до «_». */
+export const constructionVisibleText = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text.includes("_")) return text;
+  if (!/^AG\.[A-Za-z0-9.]+(?:_.*)?$/.test(text)) return text;
+  return constructionPublicCipher(text);
+};
+
 /** Базовый шифр «Акуфлор S20» (template 2.1) — в колонке «шифр» показываем «—». */
 const AG_F_BASE_CIPHER = "AG.F";
 
@@ -90,7 +110,7 @@ export function constructionDisplayCipher({
     return "—";
   }
 
-  return id || "—";
+  return constructionPublicCipher(id) || "—";
 }
 
 /* ─── 2. Фолбэки legacy-пути v1 ────────────────────────────────────────── */

@@ -8,7 +8,10 @@ import {
   loadInfoPageMaterialsList,
 } from "../services/api";
 import { getResponsiveImageProps } from "../utils/responsiveImages";
-import { constructionDisplayCipher } from "../utils/constructionCiphers";
+import {
+  constructionDisplayCipher,
+  constructionVisibleText,
+} from "../utils/constructionCiphers";
 import "./Calculator.css";
 
 const ItemInfo = () => {
@@ -525,7 +528,11 @@ const ItemInfo = () => {
           {(data.Description || item.description || item.title) && (
             <div className="item-info-section">
               <h3>Название</h3>
-              <p>{data.Description || item.description || item.title}</p>
+              <p>
+                {constructionVisibleText(
+                  data.Description || item.description || item.title
+                )}
+              </p>
             </div>
           )}
 
