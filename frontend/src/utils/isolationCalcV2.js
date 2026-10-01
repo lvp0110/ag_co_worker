@@ -1,4 +1,5 @@
 import { resolveAdminPublicImageUrl } from "./adminImageSrc.js";
+import { constructionPublicCipher } from "./constructionCiphers.js";
 import {
   sectionIdFromCode,
   sectionIdFromTypeCode,
@@ -751,7 +752,7 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
     const base = pickItemsBaseMatch(itemsBase, agId, c_id);
     if (!c_id) c_id = base?.c_id ?? null;
     if (!agId || !c_id) continue;
-    const name = String(row?.name ?? "").trim() || agId;
+    const name = String(row?.name ?? "").trim() || constructionPublicCipher(agId);
     const images = Array.isArray(row.images) ? row.images : [];
     const physical = physicalParamsFromConstruction(row);
     items.push({

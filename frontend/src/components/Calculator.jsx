@@ -23,7 +23,10 @@ import {
   calculateAreaAndPerimeter,
   resolveDisplayCipher,
 } from "../utils/calculations";
-import { stripHangerSuffix } from "../utils/constructionCiphers";
+import {
+  constructionPublicCipher,
+  stripHangerSuffix,
+} from "../utils/constructionCiphers";
 import {
   getItemsAgIdKeyMap,
   itemsBaseTableName,
@@ -754,7 +757,7 @@ const Calculator = () => {
     const displayTitle = itemsBaseTableName({
       title: shortTitle,
       description: displayDescription,
-    }) || code;
+    }) || constructionPublicCipher(code);
 
     const newConstR = {
       ...constR,

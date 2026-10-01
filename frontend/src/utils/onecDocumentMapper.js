@@ -10,6 +10,7 @@ import {
   resolveItemsDisplayMeta,
 } from "./itemsCatalog.js";
 import { resolveDisplayCipher } from "./calculations.js";
+import { constructionPublicCipher } from "./constructionCiphers.js";
 import {
   sectionIdFromCode,
   sectionLabelFromSectionId,
@@ -97,13 +98,13 @@ export const mapOnecDocumentConstructionToCalc = (raw, index = 0) => {
     cipher: agId,
     sectionId,
   });
-  const shortTitle = meta.title || code;
+  const shortTitle = meta.title || constructionPublicCipher(code);
   const displayDescription = meta.description || shortTitle;
   const displayTitle =
     itemsBaseTableName({
       title: shortTitle,
       description: displayDescription,
-    }) || code;
+    }) || constructionPublicCipher(code);
   const sectionLabel = sectionLabelFromSectionId(sectionId);
 
   const key_id = Date.now() + index;

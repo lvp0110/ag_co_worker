@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getImageUrl } from "../services/api";
 import { getResponsiveImageProps } from "../utils/responsiveImages";
+import { constructionVisibleText } from "../utils/constructionCiphers";
 
 /**
  * Компонент списка элементов конструкции
@@ -92,7 +93,7 @@ const ItemsList = ({ items, onItemSelect, selectedItemId }) => {
               data-zips-ceiling={isZIPSCeiling ? "true" : undefined}
               style={buttonStyle}
             >
-              <p>{elem.title}</p>
+              <p>{constructionVisibleText(elem.title)}</p>
               {imageProps && imageProps.src && (
                 <img 
                   {...imageProps}
