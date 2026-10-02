@@ -281,7 +281,7 @@ function AdminConstructionRegionsField({
     <fieldset className="admin-page__field admin-page__field--regions">
       <legend className="admin-page__field-label">Регионы продаж</legend>
       <p className="admin-page__hint">
-        Нужен хотя бы один — иначе конструкция не появится в калькуляторе.
+        Без регионов конструкция не появится в калькуляторе.
       </p>
       <div className="admin-page__region-checks">
         <label className="admin-page__region-check admin-page__region-check--all">
@@ -3465,11 +3465,6 @@ function ConstructionDetail({
     }
 
     const regionIds = uniquePositiveIds(editRegionIds);
-    if (!regionIds.length) {
-      setMetaError("Выберите хотя бы один регион продаж.");
-      setMetaSuccess(null);
-      return;
-    }
 
     setSavingMeta(true);
     setMetaError(null);
@@ -4064,7 +4059,6 @@ function ConstructionDetail({
                   !editName.trim() ||
                   !editTypeId ||
                   !editCategoryId ||
-                  !editRegionIds.length ||
                   (editCode.trim() === String(detail.code ?? "").trim() &&
                     editName.trim() === String(detail.name ?? "").trim() &&
                     String(editTypeId) ===
@@ -4914,11 +4908,6 @@ function ConstructionsListPanel() {
     }
 
     const regionIds = uniquePositiveIds(createRegionIds);
-    if (!regionIds.length) {
-      setCreateError("Выберите хотя бы один регион продаж.");
-      setCreateSuccess(null);
-      return;
-    }
 
     setCreating(true);
     setCreateError(null);
@@ -5064,8 +5053,7 @@ function ConstructionsListPanel() {
                 !createCode.trim() ||
                 !createName.trim() ||
                 !createTypeId ||
-                !soundCategoryId ||
-                !createRegionIds.length
+                !soundCategoryId
               }
             >
               {creating ? "Создание…" : "Создать"}
