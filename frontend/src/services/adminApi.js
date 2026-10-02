@@ -2644,9 +2644,6 @@ export const duplicateAdminConstruction = async (sourceId) => {
   if (!Number.isFinite(categoryId) || categoryId <= 0) {
     throw new Error("У конструкции нет category_id.");
   }
-  if (!regionIds.length) {
-    throw new Error("У конструкции нет регионов продаж.");
-  }
 
   const card = {
     name: String(detail.name || "").trim(),
