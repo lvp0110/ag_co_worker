@@ -320,6 +320,54 @@ textarea.admin-page__input {
   padding: 0 8px;
 }
 
+.admin-page__weight-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.admin-page__weight-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-page__weight-field .admin-page__field-label {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.admin-page__input--weight {
+  flex: 0 0 auto;
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
+  height: 32px;
+  margin: 0;
+  padding: 0 8px;
+  line-height: 30px;
+  box-shadow: none;
+}
+
+.admin-page__table .admin-page__input--weight {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__table th.admin-page__col--weight,
+.admin-page__table td.admin-page__col--weight {
+  width: 6.5rem;
+  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: normal;
+}
+
 .admin-page__region-row--child td:first-child {
   padding-left: 28px;
 }

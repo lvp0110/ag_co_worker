@@ -636,7 +636,7 @@ const COMPOSITION_COLUMNS = [
   { key: "material_id", label: "ID мат.", className: "admin-page__col--compact" },
   { key: "code", label: "Код", className: "admin-page__col--code" },
   { key: "name", label: "Название", className: "admin-page__col--grow" },
-  { key: "weight", label: "Вес", className: "admin-page__col--compact" },
+  { key: "weight", label: "Вес", className: "admin-page__col--weight" },
 ];
 
 function CalculationTypeSelect({
@@ -672,6 +672,79 @@ const calcTypeIdPayload = (value) => {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+
+/** Вес строки состава. Пустое и неположительное значение уходит как 1. */
+const materialWeightPayload = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+};
+
+function MaterialWeightInput({ value, disabled, ariaLabel, onCommit }) {
+  const committed = materialWeightPayload(value);
+  const [draft, setDraft] = useState(String(committed));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(String(committed));
+  }, [committed]);
+
+  const commit = () => {
+    focused.current = false;
+    const next = materialWeightPayload(draft);
+    setDraft(String(next));
+    if (next !== committed) onCommit?.(next);
+  };
+
+  return (
+    <input
+      className="admin-page__input admin-page__input--weight"
+      type="number"
+      min="0"
+      step="any"
+      value={draft}
+      disabled={disabled}
+      aria-label={ariaLabel || "Вес"}
+      title="Вес"
+      onClick={(e) => e.stopPropagation()}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => {
+        e.stopPropagation();
+        setDraft(e.target.value);
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+function AddWeightField({ value, disabled, ariaLabel, onChange }) {
+  return (
+    <label className="admin-page__weight-field">
+      <span className="admin-page__field-label">Вес</span>
+      <input
+        className="admin-page__input admin-page__input--weight"
+        type="number"
+        min="0"
+        step="any"
+        value={value}
+        disabled={disabled}
+        aria-label={ariaLabel || "Вес"}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          e.stopPropagation();
+          onChange?.(e.target.value);
+        }}
+      />
+    </label>
+  );
+}
 
 function DeleteIconButton({ deleting, disabled, label, onClick }) {
   return (
@@ -2883,15 +2956,19 @@ function ConstructionDetail({
   const [addByGroup, setAddByGroup] = useState({});
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
   const [addCalcTypeByGroup, setAddCalcTypeByGroup] = useState({});
+  const [addWeightByGroup, setAddWeightByGroup] = useState({});
   const [optionalAddArticle, setOptionalAddArticle] = useState("");
   const [optionalAddQuery, setOptionalAddQuery] = useState("");
   const [optionalAddCalcTypeId, setOptionalAddCalcTypeId] = useState("");
+  const [optionalAddWeight, setOptionalAddWeight] = useState("1");
   const [defaultAddArticle, setDefaultAddArticle] = useState("");
   const [defaultAddQuery, setDefaultAddQuery] = useState("");
   const [defaultAddCalcTypeId, setDefaultAddCalcTypeId] = useState("");
+  const [defaultAddWeight, setDefaultAddWeight] = useState("1");
   const [generalAddArticle, setGeneralAddArticle] = useState("");
   const [generalAddQuery, setGeneralAddQuery] = useState("");
   const [generalAddCalcTypeId, setGeneralAddCalcTypeId] = useState("");
+  const [generalAddWeight, setGeneralAddWeight] = useState("1");
   const [promoteItemId, setPromoteItemId] = useState("");
   const [promoteGroupId, setPromoteGroupId] = useState("");
   const [promoteTypeId, setPromoteTypeId] = useState("");
@@ -2911,6 +2988,7 @@ function ConstructionDetail({
   const [addingGeneral, setAddingGeneral] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [savingCalcTypeKey, setSavingCalcTypeKey] = useState(null);
+  const [savingWeightKey, setSavingWeightKey] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
   const panelRef = useRef(null);
 
@@ -3153,9 +3231,95 @@ function ConstructionDetail({
     );
   };
 
+  const patchCompositionWeight = (kind, itemId, weight) => {
+    const patchRow = (row) =>
+      Number(row.id) !== itemId ? row : { ...row, weight };
+    if (kind === "optional") {
+      setOptionalMaterials((prev) => prev.map(patchRow));
+      return;
+    }
+    if (kind === "default" || kind === "general") {
+      setDefaultMaterials((prev) => prev.map(patchRow));
+      return;
+    }
+    setReplacementGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        materials: (group.materials || []).map(patchRow),
+      }))
+    );
+  };
+
+  const handleChangeWeight = async (row, kind, weight) => {
+    const itemId = Number(row.id);
+    const materialId = Number(row.material_id ?? row.material?.id);
+    if (!Number.isFinite(itemId) || itemId <= 0) return;
+    if (!Number.isFinite(materialId) || materialId <= 0) return;
+
+    const prevWeight = row.weight;
+    const key = `${kind}:${itemId}`;
+    patchCompositionWeight(kind, itemId, weight);
+    setSavingWeightKey(key);
+    const setErr =
+      kind === "optional"
+        ? setOptionalAddError
+        : kind === "replacement"
+          ? setAddError
+          : kind === "general"
+            ? setGeneralAddError
+            : setDefaultAddError;
+    setErr(null);
+    try {
+      if (kind === "optional") {
+        await updateAdminConstructionOptionalMaterial(constructionId, itemId, {
+          id: materialId,
+          weight,
+          sort_order: Number(row.sort_order) >= 0 ? Number(row.sort_order) : 0,
+          calculation_type_id: getCalculationTypeId(row),
+          calculation_note: String(row.calculation_note || ""),
+        });
+      } else {
+        await updateAdminConstructionMaterial(
+          constructionId,
+          itemId,
+          constructionMaterialUpsert(row, { weight })
+        );
+      }
+    } catch (err) {
+      patchCompositionWeight(kind, itemId, prevWeight);
+      setErr(formatRequestError(err));
+    } finally {
+      setSavingWeightKey(null);
+    }
+  };
+
+  const renderWeightInput = (row, kind) => {
+    const itemId = Number(row.id);
+    const article = String(row.code || row.material_code || itemId || "").trim();
+    return (
+      <MaterialWeightInput
+        value={row.weight}
+        disabled={
+          !Number.isFinite(itemId) ||
+          itemId <= 0 ||
+          savingWeightKey === `${kind}:${itemId}`
+        }
+        ariaLabel={`Вес ${article}`}
+        onCommit={(next) => handleChangeWeight(row, kind, next)}
+      />
+    );
+  };
+
+  const compositionColumnsFor = (kind) =>
+    COMPOSITION_COLUMNS.map((col) =>
+      col.key === "weight"
+        ? { ...col, render: (row) => renderWeightInput(row, kind) }
+        : col
+    );
+
   const defaultMaterialsColumns = useMemo(
     () => [
-      ...COMPOSITION_COLUMNS,
+      ...compositionColumnsFor("default"),
       {
         key: "calculation_type",
         label: "Тип расчёта",
@@ -3200,12 +3364,12 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId, duplicatingMaterialId, calculationTypes, savingCalcTypeKey, defaultMaterials]
+    [deletingMaterialId, duplicatingMaterialId, calculationTypes, savingCalcTypeKey, savingWeightKey, defaultMaterials]
   );
 
   const generalMaterialsColumns = useMemo(
     () => [
-      ...COMPOSITION_COLUMNS,
+      ...compositionColumnsFor("general"),
       {
         key: "calculation_type",
         label: "Тип расчёта",
@@ -3233,12 +3397,12 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId, calculationTypes, savingCalcTypeKey]
+    [deletingMaterialId, calculationTypes, savingCalcTypeKey, savingWeightKey]
   );
 
   const optionalMaterialsColumns = useMemo(
     () => [
-      ...COMPOSITION_COLUMNS,
+      ...compositionColumnsFor("optional"),
       {
         key: "calculation_type",
         label: "Тип расчёта",
@@ -3266,7 +3430,7 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingOptionalId, calculationTypes, savingCalcTypeKey]
+    [deletingOptionalId, calculationTypes, savingCalcTypeKey, savingWeightKey]
   );
 
   const optionalArticles = useMemo(() => {
@@ -3587,7 +3751,7 @@ function ConstructionDetail({
       // POST: id = materials.id для выбранного артикула
       await addAdminConstructionMaterial(constructionId, {
         id: materialId,
-        weight: Number(sample?.weight) > 0 ? Number(sample.weight) : 1,
+        weight: materialWeightPayload(addWeightByGroup[groupKey]),
         sort_order: maxSort + 1,
         is_default: false,
         replacement_group: Number(group.group),
@@ -3597,6 +3761,7 @@ function ConstructionDetail({
           getCalculationTypeId(sample),
         calculation_note: String(sample?.calculation_note || ""),
       });
+      setAddWeightByGroup((prev) => ({ ...prev, [groupKey]: "1" }));
       setReloadToken((n) => n + 1);
     } catch (err) {
       setAddError(formatRequestError(err));
@@ -3633,11 +3798,12 @@ function ConstructionDetail({
     try {
       await addAdminConstructionOptionalMaterial(constructionId, {
         id: materialId,
-        weight: 1,
+        weight: materialWeightPayload(optionalAddWeight),
         sort_order: maxSort + 1,
         calculation_type_id: calcTypeIdPayload(optionalAddCalcTypeId),
         calculation_note: "",
       });
+      setOptionalAddWeight("1");
       setReloadToken((n) => n + 1);
     } catch (err) {
       setOptionalAddError(formatRequestError(err));
@@ -3707,7 +3873,7 @@ function ConstructionDetail({
     try {
       await addAdminConstructionMaterial(constructionId, {
         id: materialId,
-        weight: 1,
+        weight: materialWeightPayload(defaultAddWeight),
         sort_order: maxSort + 1,
         is_default: true,
         replacement_group: null,
@@ -3715,6 +3881,7 @@ function ConstructionDetail({
         calculation_type_id: calcTypeIdPayload(defaultAddCalcTypeId),
         calculation_note: "",
       });
+      setDefaultAddWeight("1");
       setReloadToken((n) => n + 1);
     } catch (err) {
       setDefaultAddError(formatRequestError(err));
@@ -3751,7 +3918,7 @@ function ConstructionDetail({
     try {
       await addAdminConstructionMaterial(constructionId, {
         id: materialId,
-        weight: 1,
+        weight: materialWeightPayload(generalAddWeight),
         sort_order: maxSort + 1,
         is_default: true,
         replacement_group: null,
@@ -3759,6 +3926,7 @@ function ConstructionDetail({
         calculation_type_id: calcTypeIdPayload(generalAddCalcTypeId),
         calculation_note: "",
       });
+      setGeneralAddWeight("1");
       setReloadToken((n) => n + 1);
     } catch (err) {
       setGeneralAddError(formatRequestError(err));
@@ -4175,6 +4343,12 @@ function ConstructionDetail({
               ariaLabel="Тип расчёта нового материала по умолчанию"
               onChange={setDefaultAddCalcTypeId}
             />
+            <AddWeightField
+              value={defaultAddWeight}
+              disabled={addingDefault}
+              ariaLabel="Вес нового материала по умолчанию"
+              onChange={setDefaultAddWeight}
+            />
             <button
               type="button"
               className="admin-page__btn admin-page__btn--inline"
@@ -4258,6 +4432,12 @@ function ConstructionDetail({
               disabled={addingGeneral || !calculationTypes.length}
               ariaLabel="Тип расчёта общестроительного материала"
               onChange={setGeneralAddCalcTypeId}
+            />
+            <AddWeightField
+              value={generalAddWeight}
+              disabled={addingGeneral}
+              ariaLabel="Вес общестроительного материала"
+              onChange={setGeneralAddWeight}
             />
             <button
               type="button"
@@ -4441,6 +4621,12 @@ function ConstructionDetail({
                                   </span>
                                 ) : null}
                               </span>
+                              <label className="admin-page__weight-field admin-page__weight-field--inline">
+                                <span className="admin-page__field-label">
+                                  Вес
+                                </span>
+                                {renderWeightInput(mat, "replacement")}
+                              </label>
                               {renderCalcTypeSelect(mat, "replacement")}
                               <DeleteIconButton
                                 deleting={deletingMaterialId === itemId}
@@ -4524,6 +4710,17 @@ function ConstructionDetail({
                         ariaLabel={`Тип расчёта для группы ${typeLabel}`}
                         onChange={(next) =>
                           setAddCalcTypeByGroup((prev) => ({
+                            ...prev,
+                            [groupKey]: next,
+                          }))
+                        }
+                      />
+                      <AddWeightField
+                        value={addWeightByGroup[groupKey] ?? "1"}
+                        disabled={adding}
+                        ariaLabel={`Вес для группы ${typeLabel}`}
+                        onChange={(next) =>
+                          setAddWeightByGroup((prev) => ({
                             ...prev,
                             [groupKey]: next,
                           }))
@@ -4617,6 +4814,12 @@ function ConstructionDetail({
               disabled={addingOptional || !calculationTypes.length}
               ariaLabel="Тип расчёта дополнительного материала"
               onChange={setOptionalAddCalcTypeId}
+            />
+            <AddWeightField
+              value={optionalAddWeight}
+              disabled={addingOptional}
+              ariaLabel="Вес дополнительного материала"
+              onChange={setOptionalAddWeight}
             />
             <button
               type="button"
