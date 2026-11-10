@@ -1,39 +1,43 @@
 #!/usr/bin/env bash
-# Роллаут frontend (Docker): vite build происходит НА СЕРВЕРЕ внутри образа.
-#
-# Отличие от прежней схемы (локальный vite build + rsync dist): локальный Node
-# больше не нужен, а хостовой Node 18 (слишком старый для vite 7) не участвует —
-# сборка идёт в образе на Node 22.
-#
-# Использование:
-#   make deploy-frontend
-#   REV=<commit|tag> make deploy-frontend
 set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
 REV="${REV:-$DEPLOY_REV}"
-info "rollout frontend на $DEPLOY_HOST: rev=$REV"
+info "rollout ag_co_worker на $DEPLOY_HOST: rev=$REV"
 
-remote "git fetch '$DEPLOY_REMOTE' && git checkout '$REV' -- frontend/ docker-compose.prod.yml"
+remote "git fetch '$DEPLOY_REMOTE' && git checkout --detach '$REV'"
 
-info "build + up frontend (vite build внутри образа)"
-dc "up -d --build frontend"
+info "сохраняем предыдущий image для rollback"
+remote "docker image inspect ag_co_worker-frontend:latest >/dev/null 2>&1 && docker tag ag_co_worker-frontend:latest ag_co_worker-frontend:prev || true"
 
-# HEAD после path-checkout не двигается — фиксируем ревизию в маркер,
-# иначе deploy-status.sh покажет неправду.
-mark_deployed frontend "$REV"
+info "собираем новый frontend image"
+compose "build frontend"
 
-info "ждём health"
-wait_health 30 || warn "frontend не поднялся — смотрите make deploy-logs"
+info "перезапускаем frontend"
+compose "up -d --no-deps --force-recreate frontend"
 
-info "последние 40 строк логов frontend:"
-dc "logs --tail 40 --no-log-prefix frontend" || true
+info "ждём container health"
+healthy=0
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  container_state="$(remote "docker inspect --format='{{.State.Health.Status}}' ag_co_worker-frontend 2>/dev/null || true")"
+  if [ "$container_state" = "healthy" ]; then
+    healthy=1
+    break
+  fi
+  echo "  попытка $attempt/12: ${container_state:-container unavailable}"
+  sleep 5
+done
 
-if [ -n "$DEPLOY_DOMAIN" ]; then
-  info "smoke https://$DEPLOY_DOMAIN/"
-  curl -fsS -o /dev/null --retry 3 --retry-delay 2 -w "  HTTP %{http_code}\n" "https://$DEPLOY_DOMAIN/" \
-    && ok "фронт отвечает через домен" \
-    || warn "через домен не отвечает — проверьте nginx server block"
+if [ "$healthy" -ne 1 ]; then
+  warn "health-check не прошёл; возвращаем предыдущий image"
+  compose "logs --tail=100 frontend" || true
+  if remote "docker image inspect ag_co_worker-frontend:prev >/dev/null 2>&1"; then
+    remote "docker tag ag_co_worker-frontend:prev ag_co_worker-frontend:latest"
+    compose "up -d --no-deps --force-recreate --no-build frontend"
+    fail "новый frontend не прошёл health-check; выполнен rollback"
+  fi
+  fail "новый frontend не прошёл health-check; предыдущий image отсутствует"
 fi
 
-ok "frontend выкачен"
+compose "ps frontend"
+ok "ag_co_worker выкачен"

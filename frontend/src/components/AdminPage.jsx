@@ -685,7 +685,12 @@ function MaterialWeightInput({ value, disabled, ariaLabel, onCommit }) {
   const focused = useRef(false);
 
   useEffect(() => {
-    if (!focused.current) setDraft(String(committed));
+    if (!focused.current) {
+      // Внешнее значение может измениться после сохранения на сервере. Пока
+      // пользователь не редактирует поле, синхронизируем локальный draft.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraft(String(committed));
+    }
   }, [committed]);
 
   const commit = () => {

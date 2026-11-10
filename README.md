@@ -16,8 +16,8 @@
 | Расчёт | ConstrTodo v2: `POST /api/v2/calculations/isolation/by-construction`; параметры и состав конструкций — из БД, редактируются в админке |
 | КП | ConstrTodo → 1С: `/integration/onec/isolation/document(s)`; список и карточка читаются с сервера, `sessionStorage` — кэш на вкладку |
 | Админка | `/admin` — конструкции, материалы, регионы, картинки (`/admin/*`, `/content/*`, `/commerce/*`) |
-| Внешний сервис | `:3005` — всё перечисленное в одном сервисе (локально `localhost:3005`, staging `dev3.constrtodo.ru:3005`) |
-| Prod | host nginx + Docker Compose (`ag_co_worker-frontend`) → https://isocalc.constrtodo.ru |
+| Внешний сервис | `:3005` — всё перечисленное в одном сервисе (локально `localhost:3005`, production `prodbackend.mcs.local:3005`) |
+| Prod | gateway-01 + Docker Compose на prodfront (`ag_co_worker-frontend`) → https://isocalc.constrtodo.ru |
 
 ---
 
@@ -65,9 +65,9 @@ UPSTREAM_TARGET=https://dev3.constrtodo.ru:3005
 | `make clean` | Удалить `node_modules` и `dist` |
 | `make status` | Занятость портов 3005 / 5175 |
 
-Prod-деплой: `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`, `make deploy-nginx-sync`, `make deploy-nginx-reload`. Подробности — в [deploy/README.md](deploy/README.md).
+Prod-деплой: `make deploy-frontend`, `make deploy-bootstrap`, `make deploy-status`, `make deploy-logs`. Подробности — в [deploy/README.md](deploy/README.md).
 
-Кратко по прод-топологии: host nginx `:443` → `127.0.0.1:3007` (frontend-контейнер, `node server.js` на `:3008`) → ConstrTodo на `dev3.constrtodo.ru:3005`. Стек — [docker-compose.prod.yml](docker-compose.prod.yml), адрес upstream и секреты — `$DEPLOY_DIR/.env.prod`. Сборка (vite) идёт на сервере внутри образа на Node 22.
+Кратко по прод-топологии: gateway-01 `:443` → `prodfront.mcs.local:3011` (frontend-контейнер, `node server.js` на `:3008`) → ConstrTodo на `prodbackend.mcs.local:3005`. Стек — [docker-compose.prod.yml](docker-compose.prod.yml), адрес upstream и приватный bind — в `$DEPLOY_DIR/.env.prod`. Сборка Vite идёт на сервере внутри образа Node 22.
 
 ---
 
@@ -119,11 +119,10 @@ ag_co_worker/
 │   ├── vite.config.js              ← dev-прокси (тот же набор путей)
 │   ├── public/
 │   └── package.json
-├── deploy/                         ← SSH-деплой, nginx server block, bootstrap
-│   └── nginx/                      ← ag_co_worker.conf (шаблон server block)
+├── deploy/                         ← SSH-деплой через gateway-01 и bootstrap
 ├── docker-compose.prod.yml         ← прод-стек (один сервис: frontend)
 ├── Makefile                        ← команды разработки и деплоя
-└── .github/workflows/              ← GitHub Pages + prod-deploy
+└── .github/workflows/              ← production deploy
 ```
 
 ---
@@ -135,16 +134,17 @@ Dev (опционально, `frontend/.env.development.local` — шаблон 
 | Переменная | Дефолт | Описание |
 |------------|--------|----------|
 | `UPSTREAM_TARGET` | `http://localhost:3005` | Куда dev-прокси отправляет все API-пути |
-| `VITE_API_URL` | `""` (same-origin) | Override базы API. Нужен только для сборок без прокси (GitHub Pages) |
+| `VITE_API_URL` | `""` (same-origin) | Override базы API; в production не задаётся |
 
 Prod (`$DEPLOY_DIR/.env.prod` на сервере, шаблон — [deploy/.env.prod.example](deploy/.env.prod.example)):
 
 | Переменная | Описание |
 |------------|----------|
-| `UPSTREAM_URL` | База ConstrTodo, в проде `https://dev3.constrtodo.ru:3005`. Историческое имя `AUTH_SERVICE_URL` тоже читается |
-| `NODE_ENV` | `production` |
+| `FRONTEND_BIND_IP` | Приватный IP prodfront: `10.0.0.249` |
+| `FRONTEND_HOST_PORT` | Порт frontend для gateway-01: `3011` |
+| `UPSTREAM_URL` | Внутренний ConstrTodo: `http://prodbackend.mcs.local:3005` |
 
-`PORT` и `DIST_DIR` задаёт systemd-юнит.
+`PORT` и `DIST_DIR` задаёт Docker Compose.
 
 ---
 
@@ -166,17 +166,12 @@ make build
 
 ---
 
-## Деплой фронта на GitHub Pages
+## Production deploy
 
-Фронт автоматически собирается и публикуется через [.github/workflows/deploy.yml](.github/workflows/deploy.yml) на каждый push в `main` (`BASE_PATH=/ag_co_worker/`).
-
-Настройка один раз:
-1. В `Settings` → `Pages` → `Deploy from a branch` → ветка **gh-pages**, folder **/ (root)**.
-   Не выбирайте `main` — иначе вместо приложения откроется README.
-   Workflow при деплое сам пытается переключить источник на `gh-pages`.
-2. После первого успешного деплоя ссылка: https://lvp0110.github.io/ag_co_worker/
-
-**Важно:** на Pages прокси нет вообще. Сборка ходит на `https://dev3.constrtodo.ru:3005` напрямую (`VITE_API_URL`) и использует HashRouter (`/#/calc`). Значит запросы cross-origin, и чтобы работали логин, каталог, админка и КП, на стороне ConstrTodo нужны CORS для `https://lvp0110.github.io` и cookies `SameSite=None; Secure`. Полноценный контур — systemd, см. [deploy/README.md](deploy/README.md).
+После слияния инфраструктурной ветки в `main` workflow
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml) проверяет frontend,
+подключается к `prodfront` через `gateway-01`, выкладывает точный commit SHA и
+проверяет `https://isocalc.constrtodo.ru/__front_health`.
 
 ---
 

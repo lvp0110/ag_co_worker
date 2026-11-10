@@ -11,15 +11,14 @@
 #   frontend             → http://localhost:5175
 #   ConstrTodo (внешний) → http://localhost:3005
 #
-# Prod: Docker Compose на webtest, домен isocalc.constrtodo.ru. См. deploy/README.md.
+# Prod: Docker Compose на prodfront через gateway-01. См. deploy/README.md.
 
 SHELL := /bin/bash
 FRONTEND_DIR := frontend
 
 .PHONY: help setup install reinstall \
         frontend dev stop build clean status \
-        deploy-bootstrap deploy-frontend \
-        deploy-nginx-sync deploy-nginx-reload deploy-status deploy-logs
+        deploy-bootstrap deploy-frontend deploy-status deploy-logs
 
 .DEFAULT_GOAL := help
 
@@ -87,12 +86,6 @@ deploy-bootstrap: ## Первый запуск на сервере (git clone + 
 
 deploy-frontend: ## Роллаут frontend-контейнера (vite build внутри образа). REV=<commit>
 	bash deploy/deploy-frontend.sh
-
-deploy-nginx-sync: ## Залить nginx server block на сервер и валидировать nginx -t (нужен sudo)
-	bash deploy/deploy-nginx-sync.sh
-
-deploy-nginx-reload: ## nginx -t && systemctl reload nginx на сервере (нужен sudo)
-	bash deploy/deploy-nginx-reload.sh
 
 deploy-status: ## Состояние прод-стека (compose ps + health)
 	bash deploy/deploy-status.sh

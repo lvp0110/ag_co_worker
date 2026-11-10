@@ -2,7 +2,7 @@
 #
 # Multi-stage: vite собирается с dev-deps, в рантайме остаётся server.js,
 # dist и prod-deps (express + http-proxy-middleware).
-# Node 22 — vite 7 требует ≥20.19, а на хосте webtest стоит 18.
+# Node 22 — vite 7 требует ≥20.19.
 
 FROM node:22-alpine AS build
 WORKDIR /app

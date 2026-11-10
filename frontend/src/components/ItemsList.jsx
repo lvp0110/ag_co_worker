@@ -105,7 +105,7 @@ const ItemsList = ({ items, onItemSelect, selectedItemId }) => {
                   width="200"
                   height="200"
                   data-image-key={`${elem.id}-${imageSrc}`}
-                  onError={(e) => {
+                  onError={() => {
                     handleImageError(elem, imageSrc);
                   }}
                 />
