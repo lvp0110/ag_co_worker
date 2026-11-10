@@ -1,7 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import { copyFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
 
 /** Vite `base` — только pathname со слэшами. Полный URL ломает GH Pages (двойной путь). */
 function normalizeBase(raw) {
@@ -44,26 +42,7 @@ export default defineConfig(({ mode }) => {
 
   return {
   base: normalizeBase(process.env.BASE_PATH || env.BASE_PATH || '/'),
-  plugins: [
-    react(),
-    // SPA на GitHub Pages: 404.html + .nojekyll (иначе Jekyll может отдать README)
-    {
-      name: 'gh-pages-spa',
-      closeBundle() {
-        const distPath = join(process.cwd(), 'dist')
-        try {
-          copyFileSync(join(distPath, 'index.html'), join(distPath, '404.html'))
-        } catch (error) {
-          console.warn('Could not copy index.html to 404.html:', error.message)
-        }
-        try {
-          writeFileSync(join(distPath, '.nojekyll'), '')
-        } catch (error) {
-          console.warn('Could not write .nojekyll:', error.message)
-        }
-      },
-    },
-  ],
+  plugins: [react()],
   server: {
     host: true,
     port: 5175,

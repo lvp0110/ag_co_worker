@@ -1,13 +1,13 @@
-# Прод-стек ag_co_worker на webtest (51.250.51.86), домен isocalc.constrtodo.ru.
+# Production frontend на prodfront, домен isocalc.constrtodo.ru.
 #
-#   Интернет :443 → host nginx → 127.0.0.1:3007 → [frontend]
+#   Интернет :443 → gateway-01 → 10.0.0.249:3011 → [frontend]
 #                                                      ↓
 #                                    ConstrTodo: auth/calc/админ-API/1С
-#                                    (dev3.constrtodo.ru:3005)
+#                                    (prodbackend.mcs.local:3005)
 #
 # В стеке один сервис: своего backend у проекта нет, frontend отдаёт статику и
-# проксирует API в ConstrTodo. Публикуется только на loopback — TLS у хостового
-# nginx.
+# проксирует API в ConstrTodo. Публикуется только на приватном интерфейсе — TLS
+# завершается на gateway-01.
 #
 # Секреты и внешние URL — в .env.prod рядом с этим файлом (chmod 600, не в git).
 # Запуск:  docker compose -f docker-compose.prod.yml up -d --build
@@ -19,24 +19,22 @@ services:
     image: ag_co_worker-frontend:latest
     container_name: ag_co_worker-frontend
     restart: unless-stopped
-    env_file:
-      # Нужен UPSTREAM_URL (историческое имя AUTH_SERVICE_URL тоже читается).
-      # PORT из .env.prod перебивается ниже — environment приоритетнее env_file.
-      - .env.prod
     environment:
       NODE_ENV: production
       PORT: "3008"
       DIST_DIR: /app/dist
+      UPSTREAM_URL: ${UPSTREAM_URL:?UPSTREAM_URL must be set in .env.prod}
+      PAGES_CORS_ORIGINS: ${PAGES_CORS_ORIGINS:-}
     ports:
-      # Только loopback: снаружи ходит host nginx.
-      - "127.0.0.1:3007:3008"
+      # Только приватный интерфейс prodfront; снаружи ходит gateway-01.
+      - "${FRONTEND_BIND_IP:?FRONTEND_BIND_IP must be set in .env.prod}:${FRONTEND_HOST_PORT:-3011}:3008"
     healthcheck:
       test:
         - CMD
         - node
         - -e
         - "fetch('http://127.0.0.1:3008/__front_health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 5s

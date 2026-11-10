@@ -1,7 +1,7 @@
 /**
- * Prod-сервер фронта (systemd: ag-co-worker-frontend).
+ * Production Node-сервер frontend-контейнера.
  *
- * TLS и маршрутизация по домену — на хостовом nginx → 127.0.0.1:PORT.
+ * TLS и маршрутизация по домену — на gateway-01 → приватный адрес prodfront.
  * Этот процесс — весь серверный слой проекта:
  *   1) отдаёт статику из DIST_DIR (vite build);
  *   2) проксирует всё API в ConstrTodo (UPSTREAM_URL): /login, /auth/*,
@@ -30,7 +30,7 @@ const UPSTREAM_URL =
 const DIST_DIR = process.env.DIST_DIR || "/app/dist";
 const INDEX_HTML = path.join(DIST_DIR, "index.html");
 const PAGES_ORIGINS = new Set(
-  String(process.env.PAGES_CORS_ORIGINS || "https://lvp0110.github.io")
+  String(process.env.PAGES_CORS_ORIGINS || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
@@ -44,8 +44,8 @@ if (!fs.existsSync(INDEX_HTML)) {
 
 const app = express();
 
-// Трасту X-Forwarded-* только от loopback (host nginx приходит с 127.0.0.1).
-app.set("trust proxy", "loopback");
+// Порт опубликован только в приватной сети, единственный внешний hop — gateway-01.
+app.set("trust proxy", 1);
 
 const isPagesOrigin = (req) => PAGES_ORIGINS.has(String(req.headers.origin || ""));
 
