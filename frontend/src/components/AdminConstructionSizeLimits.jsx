@@ -433,7 +433,9 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
           Загрузка ограничений…
         </p>
       ) : (
-        <>
+        <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           {rows.length ? (
             <div className="admin-page__replacements">
               {rows.map((row) => {
@@ -519,13 +521,15 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
               К конструкции ещё не привязано ни одно ограничение размеров.
             </p>
           )}
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <form
             className="admin-page__create-form"
             onSubmit={handleAdd}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="admin-page__create-title">Добавить ограничение</h3>
             <div className="admin-page__create-fields admin-page__create-fields--wide">
               {renderLimitFields(
                 addDraft,
@@ -549,7 +553,8 @@ export default function AdminConstructionSizeLimits({ constructionId }) {
               </div>
             )}
           </form>
-        </>
+          </div>
+        </div>
       )}
     </AdminCollapsibleSection>
   );

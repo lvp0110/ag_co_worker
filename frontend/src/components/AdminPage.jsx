@@ -634,7 +634,6 @@ function UnmatchedAddForm({
 const COMPOSITION_COLUMNS = [
   { key: "sort_order", label: "№", className: "admin-page__col--num" },
   { key: "material_id", label: "ID мат.", className: "admin-page__col--compact" },
-  { key: "code", label: "Код", className: "admin-page__col--code" },
   { key: "name", label: "Название", className: "admin-page__col--grow" },
   { key: "weight", label: "Вес", className: "admin-page__col--weight" },
 ];
@@ -953,6 +952,37 @@ function materialOptionLabel(mat) {
   const name = mat.name || mat.material_name || "";
   if (code && name) return `${code} — ${name}`;
   return code || name || `ID ${mat.material_id ?? mat.id ?? "?"}`;
+}
+
+function CatalogPickList({ items, emptyText, disabled, onPick, ariaLabel }) {
+  if (!items.length) {
+    return (
+      <p className="admin-page__empty admin-page__empty--inline">{emptyText}</p>
+    );
+  }
+
+  return (
+    <ul className="admin-page__catalog-pick" aria-label={ariaLabel}>
+      {items.map((mat) => {
+        const article = String(mat.code || "").trim();
+        return (
+          <li key={article}>
+            <button
+              type="button"
+              className="admin-page__catalog-pick-item"
+              disabled={disabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick?.(article);
+              }}
+            >
+              {materialOptionLabel(mat)}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function groupTypeLabel(group) {
@@ -2371,7 +2401,13 @@ const constructionParamOptionLabel = (param) => {
   return name || code || `ID ${param?.id ?? "?"}`;
 };
 
-function CalcParamOptionRows({ valueType, options, disabled, onChange }) {
+function CalcParamOptionRows({
+  valueType,
+  options,
+  disabled,
+  onChange,
+  showAdd = true,
+}) {
   const isBool = valueType === CONSTRUCTION_PARAM_TYPE_BOOL;
   const updateAt = (index, patch) => {
     onChange(
@@ -2423,19 +2459,21 @@ function CalcParamOptionRows({ valueType, options, disabled, onChange }) {
           />
         </div>
       ))}
-      <button
-        type="button"
-        className="admin-page__btn admin-page__btn--inline"
-        disabled={disabled}
-        onClick={() =>
-          onChange([
-            ...options,
-            newCalcParamOption(valueType, options.length),
-          ])
-        }
-      >
-        Добавить вариант
-      </button>
+      {showAdd ? (
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--inline"
+          disabled={disabled}
+          onClick={() =>
+            onChange([
+              ...options,
+              newCalcParamOption(valueType, options.length),
+            ])
+          }
+        >
+          Добавить вариант
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -2683,7 +2721,9 @@ function ConstructionCalcParamsPanel({ constructionId }) {
           Загрузка параметров…
         </p>
       ) : (
-        <>
+        <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           {rows.length ? (
             <div className="admin-page__replacements">
               {rows.map((row) => {
@@ -2794,6 +2834,7 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                             valueType={row.value_type}
                             options={draft.options || []}
                             disabled={busy}
+                            showAdd={false}
                             onChange={(next) =>
                               patchDraft(row.id, { options: next })
                             }
@@ -2801,6 +2842,26 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                         </>
                       )}
                       <div className="admin-page__meta-actions">
+                        {isBool ? null : (
+                          <button
+                            type="button"
+                            className="admin-page__btn admin-page__btn--inline"
+                            disabled={busy}
+                            onClick={() =>
+                              patchDraft(row.id, {
+                                options: [
+                                  ...(draft.options || []),
+                                  newCalcParamOption(
+                                    row.value_type,
+                                    (draft.options || []).length
+                                  ),
+                                ],
+                              })
+                            }
+                          >
+                            Добавить вариант
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="admin-page__btn admin-page__btn--inline"
@@ -2826,13 +2887,15 @@ function ConstructionCalcParamsPanel({ constructionId }) {
               К конструкции ещё не привязан ни один параметр.
             </p>
           )}
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <form
             className="admin-page__create-form"
             onSubmit={handleAdd}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="admin-page__create-title">Добавить параметр</h3>
             <div className="admin-page__create-fields admin-page__create-fields--wide">
               <label className="admin-page__field">
                 <span className="admin-page__field-label">Параметр</span>
@@ -2905,17 +2968,38 @@ function ConstructionCalcParamsPanel({ constructionId }) {
                     valueType={selectedAddParam.value_type}
                     options={addOptions}
                     disabled={adding}
+                    showAdd={false}
                     onChange={setAddOptions}
                   />
                 </>
               ) : null}
-              <button
-                type="submit"
-                className="admin-page__btn admin-page__btn--inline admin-page__create-submit"
-                disabled={adding || !selectedAddParam}
-              >
-                {adding ? "Добавление…" : "Добавить параметр"}
-              </button>
+              <div className="admin-page__param-add-actions">
+                {selectedAddParam && !isBoolCalcParam(selectedAddParam) ? (
+                  <button
+                    type="button"
+                    className="admin-page__btn admin-page__btn--inline"
+                    disabled={adding}
+                    onClick={() =>
+                      setAddOptions((options) => [
+                        ...options,
+                        newCalcParamOption(
+                          selectedAddParam.value_type,
+                          options.length
+                        ),
+                      ])
+                    }
+                  >
+                    Добавить вариант
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  className="admin-page__btn admin-page__btn--inline admin-page__btn--ghost"
+                  disabled={adding || !selectedAddParam}
+                >
+                  {adding ? "Добавление…" : "Добавить параметр"}
+                </button>
+              </div>
             </div>
             {addError && (
               <div className="admin-page__error" role="alert">
@@ -2926,7 +3010,8 @@ function ConstructionCalcParamsPanel({ constructionId }) {
               </div>
             )}
           </form>
-        </>
+          </div>
+        </div>
       )}
     </AdminCollapsibleSection>
   );
@@ -2958,19 +3043,15 @@ function ConstructionDetail({
   const [catalogMaterials, setCatalogMaterials] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
   const [calculationTypes, setCalculationTypes] = useState([]);
-  const [addByGroup, setAddByGroup] = useState({});
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
   const [addCalcTypeByGroup, setAddCalcTypeByGroup] = useState({});
   const [addWeightByGroup, setAddWeightByGroup] = useState({});
-  const [optionalAddArticle, setOptionalAddArticle] = useState("");
   const [optionalAddQuery, setOptionalAddQuery] = useState("");
   const [optionalAddCalcTypeId, setOptionalAddCalcTypeId] = useState("");
   const [optionalAddWeight, setOptionalAddWeight] = useState("1");
-  const [defaultAddArticle, setDefaultAddArticle] = useState("");
   const [defaultAddQuery, setDefaultAddQuery] = useState("");
   const [defaultAddCalcTypeId, setDefaultAddCalcTypeId] = useState("");
   const [defaultAddWeight, setDefaultAddWeight] = useState("1");
-  const [generalAddArticle, setGeneralAddArticle] = useState("");
   const [generalAddQuery, setGeneralAddQuery] = useState("");
   const [generalAddCalcTypeId, setGeneralAddCalcTypeId] = useState("");
   const [generalAddWeight, setGeneralAddWeight] = useState("1");
@@ -3535,16 +3616,12 @@ function ConstructionDetail({
         setDefaultMaterials(defaults);
         setReplacementGroups(groups);
         setOptionalMaterials(enriched.optionalMaterials);
-        setAddByGroup({});
         setAddQueryByGroup({});
         setAddCalcTypeByGroup({});
-        setOptionalAddArticle("");
         setOptionalAddQuery("");
         setOptionalAddCalcTypeId("");
-        setDefaultAddArticle("");
         setDefaultAddQuery("");
         setDefaultAddCalcTypeId("");
-        setGeneralAddArticle("");
         setGeneralAddQuery("");
         setGeneralAddCalcTypeId("");
         setPromoteItemId("");
@@ -3568,16 +3645,12 @@ function ConstructionDetail({
           setOptionalMaterials([]);
           setMaterialTypes([]);
           setCalculationTypes([]);
-          setAddByGroup({});
           setAddQueryByGroup({});
           setAddCalcTypeByGroup({});
-          setOptionalAddArticle("");
           setOptionalAddQuery("");
           setOptionalAddCalcTypeId("");
-          setDefaultAddArticle("");
           setDefaultAddQuery("");
           setDefaultAddCalcTypeId("");
-          setGeneralAddArticle("");
           setGeneralAddQuery("");
           setGeneralAddCalcTypeId("");
           setPromoteItemId("");
@@ -3598,13 +3671,8 @@ function ConstructionDetail({
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [constructionId]);
 
-  const handleAddChange = (groupKey, value) => {
-    setAddByGroup((prev) => ({ ...prev, [groupKey]: value }));
-  };
-
   const handleAddQueryChange = (groupKey, value) => {
     setAddQueryByGroup((prev) => ({ ...prev, [groupKey]: value }));
-    setAddByGroup((prev) => ({ ...prev, [groupKey]: "" }));
   };
 
   const handleSaveConstructionMeta = async (e) => {
@@ -3720,9 +3788,8 @@ function ConstructionDetail({
     }
   };
 
-  const handleAddMaterial = async (group, groupKey) => {
-    // value селекта = артикул (materials.code)
-    const article = String(addByGroup[groupKey] || "").trim();
+  const handleAddMaterial = async (group, groupKey, articleRaw) => {
+    const article = String(articleRaw || "").trim();
     if (!article) {
       setAddError("Выберите материал из каталога по артикулу.");
       return;
@@ -3775,8 +3842,8 @@ function ConstructionDetail({
     }
   };
 
-  const handleAddOptionalMaterial = async () => {
-    const article = String(optionalAddArticle || "").trim();
+  const handleAddOptionalMaterial = async (articleRaw) => {
+    const article = String(articleRaw || "").trim();
     if (!article) {
       setOptionalAddError("Выберите материал из каталога по артикулу.");
       return;
@@ -3850,8 +3917,8 @@ function ConstructionDetail({
     }
   };
 
-  const handleAddDefaultMaterial = async () => {
-    const article = String(defaultAddArticle || "").trim();
+  const handleAddDefaultMaterial = async (articleRaw) => {
+    const article = String(articleRaw || "").trim();
     if (!article) {
       setDefaultAddError("Выберите материал из каталога по артикулу.");
       return;
@@ -3895,8 +3962,8 @@ function ConstructionDetail({
     }
   };
 
-  const handleAddGeneralMaterial = async () => {
-    const article = String(generalAddArticle || "").trim();
+  const handleAddGeneralMaterial = async (articleRaw) => {
+    const article = String(articleRaw || "").trim();
     if (!article) {
       setGeneralAddError("Выберите материал из каталога «Допы» по артикулу.");
       return;
@@ -4291,12 +4358,18 @@ function ConstructionDetail({
             </div>
           )}
 
+          <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           <SimpleTable
             columns={defaultMaterialsColumns}
             rows={soundIsolationDefaults}
             emptyText="Нет материалов по умолчанию."
           />
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <div className="admin-page__optional-add">
             <input
               type="search"
@@ -4308,63 +4381,24 @@ function ConstructionDetail({
               onChange={(e) => {
                 e.stopPropagation();
                 setDefaultAddQuery(e.target.value);
-                setDefaultAddArticle("");
               }}
               aria-label="Поиск материала по умолчанию usage=si"
             />
-            <select
-              className="admin-page__select"
-              value={defaultAddArticle}
-              disabled={addingDefault || !defaultCandidates.length}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => {
-                e.stopPropagation();
-                setDefaultAddArticle(e.target.value);
-              }}
-              aria-label="Добавить материал по умолчанию usage=si"
-            >
-              <option value="">
-                {!siNumericCatalog.length
-                  ? "Нет материалов с usage=si"
-                  : defaultCandidates.length
-                    ? `Добавить из каталога… (${defaultCandidates.length})`
-                    : defaultAddQuery.trim()
-                      ? "Ничего не найдено по запросу"
-                      : "Все подходящие уже в составе"}
-              </option>
-              {defaultCandidates.map((mat) => {
-                const article = String(mat.code || "").trim();
-                return (
-                  <option key={article} value={article}>
-                    {materialOptionLabel(mat)}
-                  </option>
-                );
-              })}
-            </select>
-            <CalculationTypeSelect
-              value={defaultAddCalcTypeId}
-              options={calculationTypes}
-              disabled={addingDefault || !calculationTypes.length}
-              ariaLabel="Тип расчёта нового материала по умолчанию"
-              onChange={setDefaultAddCalcTypeId}
-            />
-            <AddWeightField
-              value={defaultAddWeight}
+            <CatalogPickList
+              items={defaultCandidates}
               disabled={addingDefault}
-              ariaLabel="Вес нового материала по умолчанию"
-              onChange={setDefaultAddWeight}
+              ariaLabel="Добавить материал по умолчанию usage=si"
+              emptyText={
+                !siNumericCatalog.length
+                  ? "Нет материалов с usage=si"
+                  : defaultAddQuery.trim()
+                    ? "Ничего не найдено по запросу"
+                    : "Все подходящие уже в составе"
+              }
+              onPick={handleAddDefaultMaterial}
             />
-            <button
-              type="button"
-              className="admin-page__btn admin-page__btn--inline"
-              disabled={addingDefault || !defaultAddArticle}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddDefaultMaterial();
-              }}
-            >
-              {addingDefault ? "Добавление…" : "Добавить"}
-            </button>
+          </div>
+          </div>
           </div>
           </AdminCollapsibleSection>
 
@@ -4381,12 +4415,18 @@ function ConstructionDetail({
             </div>
           )}
 
+          <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           <SimpleTable
             columns={generalMaterialsColumns}
             rows={generalConstructionMaterials}
             emptyText="Нет общестроительных материалов."
           />
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <div className="admin-page__optional-add">
             <input
               type="search"
@@ -4398,63 +4438,24 @@ function ConstructionDetail({
               onChange={(e) => {
                 e.stopPropagation();
                 setGeneralAddQuery(e.target.value);
-                setGeneralAddArticle("");
               }}
               aria-label="Поиск общестроительного материала из Допы"
             />
-            <select
-              className="admin-page__select"
-              value={generalAddArticle}
-              disabled={addingGeneral || !generalCandidates.length}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => {
-                e.stopPropagation();
-                setGeneralAddArticle(e.target.value);
-              }}
-              aria-label="Добавить общестроительный материал из Допы"
-            >
-              <option value="">
-                {!extrasCatalog.length
-                  ? "Нет материалов в каталоге «Допы»"
-                  : generalCandidates.length
-                    ? `Добавить из Допы… (${generalCandidates.length})`
-                    : generalAddQuery.trim()
-                      ? "Ничего не найдено по запросу"
-                      : "Все подходящие уже в составе"}
-              </option>
-              {generalCandidates.map((mat) => {
-                const article = String(mat.code || "").trim();
-                return (
-                  <option key={article} value={article}>
-                    {materialOptionLabel(mat)}
-                  </option>
-                );
-              })}
-            </select>
-            <CalculationTypeSelect
-              value={generalAddCalcTypeId}
-              options={calculationTypes}
-              disabled={addingGeneral || !calculationTypes.length}
-              ariaLabel="Тип расчёта общестроительного материала"
-              onChange={setGeneralAddCalcTypeId}
-            />
-            <AddWeightField
-              value={generalAddWeight}
+            <CatalogPickList
+              items={generalCandidates}
               disabled={addingGeneral}
-              ariaLabel="Вес общестроительного материала"
-              onChange={setGeneralAddWeight}
+              ariaLabel="Добавить общестроительный материал из Допы"
+              emptyText={
+                !extrasCatalog.length
+                  ? "Нет материалов в каталоге «Допы»"
+                  : generalAddQuery.trim()
+                    ? "Ничего не найдено по запросу"
+                    : "Все подходящие уже в составе"
+              }
+              onPick={handleAddGeneralMaterial}
             />
-            <button
-              type="button"
-              className="admin-page__btn admin-page__btn--inline"
-              disabled={addingGeneral || !generalAddArticle}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddGeneralMaterial();
-              }}
-            >
-              {addingGeneral ? "Добавление…" : "Добавить"}
-            </button>
+          </div>
+          </div>
           </div>
           </AdminCollapsibleSection>
 
@@ -4471,6 +4472,9 @@ function ConstructionDetail({
             </div>
           )}
 
+          <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <div className="admin-page__optional-add">
             <select
               className="admin-page__select"
@@ -4555,7 +4559,10 @@ function ConstructionDetail({
               {promoting ? "Добавление…" : "В заменяемые"}
             </button>
           </div>
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           {addError && (
             <div className="admin-page__error" role="alert">
               <p className="admin-page__error-title">
@@ -4593,7 +4600,6 @@ function ConstructionDetail({
                   .filter((mat) =>
                     matchesQuery(mat, addQuery.trim(), ["code", "name", "type"])
                   );
-                const addValue = addByGroup[groupKey] ?? "";
                 const adding = addingGroupKey === groupKey;
 
                 return (
@@ -4670,35 +4676,21 @@ function ConstructionDetail({
                         }}
                         aria-label="Поиск материала usage=si для добавления"
                       />
-                      <select
-                        className="admin-page__select"
-                        value={addValue}
-                        disabled={adding || !candidates.length}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleAddChange(groupKey, e.target.value);
-                        }}
-                        aria-label="Добавить материал usage=si"
-                      >
-                        <option value="">
-                          {!siCatalog.length
+                      <CatalogPickList
+                        items={candidates}
+                        disabled={adding}
+                        ariaLabel="Добавить материал usage=si"
+                        emptyText={
+                          !siCatalog.length
                             ? "Нет материалов с usage=si"
-                            : candidates.length
-                              ? `Добавить из каталога… (${candidates.length})`
-                              : addQuery.trim()
-                                ? "Ничего не найдено по запросу"
-                                : "Все подходящие уже в группе"}
-                        </option>
-                        {candidates.map((mat) => {
-                          const article = String(mat.code || "").trim();
-                          return (
-                            <option key={article} value={article}>
-                              {materialOptionLabel(mat)}
-                            </option>
-                          );
-                        })}
-                      </select>
+                            : addQuery.trim()
+                              ? "Ничего не найдено по запросу"
+                              : "Все подходящие уже в группе"
+                        }
+                        onPick={(article) =>
+                          handleAddMaterial(group, groupKey, article)
+                        }
+                      />
                       <CalculationTypeSelect
                         value={
                           addCalcTypeByGroup[groupKey] ??
@@ -4731,23 +4723,14 @@ function ConstructionDetail({
                           }))
                         }
                       />
-                      <button
-                        type="button"
-                        className="admin-page__btn admin-page__btn--inline"
-                        disabled={adding || !addValue}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddMaterial(group, groupKey);
-                        }}
-                      >
-                        {adding ? "Добавление…" : "Добавить"}
-                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
+          </div>
+          </div>
           </AdminCollapsibleSection>
 
           <AdminCollapsibleSection
@@ -4763,12 +4746,18 @@ function ConstructionDetail({
             </div>
           )}
 
+          <div className="admin-page__section-split">
+          <div className="admin-page__section-pane admin-page__section-pane--added">
+            <div className="admin-page__section-pane-title">Уже добавлено</div>
           <SimpleTable
             columns={optionalMaterialsColumns}
             rows={optionalMaterials}
             emptyText="Нет дополнительных материалов."
           />
+          </div>
 
+          <div className="admin-page__section-pane admin-page__section-pane--available">
+            <div className="admin-page__section-pane-title">Можно добавить</div>
           <div className="admin-page__optional-add">
             <input
               type="search"
@@ -4780,63 +4769,24 @@ function ConstructionDetail({
               onChange={(e) => {
                 e.stopPropagation();
                 setOptionalAddQuery(e.target.value);
-                setOptionalAddArticle("");
               }}
               aria-label="Поиск доп. материала usage=si"
             />
-            <select
-              className="admin-page__select"
-              value={optionalAddArticle}
-              disabled={addingOptional || !optionalCandidates.length}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => {
-                e.stopPropagation();
-                setOptionalAddArticle(e.target.value);
-              }}
-              aria-label="Добавить доп. материал usage=si"
-            >
-              <option value="">
-                {!siCatalog.length
-                  ? "Нет материалов с usage=si"
-                  : optionalCandidates.length
-                    ? `Добавить из каталога… (${optionalCandidates.length})`
-                    : optionalAddQuery.trim()
-                      ? "Ничего не найдено по запросу"
-                      : "Все подходящие уже в списке допов"}
-              </option>
-              {optionalCandidates.map((mat) => {
-                const article = String(mat.code || "").trim();
-                return (
-                  <option key={article} value={article}>
-                    {materialOptionLabel(mat)}
-                  </option>
-                );
-              })}
-            </select>
-            <CalculationTypeSelect
-              value={optionalAddCalcTypeId}
-              options={calculationTypes}
-              disabled={addingOptional || !calculationTypes.length}
-              ariaLabel="Тип расчёта дополнительного материала"
-              onChange={setOptionalAddCalcTypeId}
-            />
-            <AddWeightField
-              value={optionalAddWeight}
+            <CatalogPickList
+              items={optionalCandidates}
               disabled={addingOptional}
-              ariaLabel="Вес дополнительного материала"
-              onChange={setOptionalAddWeight}
+              ariaLabel="Добавить доп. материал usage=si"
+              emptyText={
+                !siCatalog.length
+                  ? "Нет материалов с usage=si"
+                  : optionalAddQuery.trim()
+                    ? "Ничего не найдено по запросу"
+                    : "Все подходящие уже в списке допов"
+              }
+              onPick={handleAddOptionalMaterial}
             />
-            <button
-              type="button"
-              className="admin-page__btn admin-page__btn--inline"
-              disabled={addingOptional || !optionalAddArticle}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddOptionalMaterial();
-              }}
-            >
-              {addingOptional ? "Добавление…" : "Добавить"}
-            </button>
+          </div>
+          </div>
           </div>
           </AdminCollapsibleSection>
         </>
