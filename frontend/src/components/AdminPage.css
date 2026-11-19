@@ -195,6 +195,10 @@
   align-items: center;
 }
 
+.admin-page__section-pane--added .admin-page__meta-actions {
+  margin-top: 12px;
+}
+
 .admin-page__create-form {
   margin: 0 0 16px;
   padding: 14px 16px;
@@ -254,6 +258,25 @@
 
 .admin-page__param-options .admin-page__btn {
   align-self: flex-start;
+}
+
+.admin-page__param-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-page__btn--ghost {
+  background: transparent;
+  color: var(--admin-accent);
+  border: 1px solid var(--admin-border-strong);
+  box-shadow: none;
+}
+
+.admin-page__btn--ghost:hover {
+  background: transparent;
+  color: var(--admin-text);
 }
 
 .admin-page__field {
@@ -598,6 +621,8 @@ textarea.admin-page__input {
 
 .admin-page__collapsible {
   margin-top: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #bbc4d2;
 }
 
 .admin-page__collapsible .admin-page__composition-head {
@@ -671,6 +696,249 @@ textarea.admin-page__input {
 
 .admin-page__collapsible-body[hidden] {
   display: none;
+}
+
+.admin-page__section-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-page__section-pane {
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-bg);
+  box-sizing: border-box;
+}
+
+.admin-page__section-pane--available {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.admin-page__section-pane--added {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.admin-page__section-pane-title {
+  display: block;
+  margin: 0 0 10px;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  pointer-events: auto;
+  justify-content: flex-start;
+}
+
+.admin-page__section-pane .admin-page__create-form,
+.admin-page__section-pane .admin-page__optional-add {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__section-pane--available .admin-page__optional-add {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.admin-page__catalog-pick {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.admin-page__catalog-pick-item {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.admin-page__catalog-pick-item:hover:not(:disabled) {
+  background: var(--admin-surface-hover);
+  color: var(--admin-text);
+  opacity: 1;
+}
+
+.admin-page__catalog-pick-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-page__optional-add .admin-page__catalog-pick,
+.admin-page__replacement-add .admin-page__catalog-pick {
+  flex: 1 1 100%;
+}
+
+.admin-page__section-pane--available .admin-page__optional-add .admin-page__search--inline,
+.admin-page__section-pane--available .admin-page__optional-add .admin-page__select,
+.admin-page__section-pane--available .admin-page__optional-add .admin-page__btn,
+.admin-page__section-pane--available .admin-page__optional-add .admin-page__weight-field {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__section-pane .admin-page__replacement-add {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__section-pane .admin-page__replacement-add .admin-page__select,
+.admin-page__section-pane .admin-page__replacement-add .admin-page__search--inline {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__section-pane--added .admin-page__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.admin-page__section-pane--added .admin-page__table-wrap > .admin-page__table {
+  width: 100%;
+  min-width: 43.5rem;
+  max-width: none;
+}
+
+.admin-page__section-pane .admin-page__create-fields {
+  max-width: none;
+}
+
+.admin-page__section-pane .admin-page__collapsible {
+  margin-top: 0;
+}
+
+.admin-page__section-pane .admin-page__replacements {
+  padding: 0;
+}
+
+.admin-page__section-pane--added .admin-page__replacements,
+.admin-page__section-pane--added .admin-page__replacement-block,
+.admin-page__section-pane--added .admin-page__replacement-list,
+.admin-page__section-pane--added .admin-page__replacement-list-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label label label"
+    "weight calc delete";
+  align-items: center;
+  justify-content: stretch;
+  column-gap: 8px;
+  row-gap: 6px;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-list-label {
+  grid-area: label;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-list-item .admin-page__weight-field {
+  grid-area: weight;
+  width: auto;
+  max-width: 100%;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-list-item .admin-page__select--calc {
+  grid-area: calc;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-list-item > .admin-page__btn {
+  grid-area: delete;
+  align-self: center;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-add {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.admin-page__section-pane--added .admin-page__replacement-add .admin-page__select,
+.admin-page__section-pane--added .admin-page__replacement-add .admin-page__search--inline,
+.admin-page__section-pane--added .admin-page__replacement-add .admin-page__weight-field,
+.admin-page__section-pane--added .admin-page__replacement-add .admin-page__catalog-pick {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-page__replacement-list-item input.admin-page__input--weight,
+.admin-page__replacement-add input.admin-page__input--weight {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
+  height: 32px;
+  margin: 0;
+  padding: 0 8px;
+  line-height: 30px;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+@media (max-width: 960px) {
+  .admin-page__section-split {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page__section-pane--available,
+  .admin-page__section-pane--added {
+    grid-column: 1;
+  }
+
+  .admin-page__section-pane--added {
+    grid-row: 1;
+  }
+
+  .admin-page__section-pane--available {
+    grid-row: 2;
+  }
 }
 
 .admin-page__replacements {
