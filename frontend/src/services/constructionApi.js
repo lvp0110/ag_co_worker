@@ -205,7 +205,7 @@ export const resolveConstructionRegionCode = (regionCode) => {
 
 /**
  * GET /api/v2/constructions/{category}/{regionCode}
- * swagger: categoryCode + regionCode в path, type — query.
+ * swagger: categoryCode + regionCode в path, type — query по коду типа.
  */
 export const listPublicConstructions = async (
   categoryCode = SOUND_CONSTRUCTION_CATEGORY,

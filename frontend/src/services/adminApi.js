@@ -33,12 +33,13 @@
  *   POST /admin/commerce/materials/{materialID}/prices
  *     → body: { price_region_id, price, m2, currency_code }
  *   GET /admin/constructions?type=&category=
+ *     type — код типа (construction_types.code), не id
  *   GET /api/v2/constructions/types
  *     → { id, code, name }[]  (справочник construction_types)
  *   POST /admin/constructions
- *     → body: { code, name, type_id, category_id, price_region_ids }
+ *     → body: { code, name, type_ids, category_id, price_region_ids }
  *   PUT /admin/constructions/{id}
- *     → body: { code, name, type_id, category_id, price_region_ids }
+ *     → body: { code, name, type_ids, category_id, price_region_ids }
  *   DELETE /admin/constructions/{id}
  *   GET /admin/constructions/{id}
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
@@ -143,6 +144,47 @@ export const uniquePositiveIds = (ids) => {
   return out;
 };
 
+/**
+ * Типы конструкции из ответа: types[].
+ * Если массива нет — одиночный type { id, code, name }.
+ * Дубликаты id отбрасываются.
+ */
+export const getConstructionTypes = (row) => {
+  if (!row || typeof row !== "object") return [];
+  const source = Array.isArray(row.types)
+    ? row.types
+    : row.type && typeof row.type === "object" && !Array.isArray(row.type)
+      ? [row.type]
+      : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of source) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = Number(item.id);
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      code: item.code == null ? "" : String(item.code).trim(),
+      name: item.name == null ? "" : String(item.name).trim(),
+    });
+  }
+  return out;
+};
+
+/** ID типов конструкции. Пустой types[] не подменяется одиночным type_id. */
+export const getConstructionTypeIds = (row) => {
+  if (!row || typeof row !== "object") return [];
+  if (Array.isArray(row.types)) {
+    return getConstructionTypes(row).map((type) => type.id);
+  }
+  const fromType = getConstructionTypes(row);
+  if (fromType.length) return fromType.map((type) => type.id);
+  if (Array.isArray(row.type_ids)) return uniquePositiveIds(row.type_ids);
+  const single = Number(row.type_id);
+  return Number.isFinite(single) && single > 0 ? [single] : [];
+};
+
 /** ID регионов продаж из карточки / списка GET /admin/constructions. */
 export const getConstructionPriceRegionIds = (row) => {
   if (!row || typeof row !== "object") return [];
@@ -161,17 +203,30 @@ export const sameIdSet = (a, b) => {
 };
 
 /**
- * Нормализует конструкцию: nested type/category → плоские поля + исходные объекты.
+ * Нормализует конструкцию: types[] и category → плоские поля + исходные объекты.
+ * type / type_id / type_code / type_name — первый тип, для старых мест UI.
  */
 export const normalizeConstruction = (row) => {
   if (!row || typeof row !== "object") return row;
+  const types = getConstructionTypes(row);
+  const primary = types[0] || null;
   const priceRegions = Array.isArray(row.price_regions)
     ? row.price_regions
     : [];
   return {
     ...row,
-    ...flattenRef("type", row.type, row),
     ...flattenRef("category", row.category, row),
+    types,
+    type: primary,
+    type_id: primary?.id ?? null,
+    type_code: primary?.code || null,
+    type_name: primary?.name || null,
+    type_ids: types.map((type) => type.id),
+    types_text: types
+      .flatMap((type) => [type.name, type.code])
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" "),
     price_regions: priceRegions,
     price_region_ids: getConstructionPriceRegionIds({
       ...row,
@@ -1195,6 +1250,7 @@ export const createAdminMaterialFromUnmatched = async (payload) => {
 
 /**
  * GET /admin/constructions
+ * filters.type — код типа, как в query ?type= (не id).
  * @param {{ type?: string, category?: string }} [filters]
  */
 export const listAdminConstructions = async (filters = {}) => {
@@ -1207,17 +1263,29 @@ export const listAdminConstructions = async (filters = {}) => {
   return unwrapList(body).map(normalizeConstruction);
 };
 
-const constructionUpsertBody = (payload) => ({
-  code: String(payload.code || "").trim(),
-  name: String(payload.name || "").trim(),
-  type_id: Number(payload.type_id),
-  category_id: Number(payload.category_id),
-  price_region_ids: uniquePositiveIds(payload.price_region_ids),
-});
+/**
+ * Тело POST/PUT /admin/constructions.
+ * type_ids уникальны; пустой список и неизвестные id отклоняет сервер.
+ * @param {{ code?: string, name?: string, type_ids?: number[], type_id?: number, category_id?: number, price_region_ids?: number[] }} payload
+ */
+export const buildConstructionUpsertBody = (payload = {}) => {
+  const rawIds = Array.isArray(payload.type_ids)
+    ? payload.type_ids
+    : payload.type_id != null && payload.type_id !== ""
+      ? [payload.type_id]
+      : [];
+  return {
+    code: String(payload.code || "").trim(),
+    name: String(payload.name || "").trim(),
+    type_ids: uniquePositiveIds(rawIds),
+    category_id: Number(payload.category_id),
+    price_region_ids: uniquePositiveIds(payload.price_region_ids),
+  };
+};
 
 /**
  * POST /admin/constructions — создать конструкцию.
- * @param {{ code: string, name: string, type_id: number, category_id: number, price_region_ids: number[] }} payload
+ * @param {{ code: string, name: string, type_ids: number[], category_id: number, price_region_ids: number[] }} payload
  */
 export const createAdminConstruction = async (payload) => {
   const csrf = await getCsrfToken();
@@ -1227,14 +1295,14 @@ export const createAdminConstruction = async (payload) => {
   return request("/admin/constructions", {
     method: "POST",
     headers,
-    body: constructionUpsertBody(payload),
+    body: buildConstructionUpsertBody(payload),
   });
 };
 
 /**
- * PUT /admin/constructions/{id} — обновить код/название/тип/категорию/регионы.
+ * PUT /admin/constructions/{id} — обновить код/название/типы/категорию/регионы.
  * @param {string|number} id
- * @param {{ code: string, name: string, type_id: number, category_id: number, price_region_ids: number[] }} payload
+ * @param {{ code: string, name: string, type_ids: number[], category_id: number, price_region_ids: number[] }} payload
  */
 export const updateAdminConstruction = async (id, payload) => {
   const csrf = await getCsrfToken();
@@ -1244,7 +1312,7 @@ export const updateAdminConstruction = async (id, payload) => {
   return request(`/admin/constructions/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers,
-    body: constructionUpsertBody(payload),
+    body: buildConstructionUpsertBody(payload),
   });
 };
 
@@ -1898,13 +1966,10 @@ export const collectConstructionTypes = (apiTypes, rows) => {
     });
   }
   for (const row of rows || []) {
-    const id = Number(row?.type_id ?? row?.type?.id);
-    if (!Number.isFinite(id) || id <= 0 || byId.has(id)) continue;
-    byId.set(id, {
-      id,
-      code: String(row.type_code ?? row.type?.code ?? "").trim(),
-      name: String(row.type_name ?? row.type?.name ?? "").trim(),
-    });
+    for (const type of getConstructionTypes(row)) {
+      if (byId.has(type.id)) continue;
+      byId.set(type.id, type);
+    }
   }
   return [...byId.values()].sort((a, b) =>
     (a.name || a.code).localeCompare(b.name || b.code, "ru")
@@ -2635,11 +2700,11 @@ export const duplicateAdminConstruction = async (sourceId) => {
   );
   if (!code) throw new Error("У конструкции нет кода.");
 
-  const typeId = Number(detail.type_id ?? detail.type?.id);
+  const typeIds = getConstructionTypeIds(detail);
   const categoryId = Number(detail.category_id ?? detail.category?.id);
   const regionIds = getConstructionPriceRegionIds(detail);
-  if (!Number.isFinite(typeId) || typeId <= 0) {
-    throw new Error("У конструкции нет type_id.");
+  if (!typeIds.length) {
+    throw new Error("У конструкции нет типов.");
   }
   if (!Number.isFinite(categoryId) || categoryId <= 0) {
     throw new Error("У конструкции нет category_id.");
@@ -2647,7 +2712,7 @@ export const duplicateAdminConstruction = async (sourceId) => {
 
   const card = {
     name: String(detail.name || "").trim(),
-    type_id: typeId,
+    type_ids: typeIds,
     category_id: categoryId,
     price_region_ids: regionIds,
   };

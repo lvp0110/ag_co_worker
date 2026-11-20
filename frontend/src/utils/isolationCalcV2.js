@@ -595,15 +595,37 @@ const pickItemsBaseMatch = (itemsBase, agId, sectionId) => {
   return matches[0];
 };
 
-export const publicConstructionTypeCode = (row) => {
-  if (!row || typeof row !== "object") return "";
-  if (row.type_code) return String(row.type_code).trim().toLowerCase();
-  if (typeof row.type === "string") return row.type.trim().toLowerCase();
-  if (row.type && typeof row.type === "object" && row.type.code) {
-    return String(row.type.code).trim().toLowerCase();
+const typeCodeFromValue = (value) => {
+  if (value == null || value === "") return "";
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim().toLowerCase();
+  }
+  if (typeof value === "object" && value.code != null) {
+    return String(value.code).trim().toLowerCase();
   }
   return "";
 };
+
+/** Коды типов конструкции. Сначала types[], иначе одиночный type / type_code. */
+export const publicConstructionTypeCodes = (row) => {
+  if (!row || typeof row !== "object") return [];
+  if (Array.isArray(row.types)) {
+    const seen = new Set();
+    const codes = [];
+    for (const item of row.types) {
+      const code = typeCodeFromValue(item);
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      codes.push(code);
+    }
+    if (codes.length) return codes;
+  }
+  const single = typeCodeFromValue(row.type_code) || typeCodeFromValue(row.type);
+  return single ? [single] : [];
+};
+
+export const publicConstructionTypeCode = (row) =>
+  publicConstructionTypeCodes(row)[0] || "";
 
 export const imageTypeCode = (image) =>
   String(image?.type?.code ?? image?.type_code ?? "").trim().toLowerCase();
@@ -747,32 +769,50 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
   const items = [];
   for (const row of rows) {
     const agId = String(row?.code ?? "").trim();
-    const typeCode = publicConstructionTypeCode(row);
-    let c_id = sectionIdFromTypeCode(typeCode) || sectionIdFromCode(agId);
-    const base = pickItemsBaseMatch(itemsBase, agId, c_id);
-    if (!c_id) c_id = base?.c_id ?? null;
-    if (!agId || !c_id) continue;
+    const typeCodes = publicConstructionTypeCodes(row);
+    const placed = [];
+    const seenSections = new Set();
+    for (const typeCode of typeCodes) {
+      const section = sectionIdFromTypeCode(typeCode);
+      if (!section || seenSections.has(section)) continue;
+      seenSections.add(section);
+      placed.push({ typeCode, section });
+    }
+    const placements = placed.length
+      ? placed
+      : [
+          {
+            typeCode: typeCodes[0] || "",
+            section: sectionIdFromCode(agId),
+          },
+        ];
     const name = String(row?.name ?? "").trim() || constructionPublicCipher(agId);
     const images = Array.isArray(row.images) ? row.images : [];
     const physical = physicalParamsFromConstruction(row);
-    items.push({
-      id: row.id,
-      size_limit_id: base?.id ?? null,
-      title: name,
-      description: name,
-      c_id,
-      template: base?.template ?? null,
-      ag_id: agId,
-      weight: base?.weight,
-      type_code: typeCode,
-      construction_id: row.id,
-      imageUrl: pickEntityImageUrl(images),
-      cadImageUrl: pickEntityImageUrl(images, { cad: true }),
-      images,
-      thickness: physical.thickness,
-      soundIndex: physical.soundIndex,
-      impactNoiseIndex: physical.impactNoiseIndex,
-    });
+    for (const placement of placements) {
+      let c_id = placement.section || null;
+      const base = pickItemsBaseMatch(itemsBase, agId, c_id);
+      if (!c_id) c_id = base?.c_id ?? null;
+      if (!agId || !c_id) continue;
+      items.push({
+        id: row.id,
+        size_limit_id: base?.id ?? null,
+        title: name,
+        description: name,
+        c_id,
+        template: base?.template ?? null,
+        ag_id: agId,
+        weight: base?.weight,
+        type_code: placement.typeCode,
+        construction_id: row.id,
+        imageUrl: pickEntityImageUrl(images),
+        cadImageUrl: pickEntityImageUrl(images, { cad: true }),
+        images,
+        thickness: physical.thickness,
+        soundIndex: physical.soundIndex,
+        impactNoiseIndex: physical.impactNoiseIndex,
+      });
+    }
   }
   return items;
 };

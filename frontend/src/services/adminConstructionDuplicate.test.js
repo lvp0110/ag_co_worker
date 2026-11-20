@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildConstructionUpsertBody,
   calculationParamCopyPayload,
   collectCompositionCopyRows,
   compositionMaterialCopyPayload,
+  getConstructionTypeIds,
   mapCalculationParamConfigIds,
   nextConstructionCopyCode,
+  normalizeConstruction,
   optionalMaterialCopyPayload,
   sizeLimitCopyPayload,
 } from "./adminApi.js";
@@ -148,6 +151,55 @@ describe("construction duplicate payloads", () => {
       max_warning_text: "верх",
       conditions: [{ construction_system_param_id: 40, value_int: 600 }],
     });
+  });
+
+  it("reads every construction type and drops duplicate ids", () => {
+    const row = normalizeConstruction({
+      id: 4,
+      code: "AG.W101",
+      name: "Перегородка",
+      types: [
+        { id: 2, code: "partition", name: "Перегородка" },
+        { id: 2, code: "partition", name: "дубль" },
+        { id: 3, code: "cladding", name: "Облицовка" },
+        { id: 0, code: "floor", name: "Пол" },
+      ],
+      category: { id: 1, code: "sound", name: "Звукоизоляция" },
+    });
+    expect(row.types).toEqual([
+      { id: 2, code: "partition", name: "Перегородка" },
+      { id: 3, code: "cladding", name: "Облицовка" },
+    ]);
+    expect(row.type_ids).toEqual([2, 3]);
+    expect(row.type).toEqual({ id: 2, code: "partition", name: "Перегородка" });
+    expect(getConstructionTypeIds(row)).toEqual([2, 3]);
+  });
+
+  it("sends unique type_ids and allows an empty list for the server to reject", () => {
+    expect(
+      buildConstructionUpsertBody({
+        code: " AG.W101 ",
+        name: " Перегородка ",
+        type_ids: [3, 3, 0, "2", -1],
+        category_id: 1,
+        price_region_ids: [5, 5],
+      })
+    ).toEqual({
+      code: "AG.W101",
+      name: "Перегородка",
+      type_ids: [3, 2],
+      category_id: 1,
+      price_region_ids: [5],
+    });
+    expect(
+      buildConstructionUpsertBody({
+        code: "AG.W101",
+        name: "Перегородка",
+        type_ids: [],
+        category_id: 1,
+        price_region_ids: [],
+      }).type_ids
+    ).toEqual([]);
   });
 
   it("skips a parametric limit when its param was not copied", () => {
