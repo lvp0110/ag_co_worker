@@ -508,6 +508,28 @@ describe("calcItemsFromPublicConstructions", () => {
     });
   });
 
+  it("places one catalog item in each section from types[]", () => {
+    const items = calcItemsFromPublicConstructions(
+      [
+        {
+          id: 8,
+          code: "AG.W201",
+          name: "Перегородка и облицовка",
+          types: [
+            { id: 1, code: "partition", name: "Перегородка" },
+            { id: 2, code: "cladding", name: "Облицовка" },
+            { id: 1, code: "partition", name: "дубль" },
+          ],
+        },
+      ],
+      []
+    );
+    expect(items.map((item) => [item.c_id, item.type_code])).toEqual([
+      ["W", "partition"],
+      ["L", "cladding"],
+    ]);
+  });
+
   it("keeps primary image url from images[]", () => {
     const items = calcItemsFromPublicConstructions(
       [

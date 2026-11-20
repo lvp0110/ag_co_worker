@@ -36,6 +36,8 @@ import {
   getCalculationTypeId,
   getConstructionId,
   getConstructionPriceRegionIds,
+  getConstructionTypeIds,
+  getConstructionTypes,
   getMaterialCode,
   getMaterialTypeId,
   getPriceRegionBaseId,
@@ -202,13 +204,7 @@ const CONSTRUCTION_COLUMNS = [
     key: "type",
     label: "Тип",
     className: "admin-page__col--code",
-    render: (row) =>
-      cell(
-        row.type_name ??
-          row.type_code ??
-          row.type?.name ??
-          row.type?.code
-      ),
+    render: (row) => cell(constructionTypesLabel(row)),
   },
   {
     key: "category",
@@ -314,6 +310,87 @@ function AdminConstructionRegionsField({
     </fieldset>
   );
 }
+
+function AdminConstructionTypesField({
+  types,
+  selectedIds,
+  disabled,
+  onChange,
+}) {
+  const toggle = (id) => {
+    const has = selectedIds.includes(id);
+    onChange(
+      has ? selectedIds.filter((value) => value !== id) : [...selectedIds, id]
+    );
+  };
+
+  if (!types.length) {
+    return (
+      <div className="admin-page__field">
+        <span className="admin-page__field-label">Типы</span>
+        <p className="admin-page__hint">Нет типов в справочнике.</p>
+      </div>
+    );
+  }
+
+  return (
+    <fieldset className="admin-page__field admin-page__field--regions">
+      <legend className="admin-page__field-label">Типы</legend>
+      <p className="admin-page__hint">Нужен хотя бы один тип.</p>
+      <div className="admin-page__region-checks">
+        {types.map((type) => {
+          const id = Number(type.id);
+          return (
+            <label key={id} className="admin-page__region-check">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(id)}
+                disabled={disabled}
+                onChange={() => toggle(id)}
+              />
+              <span className="admin-page__region-check-label">
+                {materialTypeOptionLabel(type)}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+const constructionTypesLabel = (row) => {
+  const types = Array.isArray(row?.types) ? row.types : [];
+  const label = types
+    .map((type) => String(type?.name || type?.code || "").trim())
+    .filter(Boolean)
+    .join(", ");
+  if (label) return label;
+  return (
+    row?.type_name ||
+    row?.type_code ||
+    row?.type?.name ||
+    row?.type?.code ||
+    ""
+  );
+};
+
+const mergeConstructionTypeOptions = (catalog, assigned) => {
+  const byId = new Map();
+  for (const item of catalog || []) {
+    const id = Number(item?.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    byId.set(id, {
+      id,
+      code: String(item.code ?? "").trim(),
+      name: String(item.name ?? "").trim(),
+    });
+  }
+  for (const item of assigned || []) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+  }
+  return [...byId.values()];
+};
 
 const CONSTRUCTION_CATEGORY_FILTERS = [
   { code: "sound", label: "Звукоизоляция" },
@@ -3022,7 +3099,7 @@ function ConstructionDetail({
   const [detail, setDetail] = useState(null);
   const [editCode, setEditCode] = useState("");
   const [editName, setEditName] = useState("");
-  const [editTypeId, setEditTypeId] = useState("");
+  const [editTypeIds, setEditTypeIds] = useState([]);
   const [editCategoryId, setEditCategoryId] = useState("");
   const [editRegionIds, setEditRegionIds] = useState([]);
   const [priceRegions, setPriceRegions] = useState([]);
@@ -3075,15 +3152,11 @@ function ConstructionDetail({
 
   const typeOptions = useMemo(
     () =>
-      withCurrentMaterialType(
+      mergeConstructionTypeOptions(
         constructionTypesProp || typeOptionsLocal,
-        editTypeId,
-        {
-          code: detail?.type_code || detail?.type?.code,
-          name: detail?.type_name || detail?.type?.name,
-        }
+        getConstructionTypes(detail)
       ),
-    [constructionTypesProp, typeOptionsLocal, editTypeId, detail]
+    [constructionTypesProp, typeOptionsLocal, detail]
   );
 
   const categorySelectOptions = useMemo(
@@ -3574,11 +3647,7 @@ function ConstructionDetail({
         setDetail(data?.detail ?? null);
         setEditCode(String(data?.detail?.code ?? ""));
         setEditName(String(data?.detail?.name ?? ""));
-        setEditTypeId(
-          String(
-            data?.detail?.type_id ?? data?.detail?.type?.id ?? ""
-          )
-        );
+        setEditTypeIds(getConstructionTypeIds(data?.detail));
         setEditCategoryId(
           String(
             data?.detail?.category_id ?? data?.detail?.category?.id ?? ""
@@ -3627,7 +3696,7 @@ function ConstructionDetail({
           setDetail(null);
           setEditCode("");
           setEditName("");
-          setEditTypeId("");
+          setEditTypeIds([]);
           setEditCategoryId("");
           setEditRegionIds([]);
           setPriceRegions([]);
@@ -3677,7 +3746,7 @@ function ConstructionDetail({
 
     const code = editCode.trim();
     const name = editName.trim();
-    const typeId = Number(editTypeId);
+    const typeIds = uniquePositiveIds(editTypeIds);
     const categoryId = Number(editCategoryId);
 
     if (!code || !name) {
@@ -3685,8 +3754,8 @@ function ConstructionDetail({
       setMetaSuccess(null);
       return;
     }
-    if (!Number.isFinite(typeId) || typeId <= 0) {
-      setMetaError("Выберите тип конструкции.");
+    if (!typeIds.length) {
+      setMetaError("Выберите хотя бы один тип конструкции.");
       setMetaSuccess(null);
       return;
     }
@@ -3705,12 +3774,14 @@ function ConstructionDetail({
       await updateAdminConstruction(constructionId, {
         code,
         name,
-        type_id: typeId,
+        type_ids: typeIds,
         category_id: categoryId,
         price_region_ids: regionIds,
       });
-      const selectedType =
-        typeOptions.find((item) => Number(item.id) === typeId) ?? null;
+      const selectedTypes = typeOptions.filter((item) =>
+        typeIds.includes(Number(item.id))
+      );
+      const selectedType = selectedTypes[0] ?? null;
       const selectedCategory =
         categorySelectOptions.find((item) => Number(item.id) === categoryId) ??
         null;
@@ -3725,12 +3796,18 @@ function ConstructionDetail({
         ...(detail || {}),
         code,
         name,
-        type_id: typeId,
+        types: selectedTypes,
+        type_ids: typeIds,
+        type_id: selectedType?.id ?? null,
         category_id: categoryId,
         type: selectedType,
         category: selectedCategory,
         type_code: selectedType?.code ?? "",
         type_name: selectedType?.name ?? "",
+        types_text: selectedTypes
+          .flatMap((type) => [type.name, type.code])
+          .filter(Boolean)
+          .join(" "),
         category_code: selectedCategory?.code ?? "",
         category_name: selectedCategory?.name ?? "",
         price_regions: nextRegions,
@@ -3742,12 +3819,18 @@ function ConstructionDetail({
         id: constructionId,
         code,
         name,
-        type_id: typeId,
+        types: selectedTypes,
+        type_ids: typeIds,
+        type_id: selectedType?.id ?? null,
         category_id: categoryId,
         type: selectedType,
         category: selectedCategory,
         type_code: selectedType?.code ?? "",
         type_name: selectedType?.name ?? "",
+        types_text: selectedTypes
+          .flatMap((type) => [type.name, type.code])
+          .filter(Boolean)
+          .join(" "),
         category_code: selectedCategory?.code ?? "",
         category_name: selectedCategory?.name ?? "",
         price_regions: nextRegions,
@@ -4214,35 +4297,15 @@ function ConstructionDetail({
                 autoComplete="off"
               />
             </label>
-            <label className="admin-page__field">
-              <span className="admin-page__field-label">Тип</span>
-              <select
-                className="admin-page__select admin-page__select--full"
-                value={editTypeId}
-                disabled={savingMeta || deleting || !typeOptions.length}
-                onChange={(e) => {
-                  setEditTypeId(e.target.value);
-                  setMetaSuccess(null);
-                }}
-                required
-                aria-label="Тип конструкции"
-              >
-                {!typeOptions.length ? (
-                  <option value="">Нет типов в справочнике</option>
-                ) : (
-                  <>
-                    {!editTypeId ? (
-                      <option value="">Выберите тип…</option>
-                    ) : null}
-                    {typeOptions.map((type) => (
-                      <option key={type.id} value={String(type.id)}>
-                        {materialTypeOptionLabel(type)}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-            </label>
+            <AdminConstructionTypesField
+              types={typeOptions}
+              selectedIds={editTypeIds}
+              disabled={savingMeta || deleting}
+              onChange={(ids) => {
+                setEditTypeIds(ids);
+                setMetaSuccess(null);
+              }}
+            />
             <label className="admin-page__field">
               <span className="admin-page__field-label">Категория</span>
               <select
@@ -4292,12 +4355,11 @@ function ConstructionDetail({
                   deleting ||
                   !editCode.trim() ||
                   !editName.trim() ||
-                  !editTypeId ||
+                  !editTypeIds.length ||
                   !editCategoryId ||
                   (editCode.trim() === String(detail.code ?? "").trim() &&
                     editName.trim() === String(detail.name ?? "").trim() &&
-                    String(editTypeId) ===
-                      String(detail.type_id ?? detail.type?.id ?? "") &&
+                    sameIdSet(editTypeIds, getConstructionTypeIds(detail)) &&
                     String(editCategoryId) ===
                       String(detail.category_id ?? detail.category?.id ?? "") &&
                     sameIdSet(
@@ -4803,7 +4865,7 @@ function ConstructionsListPanel() {
   const [reloadToken, setReloadToken] = useState(0);
   const [createCode, setCreateCode] = useState("");
   const [createName, setCreateName] = useState("");
-  const [createTypeId, setCreateTypeId] = useState("");
+  const [createTypeIds, setCreateTypeIds] = useState([]);
   const [createRegionIds, setCreateRegionIds] = useState([]);
   const [priceRegions, setPriceRegions] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -4903,16 +4965,14 @@ function ConstructionsListPanel() {
 
   useEffect(() => {
     if (!isSoundCategory) return;
-    if (
-      createTypeId &&
-      constructionTypes.some((t) => String(t.id) === String(createTypeId))
-    ) {
-      return;
-    }
-    setCreateTypeId(
-      constructionTypes.length ? String(constructionTypes[0].id) : ""
-    );
-  }, [isSoundCategory, constructionTypes, createTypeId]);
+    setCreateTypeIds((prev) => {
+      const valid = uniquePositiveIds(prev).filter((id) =>
+        constructionTypes.some((type) => Number(type.id) === id)
+      );
+      if (valid.length) return valid;
+      return constructionTypes.length ? [Number(constructionTypes[0].id)] : [];
+    });
+  }, [isSoundCategory, constructionTypes]);
 
   const filtered = useMemo(
     () =>
@@ -4923,6 +4983,7 @@ function ConstructionsListPanel() {
           "name",
           "type_code",
           "type_name",
+          "types_text",
           "category_code",
           "category_name",
         ])
@@ -4962,12 +5023,15 @@ function ConstructionsListPanel() {
               ...item,
               code: patch.code,
               name: patch.name,
+              types: patch.types ?? item.types,
+              type_ids: patch.type_ids ?? item.type_ids,
               type_id: patch.type_id ?? item.type_id,
               category_id: patch.category_id ?? item.category_id,
               type: patch.type ?? item.type,
               category: patch.category ?? item.category,
               type_code: patch.type_code ?? item.type_code,
               type_name: patch.type_name ?? item.type_name,
+              types_text: patch.types_text ?? item.types_text,
               category_code: patch.category_code ?? item.category_code,
               category_name: patch.category_name ?? item.category_name,
               price_regions: patch.price_regions ?? item.price_regions,
@@ -5039,7 +5103,7 @@ function ConstructionsListPanel() {
 
     const code = createCode.trim();
     const name = createName.trim();
-    const typeId = Number(createTypeId);
+    const typeIds = uniquePositiveIds(createTypeIds);
     const categoryId = soundCategoryId;
 
     if (!code || !name) {
@@ -5047,8 +5111,8 @@ function ConstructionsListPanel() {
       setCreateSuccess(null);
       return;
     }
-    if (!Number.isFinite(typeId) || typeId <= 0) {
-      setCreateError("Выберите тип конструкции.");
+    if (!typeIds.length) {
+      setCreateError("Выберите хотя бы один тип конструкции.");
       setCreateSuccess(null);
       return;
     }
@@ -5069,7 +5133,7 @@ function ConstructionsListPanel() {
       await createAdminConstruction({
         code,
         name,
-        type_id: typeId,
+        type_ids: typeIds,
         category_id: categoryId,
         price_region_ids: regionIds,
       });
@@ -5169,28 +5233,12 @@ function ConstructionsListPanel() {
                 autoComplete="off"
               />
             </label>
-            <label className="admin-page__field">
-              <span className="admin-page__field-label">Тип</span>
-              <select
-                className="admin-page__select admin-page__select--full"
-                value={createTypeId}
-                onChange={(e) => setCreateTypeId(e.target.value)}
-                disabled={creating || loading || !constructionTypes.length}
-                required
-                aria-label="Тип конструкции"
-              >
-                {!constructionTypes.length ? (
-                  <option value="">Нет типов в справочнике</option>
-                ) : (
-                  constructionTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.name || type.code || `ID ${type.id}`}
-                      {type.code ? ` (${type.code})` : ""}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
+            <AdminConstructionTypesField
+              types={constructionTypes}
+              selectedIds={createTypeIds}
+              disabled={creating || loading}
+              onChange={setCreateTypeIds}
+            />
             <AdminConstructionRegionsField
               regions={priceRegions}
               selectedIds={createRegionIds}
@@ -5205,7 +5253,7 @@ function ConstructionsListPanel() {
                 loading ||
                 !createCode.trim() ||
                 !createName.trim() ||
-                !createTypeId ||
+                !createTypeIds.length ||
                 !soundCategoryId
               }
             >
