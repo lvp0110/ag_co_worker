@@ -1665,6 +1665,19 @@ textarea.admin-page__input {
   color: var(--admin-text);
 }
 
+.admin-page__image-type + .admin-page__image-type {
+  margin-top: 14px;
+}
+
+.admin-page__image-type-title {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--admin-text);
+  text-align: left;
+}
+
 .admin-page__construction-images {
   margin-top: 8px;
 }

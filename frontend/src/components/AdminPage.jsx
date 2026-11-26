@@ -33,6 +33,8 @@ import {
   filterMaterialsWithTextualCode,
   getAdminConstructionById,
   getAdminMaterialByCode,
+  calculationTypesForMaterialType,
+  defaultCalculationTypeId,
   getCalculationTypeId,
   getConstructionId,
   getConstructionPriceRegionIds,
@@ -47,6 +49,7 @@ import {
   listAdminCommerceRegions,
   listAdminConstructionCalculationParams,
   listAdminConstructionCalculationTypes,
+  listAdminMaterialTypeCalculationTypes,
   listAdminConstructionParams,
   listAdminConstructions,
   listAdminMaterials,
@@ -721,6 +724,7 @@ function CalculationTypeSelect({
   disabled,
   onChange,
   ariaLabel,
+  placeholder = "Тип расчёта…",
 }) {
   return (
     <select
@@ -734,7 +738,7 @@ function CalculationTypeSelect({
       }}
       aria-label={ariaLabel || "Тип расчёта"}
     >
-      <option value="">Тип расчёта…</option>
+      <option value="">{placeholder}</option>
       {options.map((opt) => (
         <option key={opt.id} value={String(opt.id)}>
           {materialTypeOptionLabel(opt)}
@@ -3115,6 +3119,7 @@ function ConstructionDetail({
   const [catalogMaterials, setCatalogMaterials] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
   const [calculationTypes, setCalculationTypes] = useState([]);
+  const [materialTypeCalcCatalog, setMaterialTypeCalcCatalog] = useState([]);
   const [addQueryByGroup, setAddQueryByGroup] = useState({});
   const [addCalcTypeByGroup, setAddCalcTypeByGroup] = useState({});
   const [addWeightByGroup, setAddWeightByGroup] = useState({});
@@ -3253,6 +3258,31 @@ function ConstructionDetail({
     [materialTypes, replacementGroups]
   );
 
+  const materialTypeIdOf = (row) =>
+    getMaterialTypeId(row) || getMaterialTypeId(row?.material) || null;
+
+  const recommendedCalcTypes = (materialTypeId, savedId, savedObj) => {
+    const recommended = calculationTypesForMaterialType(
+      materialTypeCalcCatalog,
+      materialTypeId
+    );
+    return withCurrentMaterialType(
+      recommended == null ? calculationTypes : recommended,
+      savedId,
+      savedObj
+    );
+  };
+
+  const resolveNewCalcTypeId = (catalogItem, explicitRaw) => {
+    const explicit = calcTypeIdPayload(explicitRaw);
+    if (explicit) return explicit;
+    const recommended = calculationTypesForMaterialType(
+      materialTypeCalcCatalog,
+      getMaterialTypeId(catalogItem)
+    );
+    return defaultCalculationTypeId(recommended || []);
+  };
+
   const patchCompositionCalcType = (kind, itemId, typeId, typeObj) => {
     const patchRow = (row) =>
       Number(row.id) !== itemId
@@ -3313,7 +3343,11 @@ function ConstructionDetail({
 
     const typeId = calcTypeIdPayload(nextValue);
     const typeObj =
-      calculationTypes.find((item) => Number(item.id) === typeId) || null;
+      recommendedCalcTypes(materialTypeIdOf(row), typeId, null).find(
+        (item) => Number(item.id) === typeId
+      ) ||
+      calculationTypes.find((item) => Number(item.id) === typeId) ||
+      null;
     const prevTypeId = getCalculationTypeId(row);
     const key = `${kind}:${itemId}`;
 
@@ -3358,21 +3392,14 @@ function ConstructionDetail({
 
   const renderCalcTypeSelect = (row, kind) => {
     const itemId = Number(row.id);
-    const options = withCurrentMaterialType(
-      calculationTypes,
-      getCalculationTypeId(row),
-      row.calculation_type || {
-        code: row.calculation_type_code,
-        name: row.calculation_type_name,
-      }
-    );
+    const savedId = getCalculationTypeId(row);
+    const options = recommendedCalcTypes(materialTypeIdOf(row), savedId, row.calculation_type || {
+      code: row.calculation_type_code,
+      name: row.calculation_type_name,
+    });
     return (
       <CalculationTypeSelect
-        value={
-          getCalculationTypeId(row) != null
-            ? String(getCalculationTypeId(row))
-            : ""
-        }
+        value={savedId != null ? String(savedId) : ""}
         options={options}
         disabled={
           !Number.isFinite(itemId) ||
@@ -3518,7 +3545,7 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId, duplicatingMaterialId, calculationTypes, savingCalcTypeKey, savingWeightKey, defaultMaterials]
+    [deletingMaterialId, duplicatingMaterialId, calculationTypes, materialTypeCalcCatalog, catalogMaterials, savingCalcTypeKey, savingWeightKey, defaultMaterials]
   );
 
   const generalMaterialsColumns = useMemo(
@@ -3551,7 +3578,7 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingMaterialId, calculationTypes, savingCalcTypeKey, savingWeightKey]
+    [deletingMaterialId, calculationTypes, materialTypeCalcCatalog, catalogMaterials, savingCalcTypeKey, savingWeightKey]
   );
 
   const optionalMaterialsColumns = useMemo(
@@ -3584,7 +3611,7 @@ function ConstructionDetail({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deletingOptionalId, calculationTypes, savingCalcTypeKey, savingWeightKey]
+    [deletingOptionalId, calculationTypes, materialTypeCalcCatalog, catalogMaterials, savingCalcTypeKey, savingWeightKey]
   );
 
   const optionalArticles = useMemo(() => {
@@ -3620,7 +3647,7 @@ function ConstructionDetail({
       setGeneralAddError(null);
       setPromoteError(null);
       try {
-        const [data, catalog, types, constrTypes, allConstructions, calcTypes, regions] =
+        const [data, catalog, types, constrTypes, allConstructions, calcTypes, materialCalcCatalog, regions] =
           await Promise.all([
             getAdminConstructionById(constructionId),
             listAdminMaterials().catch(() => []),
@@ -3630,12 +3657,14 @@ function ConstructionDetail({
               : listConstructionTypes().catch(() => []),
             listAdminConstructions().catch(() => []),
             listAdminConstructionCalculationTypes().catch(() => []),
+            listAdminMaterialTypeCalculationTypes().catch(() => []),
             listAdminCommerceRegions().catch(() => []),
           ]);
         if (cancelled) return;
         setCatalogMaterials(catalog);
         setMaterialTypes(types);
         setCalculationTypes(calcTypes || []);
+        setMaterialTypeCalcCatalog(materialCalcCatalog || []);
         if (constructionTypesProp == null) {
           setTypeOptionsLocal(constrTypes || []);
         }
@@ -3709,6 +3738,7 @@ function ConstructionDetail({
           setOptionalMaterials([]);
           setMaterialTypes([]);
           setCalculationTypes([]);
+          setMaterialTypeCalcCatalog([]);
           setAddQueryByGroup({});
           setAddCalcTypeByGroup({});
           setOptionalAddQuery("");
@@ -3907,7 +3937,7 @@ function ConstructionDetail({
         replacement_group: Number(group.group),
         replacement_material_type_id: Number(typeId),
         calculation_type_id:
-          calcTypeIdPayload(addCalcTypeByGroup[groupKey]) ||
+          resolveNewCalcTypeId(catalogItem, addCalcTypeByGroup[groupKey]) ||
           getCalculationTypeId(sample),
         calculation_note: String(sample?.calculation_note || ""),
       });
@@ -3950,7 +3980,10 @@ function ConstructionDetail({
         id: materialId,
         weight: materialWeightPayload(optionalAddWeight),
         sort_order: maxSort + 1,
-        calculation_type_id: calcTypeIdPayload(optionalAddCalcTypeId),
+        calculation_type_id: resolveNewCalcTypeId(
+          catalogItem,
+          optionalAddCalcTypeId
+        ),
         calculation_note: "",
       });
       setOptionalAddWeight("1");
@@ -4028,7 +4061,10 @@ function ConstructionDetail({
         is_default: true,
         replacement_group: null,
         replacement_material_type_id: null,
-        calculation_type_id: calcTypeIdPayload(defaultAddCalcTypeId),
+        calculation_type_id: resolveNewCalcTypeId(
+          catalogItem,
+          defaultAddCalcTypeId
+        ),
         calculation_note: "",
       });
       setDefaultAddWeight("1");
@@ -4073,7 +4109,10 @@ function ConstructionDetail({
         is_default: true,
         replacement_group: null,
         replacement_material_type_id: null,
-        calculation_type_id: calcTypeIdPayload(generalAddCalcTypeId),
+        calculation_type_id: resolveNewCalcTypeId(
+          catalogItem,
+          generalAddCalcTypeId
+        ),
         calculation_note: "",
       });
       setGeneralAddWeight("1");
@@ -4395,6 +4434,7 @@ function ConstructionDetail({
           <AdminConstructionImages
             constructionId={constructionId}
             constructionCode={detail.code || editCode}
+            constructionTypes={getConstructionTypes(detail)}
           />
           </div>
 
@@ -4749,18 +4789,18 @@ function ConstructionDetail({
                         }
                       />
                       <CalculationTypeSelect
-                        value={
-                          addCalcTypeByGroup[groupKey] ??
-                          (getCalculationTypeId(group.materials?.[0]) != null
-                            ? String(getCalculationTypeId(group.materials[0]))
-                            : "")
-                        }
-                        options={withCurrentMaterialType(
-                          calculationTypes,
-                          getCalculationTypeId(group.materials?.[0]),
-                          group.materials?.[0]?.calculation_type
+                        value={addCalcTypeByGroup[groupKey] ?? ""}
+                        placeholder="По умолчанию для типа"
+                        options={recommendedCalcTypes(
+                          getReplacementMaterialTypeId(group),
+                          calcTypeIdPayload(addCalcTypeByGroup[groupKey]),
+                          calculationTypes.find(
+                            (item) =>
+                              Number(item.id) ===
+                              calcTypeIdPayload(addCalcTypeByGroup[groupKey])
+                          )
                         )}
-                        disabled={adding || !calculationTypes.length}
+                        disabled={adding}
                         ariaLabel={`Тип расчёта для группы ${typeLabel}`}
                         onChange={(next) =>
                           setAddCalcTypeByGroup((prev) => ({

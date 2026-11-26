@@ -45,6 +45,8 @@
  *     → { construction, composition: { default_materials, replacement_groups, optional_materials } }
  *   GET /admin/constructions/calculation-types
  *     → { id, code, name, description }[]
+ *   GET /admin/materials/types/calculation-types
+ *     → { id, code, name, calculation_types: { id, code, name, description, is_default, sort_order }[] }[]
  *   GET /admin/constructions/params
  *     → { id, code, name, description, value_type }[]
  *   GET /admin/constructions/{id}/calculation-params
@@ -72,8 +74,9 @@
  *   DELETE /admin/images/types/{id}
  *   POST /admin/images/upload  multipart: entity_type, image_type_code, entity_code?, file
  *     → { file_name, url, mime_type, file_size, width, height }
- *   GET /admin/images?entity_type=&entity_id=
- *   POST /admin/images  JSON AdminEntityImageUpsert (привязка уже загруженного файла)
+ *   GET /admin/images?entity_type=&entity_id=&construction_type_id=
+ *   POST /admin/images  JSON AdminEntityImageUpsert
+ *     constr: construction_type_id обязателен; material: поле не передаётся
  *   PUT /admin/images/{id}
  *   DELETE /admin/images/{id}  (только привязка, не файл)
  *
@@ -366,7 +369,7 @@ export const unwrapConstructionComposition = (body) => {
 };
 
 /**
- * Подставляет name/code из каталога /admin/materials по артикулу
+ * Подставляет name/code и тип материала из каталога /admin/materials по артикулу
  * (materials.code ↔ composition.material.code). material_id состава не трогает.
  */
 export const enrichCompositionFromMaterialsCatalog = (
@@ -385,12 +388,23 @@ export const enrichCompositionFromMaterialsCatalog = (
     const code = String(row.code || row.material_code || "").trim();
     const catalog = code ? byCode.get(code) : null;
     if (!catalog) return row;
+    const typeObj =
+      catalog.type && typeof catalog.type === "object" && !Array.isArray(catalog.type)
+        ? catalog.type
+        : null;
+    const typeIdRaw = Number(catalog.type_id ?? typeObj?.id);
+    const typeId =
+      Number.isFinite(typeIdRaw) && typeIdRaw > 0 ? typeIdRaw : null;
     return {
       ...row,
       code,
       name: catalog.name ?? row.name,
       material_code: code,
       material_name: catalog.name ?? row.material_name,
+      type: typeObj ?? row.type ?? null,
+      type_id: typeId ?? row.type_id ?? null,
+      type_code: typeObj?.code ?? catalog.type_code ?? row.type_code ?? null,
+      type_name: typeObj?.name ?? catalog.type_name ?? row.type_name ?? null,
     };
   };
 
@@ -552,6 +566,68 @@ export const listAdminMaterials = async () => {
 export const listAdminMaterialTypes = async () => {
   const body = await request("/admin/materials/types");
   return unwrapList(body).map(normalizeMaterialType).filter(Boolean);
+};
+
+const normalizeCalculationTypeOption = (row) => {
+  if (!row || typeof row !== "object") return null;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    id,
+    code: row.code == null ? "" : String(row.code).trim(),
+    name: row.name == null ? "" : String(row.name).trim(),
+    description:
+      row.description == null ? "" : String(row.description).trim(),
+    is_default: row.is_default === true || row.is_default === 1,
+    sort_order: Number(row.sort_order) || 0,
+  };
+};
+
+/**
+ * Строка GET /admin/materials/types/calculation-types.
+ * calculation_types всегда массив: пустой, если типу ничего не назначено.
+ */
+export const normalizeMaterialTypeCalculationEntry = (row) => {
+  const base = normalizeMaterialType(row);
+  if (!base) return null;
+  const calculationTypes = (
+    Array.isArray(row.calculation_types) ? row.calculation_types : []
+  )
+    .map(normalizeCalculationTypeOption)
+    .filter(Boolean)
+    .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  return { ...base, calculation_types: calculationTypes };
+};
+
+/**
+ * Рекомендации для типа материала.
+ * null — тип неизвестен справочнику (можно показать полный список).
+ * [] — тип есть, но функций ему не назначено.
+ */
+export const calculationTypesForMaterialType = (catalog, materialTypeId) => {
+  if (!Array.isArray(catalog) || catalog.length === 0) return null;
+  const id = Number(materialTypeId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const entry = catalog.find((item) => Number(item.id) === id);
+  if (!entry) return null;
+  return Array.isArray(entry.calculation_types) ? entry.calculation_types : [];
+};
+
+/** id функции с is_default, если она есть в списке рекомендаций. */
+export const defaultCalculationTypeId = (types) => {
+  const hit = (Array.isArray(types) ? types : []).find(
+    (item) => item && item.is_default
+  );
+  const id = Number(hit?.id);
+  return Number.isFinite(id) && id > 0 ? id : null;
+};
+
+/** GET /admin/materials/types/calculation-types — функции расчёта по типам материалов. */
+export const listAdminMaterialTypeCalculationTypes = async () => {
+  const body = await request("/admin/materials/types/calculation-types");
+  return unwrapList(body)
+    .map(normalizeMaterialTypeCalculationEntry)
+    .filter(Boolean);
 };
 
 /**
@@ -2503,11 +2579,36 @@ export const normalizeEntityImage = (row) => {
     fileNameFromImageUrl(rawUrl);
   const url =
     resolveAdminPublicImageUrl({ file_name: fileName, url: rawUrl }) || rawUrl;
+  const constructionTypeRaw =
+    row.construction_type &&
+    typeof row.construction_type === "object" &&
+    !Array.isArray(row.construction_type)
+      ? row.construction_type
+      : null;
+  const constructionTypeId = Number(
+    row.construction_type_id ?? constructionTypeRaw?.id
+  );
+  const constructionType =
+    Number.isFinite(constructionTypeId) && constructionTypeId > 0
+      ? {
+          id: constructionTypeId,
+          code:
+            constructionTypeRaw?.code == null
+              ? ""
+              : String(constructionTypeRaw.code).trim(),
+          name:
+            constructionTypeRaw?.name == null
+              ? ""
+              : String(constructionTypeRaw.name).trim(),
+        }
+      : null;
   return {
     ...row,
     id: Number.isFinite(id) && id > 0 ? id : null,
     entity_type: row.entity_type == null ? "" : String(row.entity_type).trim(),
     entity_id: Number(row.entity_id) || 0,
+    construction_type_id: constructionType?.id ?? null,
+    construction_type: constructionType,
     type: typeObj,
     image_type_id: Number(row.image_type_id ?? typeObj?.id) || 0,
     file_name: fileName,
@@ -2525,20 +2626,33 @@ export const normalizeEntityImage = (row) => {
   };
 };
 
-const buildEntityImageUpsertBody = (payload) => ({
-  entity_type: String(payload.entity_type || "").trim(),
-  entity_id: Number(payload.entity_id) || 0,
-  image_type_id: Number(payload.image_type_id) || 0,
-  file_name: String(payload.file_name || "").trim(),
-  mime_type: String(payload.mime_type || "").trim(),
-  file_size: Number(payload.file_size) || 0,
-  width: Number(payload.width) || 0,
-  height: Number(payload.height) || 0,
-  title: String(payload.title || "").trim(),
-  alt: String(payload.alt || "").trim(),
-  sort_order: Number(payload.sort_order) || 0,
-  is_primary: Boolean(payload.is_primary),
-});
+/**
+ * Тело POST/PUT /admin/images.
+ * Для constr добавляет construction_type_id. Для material поле не уходит.
+ */
+export const buildEntityImageUpsertBody = (payload) => {
+  const entityType = String(payload?.entity_type || "").trim();
+  const body = {
+    entity_type: entityType,
+    entity_id: Number(payload?.entity_id) || 0,
+    image_type_id: Number(payload?.image_type_id) || 0,
+    file_name: String(payload?.file_name || "").trim(),
+    mime_type: String(payload?.mime_type || "").trim(),
+    file_size: Number(payload?.file_size) || 0,
+    width: Number(payload?.width) || 0,
+    height: Number(payload?.height) || 0,
+    title: String(payload?.title || "").trim(),
+    alt: String(payload?.alt || "").trim(),
+    sort_order: Number(payload?.sort_order) || 0,
+    is_primary: Boolean(payload?.is_primary),
+  };
+  if (entityType !== IMAGE_ENTITY_CONSTR) return body;
+  const typeId = Number(payload?.construction_type_id);
+  if (Number.isFinite(typeId) && typeId > 0) {
+    body.construction_type_id = typeId;
+  }
+  return body;
+};
 
 export const IMAGE_TYPE_PREVIEW = "preview";
 export const IMAGE_TYPE_CAD = "cad";
@@ -2632,15 +2746,28 @@ export const uploadAdminImage = async (payload) => {
 };
 
 /**
- * GET /admin/images?entity_type=&entity_id=
+ * GET /admin/images?entity_type=&entity_id=&construction_type_id=
  * @param {string} entityType constr | material
  * @param {string|number} entityId
+ * @param {string|number} [constructionTypeId] только для constr
  */
-export const listAdminEntityImages = async (entityType, entityId) => {
+export const listAdminEntityImages = async (
+  entityType,
+  entityId,
+  constructionTypeId
+) => {
   const params = new URLSearchParams({
     entity_type: String(entityType || "").trim(),
     entity_id: String(entityId),
   });
+  const typeId = Number(constructionTypeId);
+  if (
+    String(entityType || "").trim() === IMAGE_ENTITY_CONSTR &&
+    Number.isFinite(typeId) &&
+    typeId > 0
+  ) {
+    params.set("construction_type_id", String(typeId));
+  }
   const body = await request(`/admin/images?${params}`);
   return unwrapList(body).map(normalizeEntityImage).filter(Boolean);
 };
@@ -2804,16 +2931,27 @@ export const duplicateAdminConstruction = async (sourceId) => {
   await recordCopyFailure(warnings, "картинки", async () => {
     images = await listAdminEntityImages(IMAGE_ENTITY_CONSTR, sourceId);
   });
+  const fallbackTypeId = typeIds.length === 1 ? typeIds[0] : null;
   for (const image of images) {
     const label = image.title || image.file_name || "картинка";
     if (!image.file_name || !image.image_type_id) {
       warnings.push(`${label}: нет файла или типа`);
       continue;
     }
+    const fromImage = Number(
+      image.construction_type_id ?? image.construction_type?.id
+    );
+    const constructionTypeId =
+      Number.isFinite(fromImage) && fromImage > 0 ? fromImage : fallbackTypeId;
+    if (!constructionTypeId) {
+      warnings.push(`${label}: нет типа монтажа`);
+      continue;
+    }
     await recordCopyFailure(warnings, label, () =>
       createAdminEntityImage({
         entity_type: IMAGE_ENTITY_CONSTR,
         entity_id: newId,
+        construction_type_id: constructionTypeId,
         image_type_id: image.image_type_id,
         file_name: image.file_name,
         mime_type: image.mime_type,

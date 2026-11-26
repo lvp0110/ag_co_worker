@@ -6,7 +6,7 @@ export default ItemsBase;
 
 let itemsWithApiImagesCache = null;
 let itemsWithApiImagesInFlight = new Map();
-const ITEMS_WITH_IMAGES_CACHE_VERSION = 8;
+const ITEMS_WITH_IMAGES_CACHE_VERSION = 9;
 
 const cacheKeyForRegion = (region) =>
   `${ITEMS_WITH_IMAGES_CACHE_VERSION}:${region || "_"}`;
