@@ -3,6 +3,7 @@ import {
   buildIsolationCalcRequestFromStored,
   buildIsolationCalcRequestItem,
   calcItemsFromPublicConstructions,
+  imagesForPublicConstruction,
   mapPublicConstructionToInfoRecord,
   materialsFromPublicComposition,
   defaultCalcApiValues,
@@ -557,6 +558,83 @@ describe("calcItemsFromPublicConstructions", () => {
     expect(items[0].imageUrl).toBe("/api/v2/public/image/b.jpg");
     expect(items[0].images).toHaveLength(2);
   });
+
+  it("picks images from the types[] entry of the selected mounting type", () => {
+    const items = calcItemsFromPublicConstructions(
+      [
+        {
+          id: 22,
+          code: "AG.L404",
+          name: "Конструкция",
+          types: [
+            {
+              id: 2,
+              code: "cladding",
+              name: "Облицовка",
+              images: [
+                {
+                  url: "/api/v2/public/image/lining.jpg",
+                  is_primary: true,
+                  type: { code: "preview" },
+                },
+              ],
+            },
+            {
+              id: 1,
+              code: "ceiling",
+              name: "Потолок",
+              images: [
+                {
+                  url: "/api/v2/public/image/ceil.jpg",
+                  is_primary: true,
+                  type: { code: "preview" },
+                },
+                {
+                  url: "/api/v2/public/image/ceil-cad.png",
+                  type: { code: "cad" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      []
+    );
+    const lining = items.find((item) => item.type_code === "cladding");
+    const ceiling = items.find((item) => item.type_code === "ceiling");
+    expect(lining.imageUrl).toBe("/api/v2/public/image/lining.jpg");
+    expect(lining.cadImageUrl).toBe("");
+    expect(ceiling.imageUrl).toBe("/api/v2/public/image/ceil.jpg");
+    expect(ceiling.cadImageUrl).toBe("/api/v2/public/image/ceil-cad.png");
+  });
+});
+
+describe("imagesForPublicConstruction", () => {
+  const row = {
+    images: [{ url: "/api/v2/public/image/legacy.jpg", is_primary: true }],
+    types: [
+      {
+        id: 1,
+        code: "wall",
+        images: [{ url: "/api/v2/public/image/wall.jpg", is_primary: true }],
+      },
+      { id: 2, code: "ceiling", images: [] },
+    ],
+  };
+
+  it("uses the matching type and does not fall back to another type", () => {
+    expect(imagesForPublicConstruction(row, "wall")).toEqual(row.types[0].images);
+    expect(imagesForPublicConstruction(row, "ceiling")).toEqual([]);
+  });
+
+  it("keeps root images when types do not carry images", () => {
+    expect(
+      imagesForPublicConstruction({
+        images: row.images,
+        types: [{ id: 1, code: "wall" }],
+      })
+    ).toEqual(row.images);
+  });
 });
 
 describe("pickEntityImageUrl", () => {
@@ -641,6 +719,42 @@ describe("mapPublicConstructionToInfoRecord", () => {
     expect(materialsFromPublicComposition(record.composition)).toEqual([
       { code: "1111", name: "Профиль", Code: "1111", Name: "Профиль" },
     ]);
+  });
+
+  it("uses images of the requested mounting type", () => {
+    const detail = {
+      construction: {
+        code: "AG.L404",
+        name: "Конструкция",
+        types: [
+          {
+            code: "wall",
+            images: [
+              {
+                url: "/api/v2/public/image/wall.jpg",
+                is_primary: true,
+                type: { code: "preview" },
+              },
+            ],
+          },
+          {
+            code: "ceiling",
+            images: [
+              {
+                url: "/api/v2/public/image/ceil.jpg",
+                is_primary: true,
+                type: { code: "preview" },
+              },
+              { url: "/api/v2/public/image/ceil-cad.png", type: { code: "cad" } },
+            ],
+          },
+        ],
+      },
+    };
+    expect(mapPublicConstructionToInfoRecord(detail, { typeCode: "ceiling" })).toMatchObject({
+      Img: "/api/v2/public/image/ceil.jpg",
+      CadImg: "/api/v2/public/image/ceil-cad.png",
+    });
   });
 });
 

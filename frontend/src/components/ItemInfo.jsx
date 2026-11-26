@@ -75,8 +75,16 @@ const ItemInfo = () => {
             
             // Загружаем данные конструкций для обоих вариантов
             const [ceilingConstruction, liningConstruction] = await Promise.all([
-              ceilingItem ? getConstructionByCode(ceilingItem.ag_id) : null,
-              liningItem ? getConstructionByCode(liningItem.ag_id) : null,
+              ceilingItem
+                ? getConstructionByCode(ceilingItem.ag_id, {
+                    typeCode: ceilingItem.type_code,
+                  })
+                : null,
+              liningItem
+                ? getConstructionByCode(liningItem.ag_id, {
+                    typeCode: liningItem.type_code,
+                  })
+                : null,
             ]);
             
             // Сохраняем оба варианта для слайдера
@@ -92,7 +100,9 @@ const ItemInfo = () => {
             setConstructionData(constructionRecord);
           } else {
             setZipsItems(null);
-            constructionRecord = await getConstructionByCode(id);
+            constructionRecord = await getConstructionByCode(id, {
+              typeCode: foundItem.type_code,
+            });
             setConstructionData(constructionRecord);
           }
           

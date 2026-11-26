@@ -627,6 +627,52 @@ export const publicConstructionTypeCodes = (row) => {
 export const publicConstructionTypeCode = (row) =>
   publicConstructionTypeCodes(row)[0] || "";
 
+/**
+ * Картинки публичной конструкции для типа монтажа.
+ * Берутся из types[].images. Корневой images[] — только если типы картинок не несут.
+ * Без typeCode — первый тип, у которого картинки есть.
+ */
+export const imagesForPublicConstruction = (row, typeCode) => {
+  if (!row || typeof row !== "object") return [];
+  const types = Array.isArray(row.types) ? row.types : [];
+  const typed = types.filter((item) => Array.isArray(item?.images));
+  if (!typed.length) return Array.isArray(row.images) ? row.images : [];
+  const wanted = String(typeCode || "").trim().toLowerCase();
+  if (wanted) {
+    const match = typed.find((item) => typeCodeFromValue(item) === wanted);
+    return match ? match.images : [];
+  }
+  const withImages = typed.find((item) => item.images.length > 0);
+  return (withImages || typed[0]).images;
+};
+
+/** Все картинки конструкции с проставленным construction_type (для админки). */
+export const flattenPublicConstructionImages = (row) => {
+  if (!row || typeof row !== "object") return [];
+  const types = Array.isArray(row.types) ? row.types : [];
+  const typed = types.filter((item) => Array.isArray(item?.images));
+  if (!typed.length) return Array.isArray(row.images) ? row.images : [];
+  const images = [];
+  for (const type of typed) {
+    for (const img of type.images) {
+      if (!img || typeof img !== "object") continue;
+      const nested =
+        img.construction_type && typeof img.construction_type === "object"
+          ? img.construction_type
+          : null;
+      images.push({
+        ...img,
+        construction_type: nested || {
+          id: type.id,
+          code: type.code,
+          name: type.name,
+        },
+      });
+    }
+  }
+  return images;
+};
+
 export const imageTypeCode = (image) =>
   String(image?.type?.code ?? image?.type_code ?? "").trim().toLowerCase();
 
@@ -730,14 +776,14 @@ export const materialsFromPublicComposition = (composition) => {
 /**
  * Публичная карточка / список админки → запись для инфо-страницы.
  */
-export const mapPublicConstructionToInfoRecord = (detail) => {
+export const mapPublicConstructionToInfoRecord = (detail, { typeCode } = {}) => {
   const unwrapped = unwrapPublicConstructionDetail(detail);
   if (!unwrapped) return null;
   const construction = unwrapped.construction;
   const code = String(construction?.code ?? "").trim();
   if (!code) return null;
   const name = String(construction?.name ?? "").trim();
-  const images = Array.isArray(construction.images) ? construction.images : [];
+  const images = imagesForPublicConstruction(construction, typeCode);
   const physical = physicalParamsFromConstruction(construction);
   return {
     Code: code,
@@ -787,13 +833,13 @@ export const calcItemsFromPublicConstructions = (rows, itemsBase = []) => {
           },
         ];
     const name = String(row?.name ?? "").trim() || constructionPublicCipher(agId);
-    const images = Array.isArray(row.images) ? row.images : [];
     const physical = physicalParamsFromConstruction(row);
     for (const placement of placements) {
       let c_id = placement.section || null;
       const base = pickItemsBaseMatch(itemsBase, agId, c_id);
       if (!c_id) c_id = base?.c_id ?? null;
       if (!agId || !c_id) continue;
+      const images = imagesForPublicConstruction(row, placement.typeCode);
       items.push({
         id: row.id,
         size_limit_id: base?.id ?? null,

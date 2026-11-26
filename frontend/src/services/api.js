@@ -162,12 +162,12 @@ export const buildImagesMapFromConstructions = (constructions) => {
  * @param {string} code - Код конструкции (например, "AG.W101")
  * @returns {Promise<Object|null>} Объект с данными конструкции или null, если не найдена
  */
-export const getConstructionByCode = async (code) => {
+export const getConstructionByCode = async (code, { typeCode } = {}) => {
   if (!code) return null;
 
   try {
     const detail = await getPublicConstruction(code);
-    const record = mapPublicConstructionToInfoRecord(detail);
+    const record = mapPublicConstructionToInfoRecord(detail, { typeCode });
     if (!record) return null;
     // Img/CadImg уже через pickEntityImageUrl → resolveAdminPublicImageUrl.
     return {

@@ -17,6 +17,7 @@ import {
   setAdminImageBlobPreview,
 } from "../utils/adminImageSrc.js";
 import {
+  flattenPublicConstructionImages,
   imageTypeCode as entityImageTypeCode,
   isCadEntityImage,
 } from "../utils/isolationCalcV2.js";
@@ -38,9 +39,17 @@ const matchSlot = (row, slotCode) => {
   return code === slotCode;
 };
 
+const imageConstructionTypeId = (row) => {
+  const id = Number(row?.construction_type_id ?? row?.construction_type?.id);
+  return Number.isFinite(id) && id > 0 ? id : null;
+};
+
+const publicImageKey = (row) =>
+  `${imageConstructionTypeId(row) || 0}:${entityImageTypeCode(row)}`;
+
 /**
- * GET /admin/images на сервисе не SELECT'ит file_name → URL пустой stub.
- * Публичный каталог отдаёт url — подмешиваем по id / типу.
+ * Если у admin-записи нет url, подставляем его из публичного каталога
+ * (types[].images) по id или по паре тип монтажа + тип картинки.
  */
 const enrichAdminImagesFromPublic = (adminRows, publicImages) => {
   if (!Array.isArray(adminRows) || adminRows.length === 0) return adminRows || [];
@@ -49,15 +58,15 @@ const enrichAdminImagesFromPublic = (adminRows, publicImages) => {
   for (const img of Array.isArray(publicImages) ? publicImages : []) {
     const id = Number(img?.id);
     if (Number.isFinite(id) && id > 0) byId.set(id, img);
-    const code = entityImageTypeCode(img);
-    if (code) byType.set(code, img);
+    const key = publicImageKey(img);
+    if (key !== "0:") byType.set(key, img);
   }
 
   return adminRows.map((row) => {
     if (resolveAdminPublicImageUrl(row)) return row;
     const pub =
       (row.id && byId.get(Number(row.id))) ||
-      byType.get(entityImageTypeCode(row)) ||
+      byType.get(publicImageKey(row)) ||
       null;
     if (!pub) return row;
     const fileName =
@@ -91,7 +100,7 @@ const fetchPublicImagesForCode = async (constructionCode) => {
     const match = catalog.find(
       (row) => String(row?.code || "").trim() === code
     );
-    return Array.isArray(match?.images) ? match.images : [];
+    return flattenPublicConstructionImages(match);
   } catch {
     return [];
   }
@@ -145,20 +154,32 @@ const SlotCard = ({ slot, image, busy, fileInputRef, onPickFile, onClear }) => {
   );
 };
 
+const slotRows = (images, constrType, slot, constructionTypes) => {
+  const typeId = Number(constrType?.id);
+  const firstTypeId = Number(constructionTypes?.[0]?.id);
+  return images.filter((row) => {
+    if (!matchSlot(row, slot.code)) return false;
+    const rowTypeId = imageConstructionTypeId(row);
+    if (rowTypeId) return rowTypeId === typeId;
+    return typeId === firstTypeId;
+  });
+};
+
 export default function AdminConstructionImages({
   constructionId,
   constructionCode = "",
+  constructionTypes = [],
 }) {
   const [types, setTypes] = useState([]);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [busySlot, setBusySlot] = useState("");
-  const previewInputRef = useRef(null);
-  const cadInputRef = useRef(null);
-  const inputRefByCode = {
-    [IMAGE_TYPE_PREVIEW]: previewInputRef,
-    [IMAGE_TYPE_CAD]: cadInputRef,
+  const inputRefs = useRef({});
+  const fileInputRef = (typeId, slotCode) => {
+    const key = `${typeId}:${slotCode}`;
+    if (!inputRefs.current[key]) inputRefs.current[key] = { current: null };
+    return inputRefs.current[key];
   };
 
   const numericId = Number(constructionId);
@@ -220,13 +241,16 @@ export default function AdminConstructionImages({
     };
   }, [hasEntity, numericId, constructionCode]);
 
-  const bySlot = useMemo(() => {
+  const imageByTypeSlot = useMemo(() => {
     const map = {};
-    for (const slot of SLOTS) {
-      map[slot.code] = images.find((row) => matchSlot(row, slot.code)) || null;
+    for (const constrType of constructionTypes) {
+      for (const slot of SLOTS) {
+        const rows = slotRows(images, constrType, slot, constructionTypes);
+        map[`${constrType.id}:${slot.code}`] = rows[0] || null;
+      }
     }
     return map;
-  }, [images]);
+  }, [images, constructionTypes]);
 
   const typeByCode = useMemo(() => {
     const map = {};
@@ -250,17 +274,23 @@ export default function AdminConstructionImages({
     return type;
   };
 
-  const handleUpload = async (slot, fileList) => {
+  const handleUpload = async (slot, fileList, constrType) => {
     const file = fileList?.[0];
-    const input = inputRefByCode[slot.code]?.current;
+    const input = fileInputRef(constrType?.id, slot.code).current;
     if (input) input.value = "";
     if (!file) return;
     if (!hasEntity) {
       setError("Сначала сохраните конструкцию, затем загрузите изображение.");
       return;
     }
+    const constructionTypeId = Number(constrType?.id);
+    if (!Number.isFinite(constructionTypeId) || constructionTypeId <= 0) {
+      setError("Сначала сохраните тип монтажа конструкции.");
+      return;
+    }
 
-    setBusySlot(slot.code);
+    const slotKey = `${constructionTypeId}:${slot.code}`;
+    setBusySlot(slotKey);
     setError(null);
     try {
       const type = await resolveSlotType(slot);
@@ -274,26 +304,24 @@ export default function AdminConstructionImages({
         throw new Error(`Upload не вернул file_name для «${file.name}».`);
       }
 
-      const existing = images.filter((row) => matchSlot(row, slot.code));
+      const existing = slotRows(images, constrType, slot, constructionTypes);
       for (const row of existing) {
         if (row.id) await deleteAdminEntityImage(row.id);
       }
 
+      const typeName = String(constrType.name || constrType.code || "").trim();
       const created = await createAdminEntityImage({
         entity_type: IMAGE_ENTITY_CONSTR,
         entity_id: numericId,
+        construction_type_id: constructionTypeId,
         image_type_id: type.id,
         file_name: uploaded.file_name,
         mime_type: uploaded.mime_type || file.type || "",
         file_size: uploaded.file_size || file.size || 0,
         width: uploaded.width,
         height: uploaded.height,
-        title: constructionCode
-          ? `${constructionCode} ${slot.title}`
-          : slot.title,
-        alt: constructionCode
-          ? `${slot.title} ${constructionCode}`
-          : slot.title,
+        title: [constructionCode, typeName, slot.title].filter(Boolean).join(" "),
+        alt: [slot.title, constructionCode, typeName].filter(Boolean).join(" "),
         sort_order: slot.sortOrder,
         is_primary: slot.primary,
       });
@@ -310,7 +338,15 @@ export default function AdminConstructionImages({
       // GET /admin/images не отдаёт file_name → url пустой. Не делаем reload:
       // optimistic row + blob держат превью; после F5 url берём из публичного каталога.
       setImages((prev) => {
-        const rest = prev.filter((row) => !matchSlot(row, slot.code));
+        const dropIds = new Set(
+          slotRows(prev, constrType, slot, constructionTypes)
+            .map((row) => row.id)
+            .filter(Boolean)
+        );
+        const rest = prev.filter((row) => {
+          if (row.id && dropIds.has(row.id)) return false;
+          return !slotRows([row], constrType, slot, constructionTypes).length;
+        });
         return [
           ...rest,
           {
@@ -319,6 +355,12 @@ export default function AdminConstructionImages({
             file_name: uploaded.file_name,
             url: durableUrl,
             mime_type: created?.mime_type || uploaded.mime_type || file.type,
+            construction_type_id: constructionTypeId,
+            construction_type: {
+              id: constructionTypeId,
+              code: constrType.code || "",
+              name: constrType.name || "",
+            },
             type: created?.type || {
               id: type.id,
               code: slot.code,
@@ -337,16 +379,21 @@ export default function AdminConstructionImages({
     }
   };
 
-  const handleClear = async (slot) => {
-    const existing = images.filter((row) => matchSlot(row, slot.code));
+  const handleClear = async (slot, constrType) => {
+    const existing = slotRows(images, constrType, slot, constructionTypes);
     if (!existing.length) return;
-    setBusySlot(slot.code);
+    const constructionTypeId = Number(constrType?.id);
+    setBusySlot(`${constructionTypeId}:${slot.code}`);
     setError(null);
     try {
       for (const row of existing) {
         if (row.id) await deleteAdminEntityImage(row.id);
       }
-      setImages((prev) => prev.filter((row) => !matchSlot(row, slot.code)));
+      setImages((prev) =>
+        prev.filter(
+          (row) => !slotRows([row], constrType, slot, constructionTypes).length
+        )
+      );
       await loadImages();
     } catch (err) {
       setError(formatRequestError(err));
@@ -381,20 +428,42 @@ export default function AdminConstructionImages({
         <p className="admin-page__empty admin-page__empty--inline">
           Загрузка изображений…
         </p>
+      ) : !constructionTypes.length ? (
+        <p className="admin-page__empty admin-page__empty--inline">
+          Сохраните тип монтажа, чтобы загрузить изображения.
+        </p>
       ) : (
-        <div className="admin-page__image-slots">
-          {SLOTS.map((slot) => (
-            <SlotCard
-              key={slot.code}
-              slot={slot}
-              image={bySlot[slot.code]}
-              busy={Boolean(busySlot) || !hasEntity}
-              fileInputRef={inputRefByCode[slot.code]}
-              onPickFile={(e) => handleUpload(slot, e.target.files)}
-              onClear={() => handleClear(slot)}
-            />
-          ))}
-        </div>
+        constructionTypes.map((constrType) => {
+          const typeLabel =
+            String(constrType.name || "").trim() ||
+            String(constrType.code || "").trim() ||
+            `Тип ${constrType.id}`;
+          return (
+            <section
+              key={constrType.id}
+              className="admin-page__image-type"
+            >
+              <h4 className="admin-page__image-type-title">{typeLabel}</h4>
+              <div className="admin-page__image-slots">
+                {SLOTS.map((slot) => (
+                  <SlotCard
+                    key={`${constrType.id}:${slot.code}`}
+                    slot={slot}
+                    image={
+                      imageByTypeSlot[`${constrType.id}:${slot.code}`] || null
+                    }
+                    busy={Boolean(busySlot) || !hasEntity}
+                    fileInputRef={fileInputRef(constrType.id, slot.code)}
+                    onPickFile={(e) =>
+                      handleUpload(slot, e.target.files, constrType)
+                    }
+                    onClear={() => handleClear(slot, constrType)}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })
       )}
     </div>
   );
